@@ -42,3 +42,23 @@ selects resident mode (start hidden, dismiss hides); without it a plain `wayrun`
 shows on launch and quits on dismiss, so the manual/dev path is independent of
 the systemd service. To revert, `systemctl --user disable --now wayrun-launcher`
 and restore the spawn-per-hotkey binding.
+
+## Proxy
+
+The launcher's only outbound request is the web-search suggestion fetch, so a
+proxy only matters if the engine (`s` by default) is unreachable directly. Point
+the core at one with `Environment=` in the unit:
+
+```ini
+# HTTP CONNECT proxy; scheme optional, credentials optional
+Environment=https_proxy=http://127.0.0.1:7890
+Environment=http_proxy=http://127.0.0.1:7890
+```
+
+Then `systemctl --user daemon-reload && systemctl --user restart wayrun-launcher`.
+`https_proxy` is what the (HTTPS) suggest endpoints use; `http_proxy` covers a
+plain-`http://` engine. Each name is read case-insensitively, lowercase first
+(`https_proxy` before `HTTPS_PROXY`), and an empty or unusable value is ignored,
+so the request falls back to a direct connection. Only HTTP CONNECT proxies are
+supported (`[http://][user[:password]@]host[:port]`, default port 1080); a
+`socks5://` URL is not, and is logged to the core's stderr.

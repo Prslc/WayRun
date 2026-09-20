@@ -115,14 +115,33 @@ fn spawn(
     })
 }
 
+/// The HTTP CONNECT proxy the environment names, lowercase before uppercase as
+/// curl reads it. `None` when neither is set or the value is unusable.
+fn proxy_from_env() -> Option<minreq::Proxy> {
+    let spec = ["https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY"]
+        .into_iter()
+        .find_map(|key| std::env::var(key).ok().filter(|v| !v.is_empty()))?;
+    match minreq::Proxy::new(&spec) {
+        Ok(proxy) => Some(proxy),
+        Err(e) => {
+            eprintln!("wayrun-core: ignoring proxy {spec:?}: {e}");
+            None
+        }
+    }
+}
+
 fn do_search(engine: &Engine, query: &str) -> Result<Vec<ResultItem>> {
     if query.is_empty() {
         return Ok(vec![]);
     }
 
-    let response = minreq::get(engine.suggest_url)
+    let request = minreq::get(engine.suggest_url).with_timeout(5);
+    let request = match proxy_from_env() {
+        Some(proxy) => request.with_proxy(proxy),
+        None => request,
+    };
+    let response = request
         .with_param("q", query)
-        .with_timeout(5)
         .send()
         .context("fetching web suggestions")?;
     let json: Vec<serde_json::Value> = response.json().context("parsing web suggestions")?;
@@ -189,5 +208,10 @@ mod tests {
             result_url(&DUCKDUCKGO, "a b"),
             "https://duckduckgo.com/?q=a%20b"
         );
+    }
+
+    #[test]
+    fn an_unusable_proxy_spec_is_ignored_not_fatal() {
+        assert!(minreq::Proxy::new("socks5://127.0.0.1:1080").is_err());
     }
 }
