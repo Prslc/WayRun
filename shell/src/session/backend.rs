@@ -160,27 +160,45 @@ fn drain(mut stdin: ChildStdin, receiver: std::sync::mpsc::Receiver<String>) {
     }
 }
 
+/// A core → shell notification. Deserialized straight into its payload, so the
+/// hot `results` path never builds an intermediate `Value`.
+#[derive(serde::Deserialize)]
+#[serde(tag = "method", content = "params", rename_all = "lowercase")]
+enum Notification {
+    Theme(ThemeConfig),
+    Results(Vec<ResultItem>),
+}
+
+/// A JSON-RPC response; only `forget` answers are expected.
+#[derive(serde::Deserialize)]
+struct Reply {
+    jsonrpc: String,
+    #[serde(default)]
+    id: Option<u64>,
+    #[serde(default)]
+    result: Option<Value>,
+}
+
 /// Parse one JSON-RPC 2.0 line: a notification the shell renders, or the reply
 /// to an in-flight `forget`.
 fn parse(line: &str) -> Option<BackendEvent> {
-    let value: Value = serde_json::from_str(line.trim()).ok()?;
-    if value.get("jsonrpc").and_then(|v| v.as_str()) != Some("2.0") {
+    let line = line.trim();
+    if line.starts_with('{')
+        && let Ok(notification) = serde_json::from_str::<Notification>(line)
+    {
+        return Some(match notification {
+            Notification::Theme(config) => BackendEvent::Theme(config),
+            Notification::Results(items) => BackendEvent::Results(items),
+        });
+    }
+
+    let reply: Reply = serde_json::from_str(line).ok()?;
+    if reply.jsonrpc != "2.0" {
         return None;
     }
 
-    if let Some(method) = value.get("method").and_then(|v| v.as_str()) {
-        let params = value.get("params").cloned().unwrap_or(Value::Null);
-        return match method {
-            "theme" => serde_json::from_value(params).ok().map(BackendEvent::Theme),
-            "results" => serde_json::from_value(params)
-                .ok()
-                .map(BackendEvent::Results),
-            _ => None,
-        };
-    }
-
     // a reply: only `forget` answers are expected (matched back by request id)
-    let id = value.get("id")?.as_u64()?;
+    let id = reply.id?;
     let key = REQUESTS
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
@@ -188,10 +206,11 @@ fn parse(line: &str) -> Option<BackendEvent> {
 
     // a reply with no `forgotten` (or an error) means nothing was dropped,
     // which is the safe answer for the UI
-    let forgotten = value
-        .get("result")
+    let forgotten = reply
+        .result
+        .as_ref()
         .and_then(|result| result.get("forgotten"))
-        .and_then(|value| value.as_bool())
+        .and_then(Value::as_bool)
         .unwrap_or(false);
     Some(BackendEvent::Forgotten { key, forgotten })
 }
