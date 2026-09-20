@@ -176,8 +176,9 @@ pub async fn handle(
                 }
             }));
         }
-        // `launch`, `copy` and `open` mirror the text verbs, so a JSON-RPC-only
-        // client can drive the launcher without string commands.
+        // `launch`, `copy`, `open`, `reveal` and `terminal` mirror the text
+        // verbs, so a JSON-RPC-only client can drive the launcher without string
+        // commands.
         "launch" => {
             let Ok(desktop_id) = string_param(params.as_ref(), "desktop_id") else {
                 if has_id {
@@ -263,6 +264,18 @@ pub async fn handle(
                 return true;
             };
             crate::system::executor::reveal(&uri);
+            if has_id {
+                respond(tx, id, Ok(Value::Null)).await;
+            }
+        }
+        "terminal" => {
+            let Ok(uri) = string_param(params.as_ref(), "uri") else {
+                if has_id {
+                    respond(tx, id, Err(INVALID_PARAMS)).await;
+                }
+                return true;
+            };
+            crate::system::executor::open_terminal(&uri);
             if has_id {
                 respond(tx, id, Ok(Value::Null)).await;
             }
@@ -467,6 +480,14 @@ mod tests {
         assert!(handled);
         let v: Value = serde_json::from_str(&msgs[0]).unwrap();
         assert_eq!(v["error"]["code"], -32600);
+    }
+
+    #[tokio::test]
+    async fn terminal_requires_a_uri() {
+        let (handled, msgs) = run(r#"{"jsonrpc":"2.0","method":"terminal","id":11}"#).await;
+        assert!(handled);
+        let v: Value = serde_json::from_str(&msgs[0]).unwrap();
+        assert_eq!(v["error"]["code"], -32602);
     }
 
     #[tokio::test]

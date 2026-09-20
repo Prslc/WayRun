@@ -22,6 +22,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 | `launch` | `{"desktop_id"}` | `null` (launches through GLib's `GAppInfo`) |
 | `open` | `{"uri"}` | `null` (opens with the default handler) |
 | `reveal` | `{"uri"}` | `null` (shows a file in the file manager) |
+| `terminal` | `{"uri"}` | `null` (opens a terminal in the URI's directory) |
 | `pin` | `{"scope","item"}` | `{"pinned": bool}` (pins an item to an exact query) |
 | `unpin` | `{"scope","on_click"}` | `{"unpinned": bool}` |
 | `copy` | `{"text"}` | `null` (writes the Wayland clipboard) |
@@ -142,11 +143,13 @@ with the same icon-spec resolution as a row's `icon`. The core attaches the
 launcher-level pin/unpin to every actionable row, and history removal to a row
 it sourced from the empty-query history that could have been recorded (not
 `ephemeral`, not `copy:`); the owning built-in
-provider adds its type-specific ones (a file reveal, a `[Desktop Action …]`
+provider adds its type-specific ones (a file reveal, copy path or open in
+terminal, a `[Desktop Action …]`
 group, a copy-link), and a host's own entries are kept after them. External hosts
 may emit `actions` directly on a result; the shell renders them without knowing the
 scheme. The panel-only schemes are `pin:{"scope","item"}`,
-`unpin:{"scope","on_click"}`, `forget:<on_click>` and `reveal:<uri>`; every row
+`unpin:{"scope","on_click"}`, `forget:<on_click>`, `reveal:<uri>` and
+`terminal:<uri>`; every row
 scheme (`run:`, `launch:`, `copy:`, `action:`, a URL) also works.
 
 `on_click` schemes:
@@ -157,6 +160,7 @@ scheme (`run:`, `launch:`, `copy:`, `action:`, a URL) also works.
 | `launch:<desktop-id>` | launch an app by desktop id (app-search) |
 | `copy:{"text":"…"}` | write the text to the Wayland clipboard (translate copy) |
 | `action:<desktop-id>:<action-id>` | run a desktop action; the shell forwards it as the `action` command (app-search emits one row per action, DMS-style) |
+| `terminal:<uri>` | open a terminal in the URI's directory (its parent for a file), panel-only |
 | bare URL / `file:` / `mailto:` URI | opened by the core with GLib `g_app_info_launch_default_for_uri` |
 
 File URIs are percent-encoded, so paths with spaces or non-ASCII characters

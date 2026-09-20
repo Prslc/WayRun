@@ -55,7 +55,8 @@ everything.
 A result row can carry secondary commands shown in the shell's `Shift+Enter`
 action panel. The menu is defined by the plugin that owns the row, not by the
 shell, so it differs by result type: `file-search`/`path-search` offer "Reveal
-in file manager", `app-search` lists the entry's `[Desktop Action …]` groups,
+in file manager", "Copy path" and "Open in terminal", `app-search` lists the
+entry's `[Desktop Action …]` groups,
 `web-search` and the Firefox plugins offer "Copy URL", and a plugin with none
 simply gets the launcher-level pin/unpin. The empty-query history adds "Remove
 from history" to the rows it sourced. An external host may put its own `actions`

@@ -51,14 +51,15 @@ macro_rules! search_plugin {
             }
 
             fn actions(&self, item: &ResultItem) -> Vec<ActionItem> {
-                reveal_action(item)
+                file_actions(item)
             }
         }
     };
 }
 
-/// A file row's one extra command: hand its URI to the file manager.
-fn reveal_action(item: &ResultItem) -> Vec<ActionItem> {
+/// The commands a file or directory row carries: show it in the file manager,
+/// copy its decoded path, or open a terminal in it (its parent when a file).
+fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
     let Some(uri) = item
         .on_click
         .as_deref()
@@ -66,11 +67,27 @@ fn reveal_action(item: &ResultItem) -> Vec<ActionItem> {
     else {
         return Vec::new();
     };
-    vec![ActionItem {
-        title: "Reveal in file manager".to_string(),
-        on_click: format!("reveal:{uri}"),
-        icon: Some("folder-open".to_string()),
-    }]
+    let Some(path) = gio::File::for_uri(uri).path() else {
+        return Vec::new();
+    };
+    let path = path.to_string_lossy();
+    vec![
+        ActionItem {
+            title: "Reveal in file manager".to_string(),
+            on_click: format!("reveal:{uri}"),
+            icon: Some("folder-open".to_string()),
+        },
+        ActionItem {
+            title: "Copy path".to_string(),
+            on_click: format!("copy:{}", serde_json::json!({ "text": path })),
+            icon: Some("edit-copy".to_string()),
+        },
+        ActionItem {
+            title: "Open in terminal".to_string(),
+            on_click: format!("terminal:{uri}"),
+            icon: Some("utilities-terminal".to_string()),
+        },
+    ]
 }
 
 search_plugin!(
@@ -206,14 +223,25 @@ mod tests {
     }
 
     #[test]
-    fn only_a_file_row_offers_a_reveal() {
-        let actions: Vec<ActionItem> = reveal_action(&row("a.txt", Some("file:///tmp/a.txt")));
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].title, "Reveal in file manager");
+    fn a_file_row_offers_reveal_copy_and_terminal() {
+        let actions: Vec<ActionItem> = file_actions(&row("a.txt", Some("file:///tmp/a.txt")));
+        let titles: Vec<&str> = actions.iter().map(|a| a.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            ["Reveal in file manager", "Copy path", "Open in terminal"]
+        );
         assert_eq!(actions[0].on_click, "reveal:file:///tmp/a.txt");
+        assert_eq!(actions[1].on_click, r#"copy:{"text":"/tmp/a.txt"}"#);
+        assert_eq!(actions[2].on_click, "terminal:file:///tmp/a.txt");
 
-        assert!(reveal_action(&row("run", Some("run:ls"))).is_empty());
-        assert!(reveal_action(&row("none", None)).is_empty());
+        assert!(file_actions(&row("run", Some("run:ls"))).is_empty());
+        assert!(file_actions(&row("none", None)).is_empty());
+    }
+
+    #[test]
+    fn the_copied_path_is_percent_decoded() {
+        let actions = file_actions(&row("a b", Some("file:///tmp/a%20b")));
+        assert_eq!(actions[1].on_click, r#"copy:{"text":"/tmp/a b"}"#);
     }
 
     #[test]

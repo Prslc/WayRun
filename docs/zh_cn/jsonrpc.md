@@ -21,6 +21,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 | `launch` | `{"desktop_id"}` | `null`（经 GLib 的 `GAppInfo` 启动） |
 | `open` | `{"uri"}` | `null`（用默认处理器打开） |
 | `reveal` | `{"uri"}` | `null`（在文件管理器中显示文件） |
+| `terminal` | `{"uri"}` | `null`（在 URI 所在目录打开终端） |
 | `pin` | `{"scope","item"}` | `{"pinned": bool}`（把结果项置顶到某条精确查询） |
 | `unpin` | `{"scope","on_click"}` | `{"unpinned": bool}` |
 | `copy` | `{"text"}` | `null`（写入 Wayland 剪贴板） |
@@ -128,11 +129,11 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 `actions` 元素为 `{"title": string, "on_click": string, "icon"?: string}`，
 `icon` 与结果行的 `icon` 采用同样的规范解析。后端为每个可操作的行补上启动器级别的
 置顶/取消置顶；对空查询历史来源、且本可被记入历史（非 `ephemeral`、非 `copy:`）的行
-再补上移除历史。产出该行的内置提供者补上类型专属项（文件定位、
+再补上移除历史。产出该行的内置提供者补上类型专属项（文件定位、复制路径、在终端打开、
 `[Desktop Action …]`、复制链接），外部主机自带的项排在其后。外部主机可以直接在结果项上
 输出 `actions`，前端无需理解 scheme 即可渲染。二级菜单专属 scheme 有
-`pin:{"scope","item"}`、`unpin:{"scope","on_click"}`、`forget:<on_click>` 与
-`reveal:<uri>`；所有行 scheme（`run:`、`launch:`、`copy:`、`action:`、URL）同样可用。
+`pin:{"scope","item"}`、`unpin:{"scope","on_click"}`、`forget:<on_click>`、
+`reveal:<uri>` 与 `terminal:<uri>`；所有行 scheme（`run:`、`launch:`、`copy:`、`action:`、URL）同样可用。
 
 `on_click` 的 scheme：
 
@@ -142,6 +143,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 | `launch:<desktop-id>` | 按 desktop id 启动应用（app-search） |
 | `copy:{"text":"…"}` | 把文本写入 Wayland 剪贴板（翻译复制） |
 | `action:<desktop-id>:<action-id>` | 运行 desktop action；由前端以 `action` 命令转交后端执行（app-search 按 DMS 的方式为每个 action 输出一行） |
+| `terminal:<uri>` | 在 URI 所在目录打开终端（文件则用其父目录），二级菜单专属 |
 | 裸 URL / `file:` / `mailto:` URI | 由后端经 GLib `g_app_info_launch_default_for_uri` 打开 |
 
 `file:` URI 会做百分号编码，路径中的空格与非 ASCII 字符都能保留；`Terminal=true`

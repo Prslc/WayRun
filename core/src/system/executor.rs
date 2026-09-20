@@ -1,4 +1,5 @@
 use gio::prelude::{AppInfoExt, FileExt};
+use std::path::{Path, PathBuf};
 use std::process;
 
 /// Run a shell command detached from the backend (system commands, …). Shell
@@ -113,6 +114,113 @@ fn reveal_via_file_manager(uri: &str) -> bool {
         .is_ok()
 }
 
+/// Open a terminal in a row's directory: the directory itself, or a file's
+/// parent. The emulator is `$TERMINAL` when set, else the first on `PATH`.
+pub fn open_terminal(uri: &str) {
+    let Some(path) = gio::File::for_uri(uri).path() else {
+        return;
+    };
+    let is_dir = path.is_dir();
+    let Some(dir) = terminal_dir(&path, is_dir) else {
+        return;
+    };
+    let Some(mut argv) = terminal_command_from(std::env::var("TERMINAL").ok().as_deref()) else {
+        return;
+    };
+    if let Some(extra) = terminal_dir_arg(&argv, &dir) {
+        argv.extend(extra);
+    }
+
+    let Some((program, args)) = argv.split_first() else {
+        return;
+    };
+    process::Command::new("setsid")
+        .arg(program)
+        .args(args)
+        .current_dir(&dir)
+        .stdin(process::Stdio::null())
+        .stdout(process::Stdio::null())
+        .stderr(process::Stdio::null())
+        .spawn()
+        .ok();
+}
+
+/// The directory a terminal starts in: the path itself when a directory, else
+/// its parent.
+fn terminal_dir(path: &Path, is_dir: bool) -> Option<PathBuf> {
+    if is_dir {
+        return Some(path.to_path_buf());
+    }
+    path.parent().map(Path::to_path_buf)
+}
+
+/// The terminal argv: `$TERMINAL` shell-parsed so it may carry arguments, else
+/// the first common emulator found on `PATH`.
+fn terminal_command_from(terminal: Option<&str>) -> Option<Vec<String>> {
+    if let Some(terminal) = terminal.map(str::trim).filter(|name| !name.is_empty())
+        && let Ok(argv) = gio::glib::shell_parse_argv(terminal)
+    {
+        let argv: Vec<String> = argv
+            .iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        if !argv.is_empty() {
+            return Some(argv);
+        }
+    }
+
+    const CANDIDATES: [&str; 8] = [
+        "kitty",
+        "foot",
+        "wezterm",
+        "alacritty",
+        "ghostty",
+        "gnome-terminal",
+        "konsole",
+        "xterm",
+    ];
+    CANDIDATES
+        .into_iter()
+        .find(|name| program_on_path(name))
+        .map(|name| vec![name.to_string()])
+}
+
+/// Whether a bare program name resolves on `PATH`.
+fn program_on_path(name: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path).any(|dir| dir.join(name).is_file())
+}
+
+/// The directory flag a known emulator needs; the rest inherit the process cwd,
+/// and wezterm needs its `start` subcommand before `--cwd`.
+fn terminal_dir_arg(argv: &[String], dir: &Path) -> Option<Vec<String>> {
+    let program = argv.first()?;
+    let name = Path::new(program.as_str())
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program.as_str());
+    let dir = dir.to_string_lossy().into_owned();
+    match name {
+        "gnome-terminal" | "kgx" => Some(vec!["--working-directory".to_string(), dir]),
+        "konsole" => Some(vec!["--workdir".to_string(), dir]),
+        "wezterm" => {
+            let mut extra = Vec::new();
+            if !argv
+                .iter()
+                .any(|arg| matches!(arg.as_str(), "start" | "connect" | "ssh"))
+            {
+                extra.push("start".to_string());
+            }
+            extra.push("--cwd".to_string());
+            extra.push(dir);
+            Some(extra)
+        }
+        _ => None,
+    }
+}
+
 /// Write text to the Wayland clipboard via `wl-copy`, no shell. The `copy:`
 /// scheme carries JSON, so a parse failure or missing `wl-copy` is a no-op.
 pub fn copy_json(payload: &str) {
@@ -144,7 +252,7 @@ struct CopyRequest {
 
 #[cfg(test)]
 mod tests {
-    use super::shell_join;
+    use super::*;
 
     fn argv(tokens: &[&str]) -> Vec<String> {
         tokens.iter().map(|t| t.to_string()).collect()
@@ -174,5 +282,53 @@ mod tests {
     #[test]
     fn an_empty_token_is_quoted_to_survive_the_shell() {
         assert_eq!(shell_join(&argv(&["foo", ""])), "foo ''");
+    }
+
+    #[test]
+    fn a_terminal_starts_in_the_directory_or_a_files_parent() {
+        assert_eq!(
+            terminal_dir(Path::new("/tmp/project"), true),
+            Some(PathBuf::from("/tmp/project"))
+        );
+        assert_eq!(
+            terminal_dir(Path::new("/tmp/project/file.txt"), false),
+            Some(PathBuf::from("/tmp/project"))
+        );
+        assert_eq!(terminal_dir(Path::new("/"), false), None);
+    }
+
+    #[test]
+    fn the_terminal_command_comes_from_the_environment() {
+        assert_eq!(
+            terminal_command_from(Some("kitty --single-instance")),
+            Some(argv(&["kitty", "--single-instance"]))
+        );
+    }
+
+    #[test]
+    fn a_missing_program_is_not_on_path() {
+        assert!(!program_on_path("wayrun-no-such-binary-xyz"));
+    }
+
+    #[test]
+    fn known_emulators_get_their_directory_flag() {
+        let dir = Path::new("/tmp/project");
+        assert_eq!(
+            terminal_dir_arg(&argv(&["kitty"]), dir),
+            None,
+            "kitty inherits the process cwd"
+        );
+        assert_eq!(
+            terminal_dir_arg(&argv(&["gnome-terminal"]), dir),
+            Some(argv(&["--working-directory", "/tmp/project"]))
+        );
+        assert_eq!(
+            terminal_dir_arg(&argv(&["wezterm"]), dir),
+            Some(argv(&["start", "--cwd", "/tmp/project"]))
+        );
+        assert_eq!(
+            terminal_dir_arg(&argv(&["wezterm", "start"]), dir),
+            Some(argv(&["--cwd", "/tmp/project"]))
+        );
     }
 }

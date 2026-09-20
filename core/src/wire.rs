@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 /// One action-panel command of a row, never run by Enter. `on_click` uses a
-/// row's schemes plus the panel-only `pin:`/`unpin:`/`forget:`/`reveal:`.
+/// row's schemes plus the panel-only `pin:`/`unpin:`/`forget:`/`reveal:`/
+/// `terminal:`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ActionItem {
     pub title: String,

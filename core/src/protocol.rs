@@ -20,6 +20,8 @@ enum Request<'a> {
     Launch(&'a str),
     /// `action:<desktop-id>:<action-id>`.
     Action(&'a str),
+    /// `terminal:<uri>`.
+    Terminal(&'a str),
     /// Anything else is a query.
     Search(&'a str),
 }
@@ -42,6 +44,7 @@ impl<'a> Request<'a> {
             "reveal" => Self::Reveal(argument),
             "launch" => Self::Launch(argument),
             "action" => Self::Action(argument),
+            "terminal" => Self::Terminal(argument),
             _ => Self::Search(input),
         }
     }
@@ -132,6 +135,7 @@ pub async fn serve() -> Result<()> {
             Request::Copy(payload) => system::executor::copy_json(payload),
             Request::Open(uri) => system::executor::open_uri(uri),
             Request::Reveal(uri) => system::executor::reveal(uri),
+            Request::Terminal(uri) => system::executor::open_terminal(uri),
             Request::Launch(id) => system::executor::launch_app(id),
             Request::Action(spec) => {
                 if let Some((desktop_id, action_id)) = spec.split_once(':') {
@@ -200,6 +204,10 @@ mod tests {
         assert!(matches!(
             Request::parse("open file:///tmp/x"),
             Request::Open("file:///tmp/x")
+        ));
+        assert!(matches!(
+            Request::parse("terminal file:///tmp/x"),
+            Request::Terminal("file:///tmp/x")
         ));
         // the argument keeps its own leading words: this runs `run tests`
         assert!(matches!(

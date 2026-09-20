@@ -850,21 +850,16 @@ pub fn parse_action(on_click: &str) -> Option<ActionCommand> {
 /// The one command line a row's `on_click` becomes; anything without a scheme
 /// is a shell command.
 pub fn launch_command(target: &str) -> String {
-    if let Some(id) = target.strip_prefix("launch:") {
-        format!("launch {id}")
-    } else if let Some(command) = target.strip_prefix("run:") {
-        format!("run {command}")
-    } else if let Some(payload) = target.strip_prefix("copy:") {
-        format!("copy {payload}")
-    } else if let Some(spec) = target.strip_prefix("action:") {
-        format!("action {spec}")
-    } else if target.starts_with("http")
-        || target.starts_with("file:")
-        || target.starts_with("mailto:")
-    {
-        format!("open {target}")
-    } else {
-        format!("run {target}")
+    if target.starts_with("http") || target.starts_with("file:") || target.starts_with("mailto:") {
+        return format!("open {target}");
+    }
+    match target.split_once(':') {
+        Some(("launch", id)) => format!("launch {id}"),
+        Some(("run", command)) => format!("run {command}"),
+        Some(("copy", payload)) => format!("copy {payload}"),
+        Some(("action", spec)) => format!("action {spec}"),
+        Some(("terminal", uri)) => format!("terminal {uri}"),
+        _ => format!("run {target}"),
     }
 }
 
@@ -1273,6 +1268,10 @@ mod tests {
         assert_eq!(
             launch_command("action:org.x:new-window"),
             "action org.x:new-window"
+        );
+        assert_eq!(
+            launch_command("terminal:file:///tmp/a%20b"),
+            "terminal file:///tmp/a%20b"
         );
         assert_eq!(
             launch_command("https://example.com"),
