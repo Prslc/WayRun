@@ -46,12 +46,13 @@ fn do_search(query: &str) -> Vec<ResultItem> {
         return Vec::new();
     };
 
+    let query = query.to_lowercase();
     let mut matcher = nucleo::Matcher::new(nucleo::Config::DEFAULT);
-    let pattern = nucleo::Utf32String::from(query.to_lowercase());
-    let mut results: Vec<(u16, ResultItem)> = Vec::new();
+    let pattern = nucleo::Utf32String::from(query.as_str());
+    let mut results: Vec<(u32, ResultItem)> = Vec::new();
 
     for window in windows {
-        let score = score_window(&window, &pattern, &mut matcher);
+        let score = score_window(&window, &query, &pattern, &mut matcher);
         if score > 0 {
             results.push((score, row(compositor, window)));
         }
@@ -60,24 +61,34 @@ fn do_search(query: &str) -> Vec<ResultItem> {
     rank_results(results, false, 50)
 }
 
+/// Title and app_id each get a name tier; the strongest tier dominates and the
+/// fuzzy score breaks ties and matches a mere subsequence.
 fn score_window(
     window: &Window,
+    query_lower: &str,
     pattern: &nucleo::Utf32String,
     matcher: &mut nucleo::Matcher,
-) -> u16 {
-    let title = nucleo::Utf32String::from(window.title.to_lowercase());
-    let title_score = matcher
-        .fuzzy_match(title.slice(..), pattern.slice(..))
-        .unwrap_or(0);
-    let app_score = window
-        .app_id
-        .as_ref()
+) -> u32 {
+    let title = window.title.to_lowercase();
+    let title_fuzzy = matcher
+        .fuzzy_match(
+            nucleo::Utf32String::from(title.as_str()).slice(..),
+            pattern.slice(..),
+        )
+        .unwrap_or(0) as u32;
+    let app = window.app_id.as_deref().map(str::to_lowercase);
+    let app_fuzzy = app
+        .as_deref()
         .and_then(|app| {
-            let app = nucleo::Utf32String::from(app.to_lowercase());
-            matcher.fuzzy_match(app.slice(..), pattern.slice(..))
+            matcher.fuzzy_match(nucleo::Utf32String::from(app).slice(..), pattern.slice(..))
         })
-        .unwrap_or(0);
-    title_score.max(app_score)
+        .unwrap_or(0) as u32;
+
+    let title_tier = crate::provider::name_tier(&title, query_lower);
+    let app_tier = app
+        .as_deref()
+        .map_or(0, |app| crate::provider::name_tier(app, query_lower));
+    title_tier.max(app_tier) * 1000 + title_fuzzy.max(app_fuzzy)
 }
 
 fn row(compositor: &dyn Compositor, window: Window) -> ResultItem {
@@ -108,5 +119,28 @@ mod tests {
     #[test]
     fn empty_query_matches_nothing() {
         assert!(do_search("").is_empty());
+    }
+
+    #[test]
+    fn an_exact_app_id_outranks_a_title_substring() {
+        let mut matcher = nucleo::Matcher::new(nucleo::Config::DEFAULT);
+        let query = "firefox";
+        let pattern = nucleo::Utf32String::from(query);
+        let exact = Window {
+            id: "1".into(),
+            title: "Mozilla Firefox".into(),
+            app_id: Some("firefox".into()),
+            workspace: None,
+        };
+        let substring = Window {
+            id: "2".into(),
+            title: "firefox docs".into(),
+            app_id: Some("kitty".into()),
+            workspace: None,
+        };
+        assert!(
+            score_window(&exact, query, &pattern, &mut matcher)
+                > score_window(&substring, query, &pattern, &mut matcher)
+        );
     }
 }

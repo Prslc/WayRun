@@ -29,6 +29,20 @@ pub fn rank_results<T: Ord>(
     scored.into_iter().map(|(_, item)| item).collect()
 }
 
+/// Exact, then prefix, then substring, so a short exact name outranks a longer
+/// name that merely contains the query. Inputs are lowercased.
+pub fn name_tier(name: &str, query: &str) -> u32 {
+    if name == query {
+        1000
+    } else if name.starts_with(query) {
+        700
+    } else if name.contains(query) {
+        400
+    } else {
+        0
+    }
+}
+
 /// A URL row's extra command: copy the link instead of opening it. Every
 /// provider whose rows are URLs shares this one action.
 pub fn copy_url_action(item: &ResultItem) -> Vec<ActionItem> {

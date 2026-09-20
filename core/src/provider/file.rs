@@ -125,23 +125,9 @@ search_plugin!(
     "Search directories by path"
 );
 
-/// Exact, then prefix, then substring, so a short exact name outranks a longer
-/// name that merely contains the query. Inputs are lowercased.
-fn name_tier(name: &str, query: &str) -> u32 {
-    if name == query {
-        1000
-    } else if name.starts_with(query) {
-        700
-    } else if name.contains(query) {
-        400
-    } else {
-        0
-    }
-}
-
 /// `file-search` cares about the name only; shallower paths break ties.
 fn score_name(name: &str, _path: &str, query: &str, depth: usize) -> u32 {
-    name_tier(&name.to_lowercase(), query).saturating_sub(depth as u32)
+    crate::provider::name_tier(&name.to_lowercase(), query).saturating_sub(depth as u32)
 }
 
 /// `path-search` matches when every token is somewhere on the path, but a name
@@ -151,7 +137,7 @@ fn score_path(name: &str, path: &str, query: &str, depth: usize) -> u32 {
     if !query.split_whitespace().all(|token| path.contains(token)) {
         return 0;
     }
-    name_tier(&name.to_lowercase(), query)
+    crate::provider::name_tier(&name.to_lowercase(), query)
         .max(200)
         .saturating_sub(depth as u32)
 }
