@@ -22,7 +22,7 @@ fn mime_icon(path: &Path) -> Option<String> {
 }
 
 macro_rules! search_plugin {
-    ($name:ident, $id:literal, $display:literal, $matcher:ident, $ready:literal) => {
+    ($name:ident, $id:literal, $display:literal, $scorer:ident, $ready:literal) => {
         pub struct $name;
 
         impl Plugin for $name {
@@ -43,7 +43,7 @@ macro_rules! search_plugin {
                 let query = query.to_lowercase();
                 Box::pin(async move {
                     Ok(
-                        tokio::task::spawn_blocking(move || do_search(&query, $matcher))
+                        tokio::task::spawn_blocking(move || do_search(&query, $scorer))
                             .await
                             .unwrap_or_default(),
                     )
@@ -101,26 +101,46 @@ search_plugin!(
     FileSearch,
     "file-search",
     "Files",
-    match_name,
+    score_name,
     "Search files by name"
 );
 search_plugin!(
     PathSearch,
     "path-search",
     "Paths",
-    match_path,
+    score_path,
     "Search files by path"
 );
 
-fn match_name(entry_name: &str, _entry_path: &str, query: &str) -> bool {
-    entry_name.to_lowercase().contains(query)
+/// Exact, then prefix, then substring, so a short exact name outranks a longer
+/// name that merely contains the query. Inputs are lowercased.
+fn name_tier(name: &str, query: &str) -> u32 {
+    if name == query {
+        1000
+    } else if name.starts_with(query) {
+        700
+    } else if name.contains(query) {
+        400
+    } else {
+        0
+    }
 }
 
-fn match_path(_entry_name: &str, entry_path: &str, query: &str) -> bool {
-    let path_lower = entry_path.to_lowercase();
-    query
-        .split_whitespace()
-        .all(|token| path_lower.contains(token))
+/// `file-search` cares about the name only; shallower paths break ties.
+fn score_name(name: &str, _path: &str, query: &str, depth: usize) -> u32 {
+    name_tier(&name.to_lowercase(), query).saturating_sub(depth as u32)
+}
+
+/// `path-search` matches when every token is somewhere on the path, but a name
+/// hit still outranks a parent-directory-only hit.
+fn score_path(name: &str, path: &str, query: &str, depth: usize) -> u32 {
+    let path = path.to_lowercase();
+    if !query.split_whitespace().all(|token| path.contains(token)) {
+        return 0;
+    }
+    name_tier(&name.to_lowercase(), query)
+        .max(200)
+        .saturating_sub(depth as u32)
 }
 
 /// Walk filter: skip hidden dirs and build caches, and skip the three roots at
@@ -133,7 +153,11 @@ fn keep_entry(name: &str, depth: usize) -> bool {
     !(depth == 1 && matches!(name, "Desktop" | "Documents" | "Downloads"))
 }
 
-fn do_search(query: &str, matcher: fn(&str, &str, &str) -> bool) -> Vec<ResultItem> {
+/// A walk may match thousands of entries; rank the first `MATCH_CAP` and show
+/// the best 50, so one keystroke cannot walk an unbounded tree.
+const MATCH_CAP: usize = 200;
+
+fn do_search(query: &str, scorer: fn(&str, &str, &str, usize) -> u32) -> Vec<ResultItem> {
     if query.is_empty() {
         return vec![];
     }
@@ -149,7 +173,7 @@ fn do_search(query: &str, matcher: fn(&str, &str, &str) -> bool) -> Vec<ResultIt
         home.clone(),
     ];
 
-    let mut results = Vec::new();
+    let mut scored: Vec<(u32, ResultItem)> = Vec::new();
 
     for root in &roots {
         if !root.exists() {
@@ -171,7 +195,8 @@ fn do_search(query: &str, matcher: fn(&str, &str, &str) -> bool) -> Vec<ResultIt
             let path = entry.path().to_string_lossy().into_owned();
             let name = entry.file_name().to_string_lossy();
 
-            if !matcher(&name, &path, query) {
+            let score = scorer(&name, &path, query, entry.depth());
+            if score == 0 {
                 continue;
             }
 
@@ -189,27 +214,30 @@ fn do_search(query: &str, matcher: fn(&str, &str, &str) -> bool) -> Vec<ResultIt
                 mime_icon(Path::new(&path))
             };
 
-            results.push(ResultItem {
-                title,
-                summary: Some(path),
-                on_click: Some(Action::Open { uri: file_url }),
-                icon,
-                ephemeral: false,
-                actions: Vec::new(),
-                badge: None,
-            });
+            scored.push((
+                score,
+                ResultItem {
+                    title,
+                    summary: Some(path),
+                    on_click: Some(Action::Open { uri: file_url }),
+                    icon,
+                    ephemeral: false,
+                    actions: Vec::new(),
+                    badge: None,
+                },
+            ));
 
-            if results.len() >= 50 {
+            if scored.len() >= MATCH_CAP {
                 break;
             }
         }
 
-        if results.len() >= 50 {
+        if scored.len() >= MATCH_CAP {
             break;
         }
     }
 
-    results
+    crate::provider::rank_results(scored, false, 50)
 }
 
 #[cfg(test)]
@@ -314,8 +342,34 @@ mod tests {
 
     #[test]
     fn empty_query_matches_nothing() {
-        assert!(do_search("", match_name).is_empty());
-        assert!(do_search("", match_path).is_empty());
+        assert!(do_search("", score_name).is_empty());
+        assert!(do_search("", score_path).is_empty());
+    }
+
+    #[test]
+    fn an_exact_name_outranks_a_longer_prefix_match() {
+        let query = "wayrun";
+        let exact = score_name("WayRun", "", query, 2);
+        let prefix = score_name("wayrun-x86_64-unknown-linux-gnu.zip", "", query, 1);
+        let contains = score_name("my-wayrun-notes.txt", "", query, 1);
+        assert!(exact > prefix, "{exact} > {prefix}");
+        assert!(prefix > contains, "{prefix} > {contains}");
+        assert_eq!(score_name("unrelated.txt", "", query, 0), 0);
+    }
+
+    #[test]
+    fn a_path_only_hit_ranks_below_a_name_hit() {
+        let query = "wayrun";
+        let named = score_path("WayRun", "/home/u/Project/WayRun", query, 2);
+        let nested = score_path("core", "/home/u/Project/WayRun/core", query, 3);
+        assert!(named > nested, "{named} > {nested}");
+        assert_eq!(score_path("core", "/home/u/other/core", query, 1), 0);
+    }
+
+    #[test]
+    fn a_shallower_path_breaks_a_tier_tie() {
+        let query = "wayrun";
+        assert!(score_name("wayrun", "", query, 1) > score_name("wayrun", "", query, 3));
     }
 
     #[test]
