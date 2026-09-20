@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::wire::ResultItem;
+use crate::wire::{Action, ResultItem};
 
 mod actions;
 mod model;
@@ -33,7 +33,7 @@ pub trait Plugin: Send + Sync {
     /// caller's. `true` means this provider owned the row and dropped it.
     fn forget(
         &self,
-        _on_click: &str,
+        _command: &Action,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send + '_>> {
         Box::pin(async { Ok(false) })
     }
@@ -46,11 +46,11 @@ pub trait Plugin: Send + Sync {
 }
 
 #[cfg(test)]
-fn item(title: &str, on_click: &str) -> ResultItem {
+fn item(title: &str, command: Action) -> ResultItem {
     ResultItem {
         title: title.to_string(),
         summary: None,
-        on_click: Some(on_click.to_string()),
+        on_click: Some(command),
         icon: None,
         ephemeral: false,
         actions: Vec::new(),

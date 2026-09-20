@@ -4,7 +4,7 @@ use std::process::Command;
 
 use crate::plugin::{Meta, Plugin};
 use crate::system::icon::resolve;
-use crate::wire::ResultItem;
+use crate::wire::{Action, ResultItem};
 use anyhow::Result;
 
 pub struct Clipboard;
@@ -74,7 +74,9 @@ fn parse_entries(query: &str, raw: &str) -> Vec<ResultItem> {
         results.push(ResultItem {
             title: preview,
             summary: None,
-            on_click: Some(format!("run:sh -c 'cliphist decode {id} | wl-copy'")),
+            on_click: Some(Action::Run {
+                cmd: format!("sh -c 'cliphist decode {id} | wl-copy'"),
+            }),
             icon: Some(String::new()),
             ephemeral: true,
             actions: Vec::new(),
@@ -99,7 +101,10 @@ mod tests {
         let entries = parse_entries("", raw);
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].title, "hello world");
-        assert!(entries[0].on_click.as_ref().unwrap().contains("decode 1"));
+        let Some(Action::Run { cmd }) = entries[0].on_click.as_ref() else {
+            panic!("a clipboard row runs a command");
+        };
+        assert!(cmd.contains("decode 1"));
         assert_eq!(entries[1].title, "screenshot");
         assert!(entries.iter().all(|e| e.ephemeral));
     }

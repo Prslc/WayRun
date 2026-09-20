@@ -6,17 +6,17 @@ use std::sync::mpsc::{Sender as StdSender, channel};
 use std::sync::{LazyLock, Mutex, PoisonError};
 
 use calloop::channel::Sender;
-
-use wayrun_core::wire::{ResultItem, ThemeConfig};
+use serde_json::{Value, json};
+use wayrun_core::wire::{Action, ResultItem, ThemeConfig};
 
 #[derive(Debug, Clone)]
 pub enum BackendEvent {
     Theme(ThemeConfig),
     Results(Vec<ResultItem>),
-    /// A JSON-RPC `forget` reply: the row the UI asked to drop, and whether the
-    /// core really dropped anything.
+    /// A JSON-RPC `forget` reply: the command key the UI asked to drop, and
+    /// whether the core really dropped anything.
     Forgotten {
-        on_click: String,
+        key: String,
         forgotten: bool,
     },
     /// The core's stdout closed: nothing can be searched or launched anymore.
@@ -26,7 +26,7 @@ pub enum BackendEvent {
 /// Lines bound for the core's stdin, drained by one writer thread.
 static OUTBOX: LazyLock<Mutex<Option<StdSender<String>>>> = LazyLock::new(|| Mutex::new(None));
 
-/// The `on_click` of each in-flight `forget`, so its reply can be routed back.
+/// The command key of each in-flight `forget`, so its reply can be routed back.
 static REQUESTS: LazyLock<Mutex<HashMap<u64, String>>> = LazyLock::new(Default::default);
 static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
 
@@ -39,65 +39,63 @@ pub fn send(line: &str) {
     }
 }
 
-/// Send a JSON-RPC request, remembering the `on_click` its reply answers.
-fn request(method: &str, params: serde_json::Value, on_click: String) -> u64 {
+/// Send a JSON-RPC notification.
+fn notify(method: &str, params: Value) {
+    send(&json!({ "jsonrpc": "2.0", "method": method, "params": params }).to_string());
+}
+
+/// Send a JSON-RPC request, remembering the command key its reply answers.
+fn request(method: &str, params: Value, key: String) -> u64 {
     let id = NEXT_REQUEST.fetch_add(1, Ordering::Relaxed);
     REQUESTS
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .insert(id, on_click);
+        .insert(id, key);
 
-    send(
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params,
-        })
-        .to_string(),
-    );
+    send(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }).to_string());
 
     id
 }
 
-/// Ask the core to forget a row; the reply arrives as
-/// [`BackendEvent::Forgotten`] and says whether anything was really dropped.
-pub fn forget_row(on_click: &str) {
-    request(
-        "forget",
-        serde_json::json!({ "on_click": on_click }),
-        on_click.to_string(),
+/// One query change: a streaming search notification.
+pub fn search(text: &str) {
+    notify("search", json!({ "text": text }));
+}
+
+/// The empty query: the history view.
+pub fn top() {
+    notify("top", Value::Null);
+}
+
+/// Record the row the user launched.
+pub fn select(item: &Value) {
+    notify("select", item.clone());
+}
+
+/// Run one row or panel command.
+pub fn command(action: &Action) {
+    notify(
+        "command",
+        serde_json::to_value(action).unwrap_or(Value::Null),
     );
 }
 
 /// Pin a row's snapshot to one exact query. A notification, not a request: the
 /// caller re-searches and the pin leads the reply.
-pub fn pin(scope: &str, item: serde_json::Value) {
-    send(
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "pin",
-            "params": { "scope": scope, "item": item },
-        })
-        .to_string(),
-    );
+pub fn pin(scope: &str, item: &ResultItem) {
+    notify("pin", json!({ "scope": scope, "item": item }));
 }
 
 /// Drop one pin of an exact query.
-pub fn unpin(scope: &str, on_click: &str) {
-    send(
-        &serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "unpin",
-            "params": { "scope": scope, "on_click": on_click },
-        })
-        .to_string(),
-    );
+pub fn unpin(scope: &str, on_click: &Action) {
+    notify("unpin", json!({ "scope": scope, "on_click": on_click }));
 }
 
-/// Ask the core to show a file in the file manager.
-pub fn reveal(uri: &str) {
-    send(&format!("reveal {uri}"));
+/// Ask the core to forget a row; the reply arrives as
+/// [`BackendEvent::Forgotten`] and says whether anything was really dropped.
+pub fn forget_row(action: &Action) {
+    let key = action.key();
+    request("forget", json!({ "on_click": action }), key);
 }
 
 /// Spawn the core and wire the reader/writer threads: one writer owns stdin (no
@@ -149,7 +147,7 @@ pub fn start(tx: Sender<BackendEvent>) {
 
     // Warm the core's caches here, not on the first keystroke: the daemon boots
     // long before the launcher is shown; a real search supersedes this one.
-    send("a");
+    search("a");
 }
 
 fn drain(mut stdin: ChildStdin, receiver: std::sync::mpsc::Receiver<String>) {
@@ -161,69 +159,40 @@ fn drain(mut stdin: ChildStdin, receiver: std::sync::mpsc::Receiver<String>) {
     }
 }
 
-/// The line's first byte decides the shape, so the common payloads are parsed
-/// once — no `Value` round trip and no `data` clone per keystroke.
+/// Parse one JSON-RPC 2.0 line: a notification the shell renders, or the reply
+/// to an in-flight `forget`.
 fn parse(line: &str) -> Option<BackendEvent> {
-    let line = line.trim();
-    match line.as_bytes().first()? {
-        b'[' => serde_json::from_str::<Vec<ResultItem>>(line)
-            .ok()
-            .map(BackendEvent::Results),
-        b'{' => parse_object(line),
-        _ => None,
-    }
-}
-
-/// `{"type":"theme","data":{…}}` / `{"type":"results","data":[…]}` in one pass.
-#[derive(serde::Deserialize)]
-#[serde(tag = "type", content = "data", rename_all = "lowercase")]
-enum Tagged {
-    Theme(ThemeConfig),
-    Results(Vec<ResultItem>),
-}
-
-/// A JSON-RPC reply: only `forget` answers are expected (matched back by
-/// request id).
-#[derive(serde::Deserialize)]
-struct RpcReply {
-    #[serde(default)]
-    jsonrpc: Option<String>,
-    #[serde(default)]
-    id: Option<u64>,
-    #[serde(default)]
-    result: Option<serde_json::Value>,
-}
-
-fn parse_object(line: &str) -> Option<BackendEvent> {
-    if let Ok(tagged) = serde_json::from_str::<Tagged>(line) {
-        return Some(match tagged {
-            Tagged::Theme(config) => BackendEvent::Theme(config),
-            Tagged::Results(items) => BackendEvent::Results(items),
-        });
-    }
-
-    let reply: RpcReply = serde_json::from_str(line).ok()?;
-    if reply.jsonrpc.as_deref() != Some("2.0") {
+    let value: Value = serde_json::from_str(line.trim()).ok()?;
+    if value.get("jsonrpc").and_then(|v| v.as_str()) != Some("2.0") {
         return None;
     }
-    let id = reply.id?;
-    let on_click = REQUESTS
+
+    if let Some(method) = value.get("method").and_then(|v| v.as_str()) {
+        let params = value.get("params").cloned().unwrap_or(Value::Null);
+        return match method {
+            "theme" => serde_json::from_value(params).ok().map(BackendEvent::Theme),
+            "results" => serde_json::from_value(params)
+                .ok()
+                .map(BackendEvent::Results),
+            _ => None,
+        };
+    }
+
+    // a reply: only `forget` answers are expected (matched back by request id)
+    let id = value.get("id")?.as_u64()?;
+    let key = REQUESTS
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .remove(&id)?;
 
     // a reply with no `forgotten` (or an error) means nothing was dropped,
     // which is the safe answer for the UI
-    let forgotten = reply
-        .result
-        .as_ref()
+    let forgotten = value
+        .get("result")
         .and_then(|result| result.get("forgotten"))
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
-    Some(BackendEvent::Forgotten {
-        on_click,
-        forgotten,
-    })
+    Some(BackendEvent::Forgotten { key, forgotten })
 }
 
 #[cfg(test)]
@@ -231,20 +200,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_the_typed_payloads_without_a_value_round_trip() {
-        let theme = parse(r##"{"type":"theme","data":{"primary":"#fff"}}"##).unwrap();
+    fn parses_the_notifications_the_core_sends() {
+        let theme =
+            parse(r##"{"jsonrpc":"2.0","method":"theme","params":{"primary":"#fff"}}"##).unwrap();
         assert!(matches!(theme, BackendEvent::Theme(_)));
 
-        let results = parse(r#"{"type":"results","data":[{"title":"a"}]}"#).unwrap();
+        let results =
+            parse(r#"{"jsonrpc":"2.0","method":"results","params":[{"title":"a"}]}"#).unwrap();
         match results {
             BackendEvent::Results(items) => assert_eq!(items[0].title, "a"),
-            other => panic!("expected results, got {other:?}"),
-        }
-
-        // the bare array form is still accepted
-        let bare = parse(r#"[{"title":"b"}]"#).unwrap();
-        match bare {
-            BackendEvent::Results(items) => assert_eq!(items[0].title, "b"),
             other => panic!("expected results, got {other:?}"),
         }
     }
@@ -253,7 +217,7 @@ mod tests {
     fn present_nulls_and_the_ephemeral_flag_do_not_reject_the_payload() {
         // Help rows carry `on_click: null`, and usage opt-out rows carry
         // `ephemeral: true`; a present `null` must not fail the whole `Vec`.
-        let line = r#"{"type":"results","data":[{"title":"Calculator","summary":"* (default)","on_click":null,"icon":null,"ephemeral":true}]}"#;
+        let line = r#"{"jsonrpc":"2.0","method":"results","params":[{"title":"Calculator","summary":"* (default)","on_click":null,"icon":null,"ephemeral":true}]}"#;
         match parse(line).unwrap() {
             BackendEvent::Results(items) => {
                 assert_eq!(items.len(), 1);
@@ -269,8 +233,8 @@ mod tests {
     #[test]
     fn ignores_lines_the_shell_does_not_render() {
         assert!(parse("").is_none());
-        assert!(parse(r#"{"type":"something-else","data":[]}"#).is_none());
         assert!(parse("not json").is_none());
+        assert!(parse(r#"{"jsonrpc":"2.0","method":"unknown","params":[]}"#).is_none());
         assert!(parse(r#"{"jsonrpc":"2.0","id":999,"result":"/x.svg"}"#).is_none());
     }
 
@@ -287,11 +251,8 @@ mod tests {
         ))
         .unwrap();
         match event {
-            BackendEvent::Forgotten {
-                on_click,
-                forgotten,
-            } => {
-                assert_eq!(on_click, "run:never-used");
+            BackendEvent::Forgotten { key, forgotten } => {
+                assert_eq!(key, "run:never-used");
                 assert!(!forgotten);
             }
             other => panic!("expected a forget reply, got {other:?}"),

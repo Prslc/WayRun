@@ -1,12 +1,67 @@
 use serde::{Deserialize, Serialize};
 
-/// One action-panel command of a row, never run by Enter. `on_click` uses a
-/// row's schemes plus the panel-only `pin:`/`unpin:`/`forget:`/`reveal:`/
-/// `terminal:`.
+/// One thing a row can do: what Enter or an action runs. Internally tagged, so
+/// the wire carries `{"type":"run","cmd":"…"}` rather than a scheme string.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Action {
+    Run {
+        cmd: String,
+    },
+    Launch {
+        desktop_id: String,
+    },
+    Copy {
+        text: String,
+    },
+    DesktopAction {
+        desktop_id: String,
+        action_id: String,
+    },
+    Reveal {
+        uri: String,
+    },
+    Terminal {
+        uri: String,
+    },
+    Open {
+        uri: String,
+    },
+}
+
+impl Action {
+    /// Canonical key for usage history and pins; internal, never emitted.
+    pub fn key(&self) -> String {
+        serde_json::to_string(self).unwrap_or_default()
+    }
+}
+
+/// A row's panel command: execute the row's own `Action`, or a launcher-level
+/// pin/unpin/history operation the shell turns into its own RPC call.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PanelAction {
+    Execute {
+        command: Action,
+    },
+    Pin {
+        scope: String,
+        item: Box<ResultItem>,
+    },
+    Unpin {
+        scope: String,
+        on_click: Action,
+    },
+    Forget {
+        on_click: Action,
+    },
+}
+
+/// One action-panel entry of a row, never run by Enter.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ActionItem {
     pub title: String,
-    pub on_click: String,
+    pub action: PanelAction,
     /// The icon spec; the core resolves it to an absolute path before emitting,
     /// like a row's `icon`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -17,7 +72,7 @@ pub struct ActionItem {
 pub struct ResultItem {
     pub title: String,
     pub summary: Option<String>,
-    pub on_click: Option<String>,
+    pub on_click: Option<Action>,
     pub icon: Option<String>,
     /// The host asked for this row not to enter usage history — a one-shot
     /// search hit, for instance. Absent on the wire means "record it".

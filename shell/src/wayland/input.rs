@@ -11,7 +11,7 @@ use wayland_client::{Connection, QueueHandle};
 use crate::app;
 use crate::session::{backend, clipboard};
 use crate::ui::geom;
-use wayrun_core::wire::ActionItem;
+use wayrun_core::wire::{Action, ActionItem, PanelAction};
 
 use super::{Shell, ime};
 
@@ -191,9 +191,9 @@ impl Shell {
             "ephemeral": launch.ephemeral,
         });
 
-        backend::send(&format!("select {usage}"));
+        backend::select(&usage);
 
-        backend::send(&app::launch_command(&launch.target));
+        backend::command(&launch.target);
 
         self.schedule_dismiss(now);
     }
@@ -245,45 +245,37 @@ impl Shell {
     /// One action-panel command. Pin/unpin re-search so the launcher stays open;
     /// the rest launch and dismiss, except `forget`, which drops the row in place.
     fn execute_action(&mut self, action: &ActionItem, now: Instant) {
-        let Some(command) = app::parse_action(&action.on_click) else {
-            return;
-        };
-
-        match command {
-            app::ActionCommand::Pin { scope, item } => {
-                backend::pin(&scope, item);
+        match &action.action {
+            PanelAction::Execute { command } => {
+                backend::command(command);
+                self.schedule_dismiss(now);
+            }
+            PanelAction::Pin { scope, item } => {
+                backend::pin(scope, item);
                 self.close_panel(now);
                 self.query_changed();
             }
-            app::ActionCommand::Unpin { scope, on_click } => {
-                backend::unpin(&scope, &on_click);
+            PanelAction::Unpin { scope, on_click } => {
+                backend::unpin(scope, on_click);
                 self.close_panel(now);
                 self.query_changed();
             }
-            app::ActionCommand::Forget { on_click } => {
-                backend::forget_row(&on_click);
+            PanelAction::Forget { on_click } => {
+                backend::forget_row(on_click);
                 self.close_panel(now);
-            }
-            app::ActionCommand::Reveal { uri } => {
-                backend::reveal(&uri);
-                self.schedule_dismiss(now);
-            }
-            app::ActionCommand::Run { target } => {
-                backend::send(&app::launch_command(&target));
-                self.schedule_dismiss(now);
             }
         }
     }
 
-    /// Ctrl+C/X: hand the selected text to the core's `copy` verb, which writes
-    /// it with `wl-copy`. Whether there was a selection to copy.
+    /// Ctrl+C/X: hand the selected text to the core's `copy` command, which
+    /// writes it with `wl-copy`. Whether there was a selection to copy.
     fn copy_selection(&self) -> bool {
         let Some((start, end)) = self.app.selection() else {
             return false;
         };
 
         let text = self.app.query[start..end].to_string();
-        backend::send(&format!("copy {}", serde_json::json!({ "text": text })));
+        backend::command(&Action::Copy { text });
         true
     }
 }

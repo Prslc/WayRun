@@ -5,56 +5,28 @@ use tokio::io::{self, AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::wire::ResultItem;
 use crate::{plugin, rpc, system, watchers};
-
-/// One line of the text protocol; JSON-RPC requests are handled before this.
-enum Request<'a> {
-    /// Empty query: the usage-ranked history.
-    History,
-    Select(&'a str),
-    Forget(&'a str),
-    Run(&'a str),
-    Copy(&'a str),
-    Open(&'a str),
-    Reveal(&'a str),
-    Launch(&'a str),
-    /// `action:<desktop-id>:<action-id>`.
-    Action(&'a str),
-    /// `terminal:<uri>`.
-    Terminal(&'a str),
-    /// Anything else is a query.
-    Search(&'a str),
-}
-
-impl<'a> Request<'a> {
-    fn parse(input: &'a str) -> Self {
-        if input.trim().is_empty() {
-            return Self::History;
-        }
-        // verbatim argument: `run run tests` runs "run tests"
-        let Some((name, argument)) = input.split_once(' ') else {
-            return Self::Search(input);
-        };
-        match name {
-            "select" => Self::Select(argument),
-            "forget" => Self::Forget(argument),
-            "run" => Self::Run(argument),
-            "copy" => Self::Copy(argument),
-            "open" => Self::Open(argument),
-            "reveal" => Self::Reveal(argument),
-            "launch" => Self::Launch(argument),
-            "action" => Self::Action(argument),
-            "terminal" => Self::Terminal(argument),
-            _ => Self::Search(input),
-        }
-    }
-}
 
 /// Serialize `payload` onto the stdout stream owned by [`spawn_writer`].
 pub async fn emit(tx: &mpsc::Sender<String>, payload: &serde_json::Value) {
     if let Ok(json) = serde_json::to_string(payload) {
         let _ = tx.send(json).await;
     }
+}
+
+/// The `theme` notification, shared with the file watcher's live re-emit.
+pub fn theme_notification() -> serde_json::Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "theme",
+        "params": system::theme::load_theme(),
+    })
+}
+
+/// The `results` notification for one search payload.
+pub fn results_notification(items: &[ResultItem]) -> serde_json::Value {
+    serde_json::json!({ "jsonrpc": "2.0", "method": "results", "params": items })
 }
 
 /// Drain sentinel: the writer flushes and returns. The watchers hold sender
@@ -78,19 +50,13 @@ fn spawn_writer(mut rx: mpsc::Receiver<String>) -> std::thread::JoinHandle<()> {
     })
 }
 
-/// Serve the line protocol until stdin closes.
+/// Serve the JSON-RPC protocol until stdin closes. Any line that is not valid
+/// JSON answers the standard `-32700` parse error.
 pub async fn serve() -> Result<()> {
     let (tx, rx) = mpsc::channel::<String>(32);
     let writer = spawn_writer(rx);
 
-    emit(
-        &tx,
-        &serde_json::json!({
-            "type": "theme",
-            "data": system::theme::load_theme()
-        }),
-    )
-    .await;
+    emit(&tx, &theme_notification()).await;
 
     // Hold the watchers for the core's lifetime: dropping them stops live theme
     // and plugin-registry updates.
@@ -100,10 +66,6 @@ pub async fn serve() -> Result<()> {
 
     let _plugins_watcher = watchers::watch_plugins();
 
-    // Drop copy:-keyed history rows; idempotent, and usage::record keeps new
-    // ones out.
-    let _ = system::usage::purge_ephemeral();
-
     let mut reader = BufReader::new(io::stdin()).lines();
     let mut search: Option<JoinHandle<()>> = None;
     // `forget` waits on external hosts, so it runs in a task; the handles are
@@ -111,47 +73,12 @@ pub async fn serve() -> Result<()> {
     let mut forgets: Vec<JoinHandle<()>> = Vec::new();
 
     while let Some(line) = reader.next_line().await? {
-        let input = line.trim_start();
-
-        // JSON-RPC 2.0 requests — independent of the text protocol
-        if rpc::handle(input, &tx, &mut forgets).await {
-            continue;
-        }
-
-        match Request::parse(input) {
-            Request::History => emit_history(&tx).await,
-            Request::Select(item) => {
-                let _ = system::usage::record(item);
-            }
-            Request::Forget(key) => {
-                let _ = system::usage::forget(key);
-                forgets.retain(|handle| !handle.is_finished());
-                let key = key.to_string();
-                forgets.push(tokio::spawn(async move {
-                    plugin::forget_row(&key).await;
-                }));
-            }
-            Request::Run(cmd) => system::executor::execute_command(cmd),
-            Request::Copy(payload) => system::executor::copy_json(payload),
-            Request::Open(uri) => system::executor::open_uri(uri),
-            Request::Reveal(uri) => system::executor::reveal(uri),
-            Request::Terminal(uri) => system::executor::open_terminal(uri),
-            Request::Launch(id) => system::executor::launch_app(id),
-            Request::Action(spec) => {
-                if let Some((desktop_id, action_id)) = spec.split_once(':') {
-                    system::desktop_action::launch(desktop_id, action_id);
-                }
-            }
-            Request::Search(query) => start_search(&tx, &mut search, query),
-        }
+        rpc::handle(&line, &tx, &mut search, &mut forgets).await;
     }
 
     // A pending search or forget still holds a sender clone; reap them, then
     // drain the writer so a one-shot client gets its last response.
-    if let Some(handle) = search.take() {
-        handle.abort();
-        let _ = handle.await;
-    }
+    abort_search(&mut search);
     for handle in forgets {
         let _ = handle.await;
     }
@@ -164,81 +91,36 @@ pub async fn serve() -> Result<()> {
 
 /// The empty query: the full, uncapped history so deleting a row converges,
 /// with the scope's pins leading and every row's action panel attached.
-async fn emit_history(tx: &mpsc::Sender<String>) {
-    let items: Vec<crate::wire::ResultItem> = system::usage::get_top(i32::MAX)
+pub async fn history_items() -> Vec<ResultItem> {
+    let items: Vec<ResultItem> = system::usage::get_top(i32::MAX)
         .unwrap_or_default()
         .into_iter()
         .filter_map(|value| serde_json::from_value(value).ok())
         .collect();
-    let items = plugin::decorate(items, "", true).await;
-    emit(tx, &serde_json::json!({ "type": "results", "data": items })).await;
+    plugin::decorate(items, "", true).await
+}
+
+/// Emit the empty-query history as a `results` notification.
+pub async fn emit_history(tx: &mpsc::Sender<String>) {
+    emit(tx, &results_notification(&history_items().await)).await;
 }
 
 /// Searches supersede each other: the pending one is aborted, the new one emits
 /// its payload when it lands.
-fn start_search(tx: &mpsc::Sender<String>, pending: &mut Option<JoinHandle<()>>, query: &str) {
-    if let Some(handle) = pending.take() {
-        handle.abort();
-    }
+pub fn start_search(tx: &mpsc::Sender<String>, pending: &mut Option<JoinHandle<()>>, query: &str) {
+    abort_search(pending);
 
     let tx = tx.clone();
     let query = query.to_string();
     *pending = Some(tokio::spawn(async move {
         let results = plugin::dispatch(&query).await;
-        emit(
-            &tx,
-            &serde_json::json!({ "type": "results", "data": results }),
-        )
-        .await;
+        emit(&tx, &results_notification(&results)).await;
     }));
 }
 
-#[cfg(test)]
-mod tests {
-    use super::Request;
-
-    #[test]
-    fn parse_splits_command_and_verbatim_argument() {
-        assert!(matches!(Request::parse("  "), Request::History));
-        assert!(matches!(Request::parse("select {}"), Request::Select("{}")));
-        assert!(matches!(
-            Request::parse("open file:///tmp/x"),
-            Request::Open("file:///tmp/x")
-        ));
-        assert!(matches!(
-            Request::parse("terminal file:///tmp/x"),
-            Request::Terminal("file:///tmp/x")
-        ));
-        // the argument keeps its own leading words: this runs `run tests`
-        assert!(matches!(
-            Request::parse("run run tests"),
-            Request::Run("run tests")
-        ));
-        // no separator, or an unknown first word, is a query — line preserved
-        assert!(matches!(Request::parse("run"), Request::Search("run")));
-        assert!(matches!(
-            Request::parse("firefox"),
-            Request::Search("firefox")
-        ));
-        assert!(matches!(
-            Request::parse("selects x"),
-            Request::Search("selects x")
-        ));
-        // a desktop action is a verb, not a query
-        assert!(matches!(
-            Request::parse("action org.x:new-window"),
-            Request::Action("org.x:new-window")
-        ));
-    }
-
-    #[test]
-    fn a_desktop_action_splits_into_its_two_ids() {
-        let Request::Action(spec) = Request::parse("action org.gnome.Nautilus:new-window") else {
-            panic!("expected an action");
-        };
-        assert_eq!(
-            spec.split_once(':'),
-            Some(("org.gnome.Nautilus", "new-window"))
-        );
+/// Drop the in-flight search, if any.
+pub fn abort_search(pending: &mut Option<JoinHandle<()>>) {
+    if let Some(handle) = pending.take() {
+        handle.abort();
     }
 }

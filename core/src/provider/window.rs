@@ -8,7 +8,7 @@ use crate::provider::rank_results;
 use crate::system::compositor::{self, Compositor, Window};
 use crate::system::desktop_action;
 use crate::system::executor::shell_join;
-use crate::wire::ResultItem;
+use crate::wire::{Action, ResultItem};
 
 pub struct WindowPlugin;
 
@@ -88,10 +88,9 @@ fn row(compositor: &dyn Compositor, window: Window) -> ResultItem {
     ResultItem {
         title: window.title,
         summary,
-        on_click: Some(format!(
-            "run:{}",
-            shell_join(&compositor.focus_argv(&window.id))
-        )),
+        on_click: Some(Action::Run {
+            cmd: shell_join(&compositor.focus_argv(&window.id)),
+        }),
         icon: window
             .app_id
             .as_deref()

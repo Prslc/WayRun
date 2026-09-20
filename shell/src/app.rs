@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::{AppearanceConfig, Mode};
 use crate::ui::theme::{Surfaces, Theme};
-use wayrun_core::wire::{ActionItem, ResultItem};
+use wayrun_core::wire::{Action, ActionItem, ResultItem};
 
 /// Launch dismissals wait this long before the surface goes away.
 pub const EXIT_DELAY_MS: u64 = 150;
@@ -47,12 +47,12 @@ fn normalize_icons(items: Vec<ResultItem>) -> Vec<ResultItem> {
 }
 
 /// The selected row's fields that `select` and the launch command need.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Launch {
     pub title: String,
     pub summary: Option<String>,
     pub icon: Option<String>,
-    pub target: String,
+    pub target: Action,
     pub ephemeral: bool,
 }
 
@@ -672,14 +672,14 @@ impl State {
         &self.query[..self.caret]
     }
 
-    /// Drop a row the core confirmed it forgot, looked up by `on_click` because
-    /// the payload may have been replaced while the reply was in flight.
-    pub fn remove_row(&mut self, on_click: &str, now: Instant) -> bool {
-        let Some(index) = self
-            .rows
-            .iter()
-            .position(|row| row.on_click.as_deref() == Some(on_click))
-        else {
+    /// Drop a row the core confirmed it forgot, looked up by its command key
+    /// because the payload may have been replaced while the reply was in flight.
+    pub fn remove_row(&mut self, key: &str, now: Instant) -> bool {
+        let Some(index) = self.rows.iter().position(|row| {
+            row.on_click
+                .as_ref()
+                .is_some_and(|command| command.key() == key)
+        }) else {
             return false;
         };
 
@@ -788,81 +788,6 @@ fn next_char_len(text: &str, at: usize) -> Option<usize> {
     text[at..].chars().next().map(char::len_utf8)
 }
 
-/// What an action-panel row's `on_click` means. The launcher-level `pin:` and
-/// `unpin:` carry a JSON payload; the rest reuse the row schemes.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ActionCommand {
-    Pin {
-        scope: String,
-        item: serde_json::Value,
-    },
-    Unpin {
-        scope: String,
-        on_click: String,
-    },
-    Forget {
-        on_click: String,
-    },
-    Reveal {
-        uri: String,
-    },
-    Run {
-        target: String,
-    },
-}
-
-/// Decode one action's `on_click`; a malformed `pin:`/`unpin:` is ignored, and a
-/// scheme-less target is an ordinary launch command.
-pub fn parse_action(on_click: &str) -> Option<ActionCommand> {
-    if let Some(payload) = on_click.strip_prefix("pin:") {
-        let value: serde_json::Value = serde_json::from_str(payload).ok()?;
-        return Some(ActionCommand::Pin {
-            scope: value["scope"].as_str()?.to_string(),
-            item: value.get("item")?.clone(),
-        });
-    }
-
-    if let Some(payload) = on_click.strip_prefix("unpin:") {
-        let value: serde_json::Value = serde_json::from_str(payload).ok()?;
-        return Some(ActionCommand::Unpin {
-            scope: value["scope"].as_str()?.to_string(),
-            on_click: value["on_click"].as_str()?.to_string(),
-        });
-    }
-
-    if let Some(on_click) = on_click.strip_prefix("forget:") {
-        return Some(ActionCommand::Forget {
-            on_click: on_click.to_string(),
-        });
-    }
-
-    if let Some(uri) = on_click.strip_prefix("reveal:") {
-        return Some(ActionCommand::Reveal {
-            uri: uri.to_string(),
-        });
-    }
-
-    Some(ActionCommand::Run {
-        target: on_click.to_string(),
-    })
-}
-
-/// The one command line a row's `on_click` becomes; anything without a scheme
-/// is a shell command.
-pub fn launch_command(target: &str) -> String {
-    if target.starts_with("http") || target.starts_with("file:") || target.starts_with("mailto:") {
-        return format!("open {target}");
-    }
-    match target.split_once(':') {
-        Some(("launch", id)) => format!("launch {id}"),
-        Some(("run", command)) => format!("run {command}"),
-        Some(("copy", payload)) => format!("copy {payload}"),
-        Some(("action", spec)) => format!("action {spec}"),
-        Some(("terminal", uri)) => format!("terminal {uri}"),
-        _ => format!("run {target}"),
-    }
-}
-
 /// Whole rows from a fractional wheel delta, carrying the remainder. One notch
 /// arrives as a line and its pixel half, so pixels must not add a second row.
 pub fn whole_rows(accum: &mut f32, delta: f32) -> i32 {
@@ -882,18 +807,24 @@ pub fn whole_rows(accum: &mut f32, delta: f32) -> i32 {
 mod tests {
     use super::*;
     use crate::ui::geom::{self, Layout};
-    use wayrun_core::wire::ResultItem;
+    use wayrun_core::wire::{PanelAction, ResultItem};
+
+    fn run(cmd: &str) -> Action {
+        Action::Run {
+            cmd: cmd.to_string(),
+        }
+    }
 
     fn item(
         title: &str,
         summary: Option<&str>,
-        on_click: Option<&str>,
+        on_click: Option<Action>,
         icon: Option<&str>,
     ) -> ResultItem {
         ResultItem {
             title: title.into(),
             summary: summary.map(str::to_string),
-            on_click: on_click.map(str::to_string),
+            on_click,
             icon: icon.map(str::to_string),
             ephemeral: false,
             actions: Vec::new(),
@@ -1004,7 +935,9 @@ mod tests {
             item(
                 "Firefox",
                 Some("Browser"),
-                Some("launch:firefox.desktop"),
+                Some(Action::Launch {
+                    desktop_id: "firefox.desktop".to_string(),
+                }),
                 Some("/i.svg"),
             ),
         ];
@@ -1021,7 +954,7 @@ mod tests {
             item(
                 "Firefox",
                 Some("Browser"),
-                Some("run:firefox"),
+                Some(run("firefox")),
                 Some("/i.svg"),
             ),
         ];
@@ -1029,14 +962,14 @@ mod tests {
         // a genuinely new payload starts from the top row: what the cursor
         // pointed at has changed
         assert_eq!(state.selected, 0);
-        assert_eq!(state.rows[1].on_click.as_deref(), Some("run:firefox"));
+        assert_eq!(state.rows[1].on_click.as_ref(), Some(&run("firefox")));
     }
 
     #[test]
     fn a_moving_list_keeps_the_hover_on_the_row_under_the_pointer() {
         let mut state = state();
         let items: Vec<ResultItem> = (0..20)
-            .map(|i| item(&format!("row {i}"), None, Some("run:x"), None))
+            .map(|i| item(&format!("row {i}"), None, Some(run("x")), None))
             .collect();
         state.apply_results(items, std::time::Instant::now());
 
@@ -1198,24 +1131,48 @@ mod tests {
     fn a_row_is_only_removed_when_the_core_confirms_the_forget() {
         let mut state = state();
         let items = vec![
-            item("Files", None, Some("launch:files.desktop"), None),
-            item("Firefox", None, Some("launch:firefox.desktop"), None),
+            item(
+                "Files",
+                None,
+                Some(Action::Launch {
+                    desktop_id: "files.desktop".to_string(),
+                }),
+                None,
+            ),
+            item(
+                "Firefox",
+                None,
+                Some(Action::Launch {
+                    desktop_id: "firefox.desktop".to_string(),
+                }),
+                None,
+            ),
         ];
         let now = std::time::Instant::now();
         state.apply_results(items, now);
         state.selected = 1;
         assert_eq!(
-            state.rows[1].on_click.as_deref(),
-            Some("launch:firefox.desktop")
+            state.rows[1].on_click.as_ref(),
+            Some(&Action::Launch {
+                desktop_id: "firefox.desktop".to_string()
+            })
         );
 
         // "nothing was dropped" (a provider that implements no forget): the row
         // stays exactly where it is
-        assert!(!state.remove_row("launch:other.desktop", now));
+        let other = Action::Launch {
+            desktop_id: "other.desktop".to_string(),
+        }
+        .key();
+        assert!(!state.remove_row(&other, now));
         assert_eq!(state.rows.len(), 2);
 
         // a confirmed forget takes that row out and keeps the selection valid
-        assert!(state.remove_row("launch:firefox.desktop", now));
+        let firefox = Action::Launch {
+            desktop_id: "firefox.desktop".to_string(),
+        }
+        .key();
+        assert!(state.remove_row(&firefox, now));
         assert_eq!(state.rows.len(), 1);
         assert_eq!(state.rows[0].title, "Files");
         assert_eq!(state.selected, 0);
@@ -1255,38 +1212,6 @@ mod tests {
     }
 
     #[test]
-    fn every_on_click_scheme_becomes_one_verb() {
-        assert_eq!(
-            launch_command("launch:firefox.desktop"),
-            "launch firefox.desktop"
-        );
-        assert_eq!(launch_command("run:kitty -e vim"), "run kitty -e vim");
-        assert_eq!(
-            launch_command(r#"copy:{"text":"hi"}"#),
-            r#"copy {"text":"hi"}"#
-        );
-        assert_eq!(
-            launch_command("action:org.x:new-window"),
-            "action org.x:new-window"
-        );
-        assert_eq!(
-            launch_command("terminal:file:///tmp/a%20b"),
-            "terminal file:///tmp/a%20b"
-        );
-        assert_eq!(
-            launch_command("https://example.com"),
-            "open https://example.com"
-        );
-        assert_eq!(
-            launch_command("file:///tmp/a%20b"),
-            "open file:///tmp/a%20b"
-        );
-        assert_eq!(launch_command("mailto:a@b"), "open mailto:a@b");
-        // no scheme at all is a shell command
-        assert_eq!(launch_command("vim"), "run vim");
-    }
-
-    #[test]
     fn nothing_is_launched_without_a_target() {
         let mut state = state();
         let items = vec![item("Files", None, None, None)];
@@ -1297,7 +1222,14 @@ mod tests {
     #[test]
     fn an_ephemeral_row_is_forwarded_when_selected() {
         let mut state = state();
-        let mut row = item("repo", None, Some("open:https://x"), None);
+        let mut row = item(
+            "repo",
+            None,
+            Some(Action::Open {
+                uri: "https://x".to_string(),
+            }),
+            None,
+        );
         row.ephemeral = true;
         state.apply_results(vec![row], std::time::Instant::now());
         assert!(state.selected_row().unwrap().ephemeral);
@@ -1308,7 +1240,9 @@ mod tests {
             .iter()
             .map(|title| ActionItem {
                 title: title.to_string(),
-                on_click: format!("run:{title}"),
+                action: PanelAction::Execute {
+                    command: run(title),
+                },
                 icon: None,
             })
             .collect();
@@ -1321,15 +1255,32 @@ mod tests {
         let now = std::time::Instant::now();
         state.apply_results(
             vec![
-                item("Files", None, Some("file:///tmp"), None),
-                item("Firefox", None, Some("launch:firefox.desktop"), None),
+                item(
+                    "Files",
+                    None,
+                    Some(Action::Open {
+                        uri: "file:///tmp".to_string(),
+                    }),
+                    None,
+                ),
+                item(
+                    "Firefox",
+                    None,
+                    Some(Action::Launch {
+                        desktop_id: "firefox.desktop".to_string(),
+                    }),
+                    None,
+                ),
             ],
             now,
         );
         state.selected = 1;
         state.rows[1].actions = vec![ActionItem {
             title: "Pin to top".to_string(),
-            on_click: "pin:{\"scope\":\"\",\"item\":{}}".to_string(),
+            action: PanelAction::Pin {
+                scope: String::new(),
+                item: Box::new(item("Firefox", None, None, None)),
+            },
             icon: None,
         }];
 
@@ -1347,12 +1298,23 @@ mod tests {
     #[test]
     fn a_pinned_row_keeps_its_badge_and_offers_unpin() {
         let mut state = state();
-        let mut row = item("YouTube", None, Some("https://youtube.com/"), None);
+        let mut row = item(
+            "YouTube",
+            None,
+            Some(Action::Open {
+                uri: "https://youtube.com/".to_string(),
+            }),
+            None,
+        );
         row.badge = Some("/usr/share/icons/Papirus/24x24/actions/pin.svg".to_string());
         row.actions = vec![ActionItem {
             title: "Unpin".to_string(),
-            on_click: r#"unpin:{"scope":"b youtube","on_click":"https://youtube.com/"}"#
-                .to_string(),
+            action: PanelAction::Unpin {
+                scope: "b youtube".to_string(),
+                on_click: Action::Open {
+                    uri: "https://youtube.com/".to_string(),
+                },
+            },
             icon: None,
         }];
         state.apply_results(vec![row], std::time::Instant::now());
@@ -1366,7 +1328,14 @@ mod tests {
     fn a_row_without_actions_has_no_panel() {
         let mut state = state();
         state.apply_results(
-            vec![item("Files", None, Some("file:///tmp"), None)],
+            vec![item(
+                "Files",
+                None,
+                Some(Action::Open {
+                    uri: "file:///tmp".to_string(),
+                }),
+                None,
+            )],
             std::time::Instant::now(),
         );
         assert!(!state.open_actions());
@@ -1379,14 +1348,14 @@ mod tests {
         let now = std::time::Instant::now();
         state.apply_results(
             vec![with_actions(
-                item("a", None, Some("run:a"), None),
+                item("a", None, Some(run("a")), None),
                 &["Pin to top"],
             )],
             now,
         );
         assert!(state.open_actions());
 
-        state.apply_results(vec![item("b", None, Some("run:b"), None)], now);
+        state.apply_results(vec![item("b", None, Some(run("b")), None)], now);
         assert!(state.menu.is_none(), "a new list invalidates the panel");
     }
 
@@ -1396,7 +1365,10 @@ mod tests {
         let now = std::time::Instant::now();
         let actions: Vec<&str> = (0..10).map(|_| "act").collect();
         state.apply_results(
-            vec![with_actions(item("a", None, Some("run:a"), None), &actions)],
+            vec![with_actions(
+                item("a", None, Some(run("a")), None),
+                &actions,
+            )],
             now,
         );
         assert!(state.open_actions());
@@ -1412,48 +1384,5 @@ mod tests {
 
         state.menu_page_up();
         assert_eq!(state.menu.as_ref().unwrap().selected, 5 - max);
-    }
-
-    #[test]
-    fn parse_action_decodes_each_panel_command() {
-        let pin =
-            parse_action(r#"pin:{"scope":"b firefox","item":{"title":"x","on_click":"run:x"}}"#)
-                .unwrap();
-        match pin {
-            ActionCommand::Pin { scope, item } => {
-                assert_eq!(scope, "b firefox");
-                assert_eq!(item["title"], "x");
-            }
-            other => panic!("expected pin, got {other:?}"),
-        }
-
-        assert_eq!(
-            parse_action(r#"unpin:{"scope":"","on_click":"run:x"}"#),
-            Some(ActionCommand::Unpin {
-                scope: String::new(),
-                on_click: "run:x".to_string(),
-            })
-        );
-        assert_eq!(
-            parse_action("forget:launch:firefox.desktop"),
-            Some(ActionCommand::Forget {
-                on_click: "launch:firefox.desktop".to_string(),
-            })
-        );
-        assert_eq!(
-            parse_action("reveal:file:///tmp/a%20b"),
-            Some(ActionCommand::Reveal {
-                uri: "file:///tmp/a%20b".to_string(),
-            })
-        );
-        // a plain scheme is an ordinary launch command
-        assert_eq!(
-            parse_action("action:org.x:new-window"),
-            Some(ActionCommand::Run {
-                target: "action:org.x:new-window".to_string(),
-            })
-        );
-        // a malformed pin is ignored, never run as a command
-        assert_eq!(parse_action("pin:not json"), None);
     }
 }

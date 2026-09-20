@@ -1,17 +1,15 @@
-use serde_json::json;
-
 use super::registry::{REGISTRY, ensure_loaded};
 use crate::system::icon::find_icon_path;
-use crate::wire::ResultItem;
+use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
 
 /// Drop a row across the registry. `true` when an external host owned and dropped
 /// it, so `forget` answers truthfully instead of claiming a deletion.
-pub async fn forget_row(on_click: &str) -> bool {
+pub async fn forget_row(command: &Action) -> bool {
     ensure_loaded().await;
     let reg = REGISTRY.read().await;
     let mut owned = false;
     for entry in reg.iter() {
-        owned |= entry.plugin.forget(on_click).await.unwrap_or(false);
+        owned |= entry.plugin.forget(command).await.unwrap_or(false);
     }
     owned
 }
@@ -41,19 +39,19 @@ pub async fn decorate(items: Vec<ResultItem>, scope: &str, history: bool) -> Vec
 }
 
 /// Pins lead the results, deduplicated, so each appears once at the top. Returns
-/// the merged list and the pinned `on_click` keys the action labels use.
+/// the merged list and the pinned commands the action labels use.
 fn merge_pins(
     mut pins: Vec<ResultItem>,
     mut results: Vec<ResultItem>,
-) -> (Vec<ResultItem>, Vec<String>) {
-    let pinned: Vec<String> = pins
+) -> (Vec<ResultItem>, Vec<Action>) {
+    let pinned: Vec<Action> = pins
         .iter()
         .filter_map(|item| item.on_click.clone())
         .collect();
     results.retain(|item| {
         !item
             .on_click
-            .as_deref()
+            .as_ref()
             .is_some_and(|on_click| pinned.iter().any(|pin| pin == on_click))
     });
     pins.append(&mut results);
@@ -62,7 +60,7 @@ fn merge_pins(
 
 /// The first plugin that recognises the row and declares actions for it, from
 /// its provider or the host's inline `actions`.
-async fn plugin_actions(item: &ResultItem) -> Vec<crate::wire::ActionItem> {
+async fn plugin_actions(item: &ResultItem) -> Vec<ActionItem> {
     let reg = REGISTRY.read().await;
     for entry in reg.iter() {
         let actions = entry.plugin.actions(item);
@@ -78,9 +76,9 @@ async fn plugin_actions(item: &ResultItem) -> Vec<crate::wire::ActionItem> {
 fn attach_actions(
     item: &mut ResultItem,
     scope: &str,
-    pinned: &[String],
+    pinned: &[Action],
     history: bool,
-    mut plugin_actions: Vec<crate::wire::ActionItem>,
+    mut plugin_actions: Vec<ActionItem>,
 ) {
     let Some(on_click) = item.on_click.clone() else {
         return;
@@ -90,29 +88,35 @@ fn attach_actions(
         item.badge = find_icon_path("pin");
     }
 
-    let mut actions: Vec<crate::wire::ActionItem> = Vec::new();
+    let mut actions: Vec<ActionItem> = Vec::new();
     if is_pinned {
-        let payload = json!({ "scope": scope, "on_click": on_click });
-        actions.push(crate::wire::ActionItem {
+        actions.push(ActionItem {
             title: "Unpin".to_string(),
-            on_click: format!("unpin:{payload}"),
+            action: PanelAction::Unpin {
+                scope: scope.to_string(),
+                on_click: on_click.clone(),
+            },
             icon: Some("window-unpin".to_string()),
         });
     } else if !item.ephemeral {
         // Snapshot the row before the launcher actions are appended, so the pin
         // never embeds the action that stores it. A host's own actions stay.
-        let payload = json!({ "scope": scope, "item": item });
-        actions.push(crate::wire::ActionItem {
+        actions.push(ActionItem {
             title: "Pin to top".to_string(),
-            on_click: format!("pin:{payload}"),
+            action: PanelAction::Pin {
+                scope: scope.to_string(),
+                item: Box::new(item.clone()),
+            },
             icon: Some("pin".to_string()),
         });
     }
 
     if history && crate::system::usage::is_recordable(item.ephemeral, Some(&on_click)) {
-        actions.push(crate::wire::ActionItem {
+        actions.push(ActionItem {
             title: "Remove from history".to_string(),
-            on_click: format!("forget:{on_click}"),
+            action: PanelAction::Forget {
+                on_click: on_click.clone(),
+            },
             icon: Some("edit-delete".to_string()),
         });
     }
@@ -137,7 +141,6 @@ fn attach_actions(
 mod tests {
     use super::*;
     use crate::plugin::item;
-    use crate::wire::ActionItem;
 
     #[test]
     fn a_pin_is_scoped_to_the_exact_query_not_its_keyword() {
@@ -151,21 +154,32 @@ mod tests {
         assert_eq!(pin_scope("  ?  "), None);
     }
 
+    fn run(cmd: &str) -> Action {
+        Action::Run {
+            cmd: cmd.to_string(),
+        }
+    }
+
     #[test]
     fn pinned_rows_lead_and_their_duplicate_is_dropped() {
-        let pins = vec![item("Pinned", "run:pinned")];
-        let results = vec![item("Other", "run:other"), item("Pinned", "run:pinned")];
+        let pins = vec![item("Pinned", run("pinned"))];
+        let results = vec![item("Other", run("other")), item("Pinned", run("pinned"))];
 
         let (merged, pinned) = merge_pins(pins, results);
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].title, "Pinned");
         assert_eq!(merged[1].title, "Other");
-        assert_eq!(pinned, ["run:pinned"]);
+        assert_eq!(pinned, [run("pinned")]);
     }
 
     #[test]
     fn launcher_actions_lead_the_row_and_carry_its_scope() {
-        let mut row = item("Firefox", "launch:firefox.desktop");
+        let mut row = item(
+            "Firefox",
+            Action::Launch {
+                desktop_id: "firefox.desktop".to_string(),
+            },
+        );
         attach_actions(&mut row, "b", &[], false, Vec::new());
 
         let titles: Vec<&str> = row
@@ -174,23 +188,39 @@ mod tests {
             .map(|action| action.title.as_str())
             .collect();
         assert_eq!(titles, ["Pin to top"]);
-        assert!(row.actions[0].on_click.starts_with("pin:"));
-        assert!(row.actions[0].on_click.contains(r#""scope":"b""#));
+        match &row.actions[0].action {
+            PanelAction::Pin { scope, item } => {
+                assert_eq!(scope, "b");
+                assert_eq!(item.title, "Firefox");
+            }
+            other => panic!("expected a pin, got {other:?}"),
+        }
         assert!(row.badge.is_none(), "an unpinned row carries no badge");
     }
 
     #[test]
     fn a_pinned_row_offers_unpin_before_its_type_actions() {
-        let mut row = item("a.txt", "file:///tmp/a.txt");
+        let mut row = item(
+            "a.txt",
+            Action::Open {
+                uri: "file:///tmp/a.txt".to_string(),
+            },
+        );
         let reveal = ActionItem {
             title: "Reveal in file manager".to_string(),
-            on_click: "reveal:file:///tmp/a.txt".to_string(),
+            action: PanelAction::Execute {
+                command: Action::Reveal {
+                    uri: "file:///tmp/a.txt".to_string(),
+                },
+            },
             icon: None,
         };
         attach_actions(
             &mut row,
             "",
-            &["file:///tmp/a.txt".to_string()],
+            &[Action::Open {
+                uri: "file:///tmp/a.txt".to_string(),
+            }],
             true,
             vec![reveal],
         );
@@ -209,19 +239,28 @@ mod tests {
 
     #[test]
     fn the_pin_snapshot_keeps_host_actions_but_not_launcher_ones() {
-        let mut row = item("Firefox", "launch:firefox.desktop");
+        let mut row = item(
+            "Firefox",
+            Action::Launch {
+                desktop_id: "firefox.desktop".to_string(),
+            },
+        );
         row.actions = vec![ActionItem {
             title: "Host".to_string(),
-            on_click: "run:host".to_string(),
+            action: PanelAction::Execute {
+                command: run("host"),
+            },
             icon: None,
         }];
         attach_actions(&mut row, "b", &[], false, Vec::new());
 
         // The snapshot is the host's row, not the decorated one: the pin action
         // must not embed itself, and the host action must survive the round trip.
-        let payload = row.actions[0].on_click.clone();
-        assert!(payload.contains(r#""title":"Host""#));
-        assert!(!payload.contains("Pin to top"));
+        let PanelAction::Pin { item, .. } = &row.actions[0].action else {
+            panic!("expected a pin");
+        };
+        assert_eq!(item.actions.len(), 1);
+        assert_eq!(item.actions[0].title, "Host");
     }
 
     #[test]
@@ -230,35 +269,50 @@ mod tests {
             row.actions.iter().map(|a| a.title.as_str()).collect()
         }
 
-        let mut history = item("Firefox", "launch:firefox.desktop");
+        let mut history = item(
+            "Firefox",
+            Action::Launch {
+                desktop_id: "firefox.desktop".to_string(),
+            },
+        );
         attach_actions(&mut history, "", &[], true, Vec::new());
         assert_eq!(titles(&history), ["Pin to top", "Remove from history"]);
 
         // a fresh search result is not sourced from the history view
-        let mut search = item("Firefox", "launch:firefox.desktop");
+        let mut search = item(
+            "Firefox",
+            Action::Launch {
+                desktop_id: "firefox.desktop".to_string(),
+            },
+        );
         attach_actions(&mut search, "fire", &[], false, Vec::new());
         assert_eq!(titles(&search), ["Pin to top"]);
 
         // an ephemeral row is neither a durable pin target nor recorded
-        let mut one_shot = item("window", "run:wctl activate 1");
+        let mut one_shot = item("window", run("wctl activate 1"));
         one_shot.ephemeral = true;
         attach_actions(&mut one_shot, "", &[], true, Vec::new());
         assert!(titles(&one_shot).is_empty());
 
         // an existing pin must stay removable even on an ephemeral row
-        let mut pinned = item("clip", "run:cliphist decode 1");
+        let mut pinned = item("clip", run("cliphist decode 1"));
         pinned.ephemeral = true;
         attach_actions(
             &mut pinned,
             "",
-            &["run:cliphist decode 1".to_string()],
+            &[run("cliphist decode 1")],
             true,
             Vec::new(),
         );
         assert_eq!(titles(&pinned), ["Unpin"]);
 
-        // a copy: row is not recorded, but it is a stable pin target
-        let mut copy = item("translated", r#"copy:{"text":"hi"}"#);
+        // a copy row is not recorded, but it is a stable pin target
+        let mut copy = item(
+            "translated",
+            Action::Copy {
+                text: "hi".to_string(),
+            },
+        );
         attach_actions(&mut copy, "", &[], true, Vec::new());
         assert_eq!(titles(&copy), ["Pin to top"]);
     }

@@ -3,7 +3,7 @@ use std::pin::Pin;
 
 use crate::plugin::{Meta, Plugin};
 use crate::system::icon::resolve;
-use crate::wire::ResultItem;
+use crate::wire::{Action, ResultItem};
 use anyhow::Result;
 
 pub struct SystemCommands;
@@ -66,7 +66,9 @@ fn do_search(input: &str) -> Vec<ResultItem> {
         .map(|(name, _, icon, cmd)| ResultItem {
             title: name.to_string(),
             summary: Some(cmd.to_string()),
-            on_click: Some(format!("run:{cmd}")),
+            on_click: Some(Action::Run {
+                cmd: (*cmd).to_string(),
+            }),
             icon: resolve(icon),
             ephemeral: true,
             actions: Vec::new(),

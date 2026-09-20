@@ -221,13 +221,28 @@ fn terminal_dir_arg(argv: &[String], dir: &Path) -> Option<Vec<String>> {
     }
 }
 
-/// Write text to the Wayland clipboard via `wl-copy`, no shell. The `copy:`
-/// scheme carries JSON, so a parse failure or missing `wl-copy` is a no-op.
-pub fn copy_json(payload: &str) {
-    let Ok(req) = serde_json::from_str::<CopyRequest>(payload) else {
-        return;
-    };
+/// Run one row or panel command; the single dispatch behind the `command` RPC.
+pub fn execute(command: &crate::wire::Action) {
+    use crate::wire::Action;
+    match command {
+        Action::Run { cmd } => execute_command(cmd),
+        Action::Launch { desktop_id } => launch_app(desktop_id),
+        Action::Copy { text } => copy_text(text),
+        Action::DesktopAction {
+            desktop_id,
+            action_id,
+        } => {
+            crate::system::desktop_action::launch(desktop_id, action_id);
+        }
+        Action::Reveal { uri } => reveal(uri),
+        Action::Terminal { uri } => open_terminal(uri),
+        Action::Open { uri } => open_uri(uri),
+    }
+}
 
+/// Write text to the Wayland clipboard via `wl-copy`, no shell. A missing
+/// `wl-copy` is a no-op.
+pub fn copy_text(text: &str) {
     let Some(mut child) = process::Command::new("wl-copy")
         .stdin(process::Stdio::piped())
         .stdout(process::Stdio::null())
@@ -239,15 +254,10 @@ pub fn copy_json(payload: &str) {
     };
     if let Some(stdin) = child.stdin.as_mut() {
         use std::io::Write;
-        let _ = stdin.write_all(req.text.as_bytes());
+        let _ = stdin.write_all(text.as_bytes());
     }
     drop(child.stdin.take());
     let _ = child.wait();
-}
-
-#[derive(serde::Deserialize)]
-struct CopyRequest {
-    text: String,
 }
 
 #[cfg(test)]

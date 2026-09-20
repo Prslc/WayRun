@@ -117,10 +117,17 @@ fn identity_card(meta: &Meta, summary: String) -> ResultItem {
 mod tests {
     use super::*;
     use crate::plugin::item;
+    use crate::wire::Action;
+
+    fn run(cmd: &str) -> Action {
+        Action::Run {
+            cmd: cmd.to_string(),
+        }
+    }
 
     #[test]
     fn rows_without_an_icon_take_the_plugin_identity_icon() {
-        let mut items = vec![item("blank", "run:blank"), item("kept", "run:kept")];
+        let mut items = vec![item("blank", run("blank")), item("kept", run("kept"))];
         items[0].icon = Some(String::new());
         items[1].icon = Some("/tmp/kept.svg".into());
 

@@ -12,7 +12,7 @@ pub mod window;
 use std::collections::HashMap;
 
 use crate::plugin::Plugin;
-use crate::wire::{ActionItem, ResultItem};
+use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
 
 /// The common tail every scored provider shares: strongest score first,
 /// optionally one row per title, capped at `max` results.
@@ -32,16 +32,17 @@ pub fn rank_results<T: Ord>(
 /// A URL row's extra command: copy the link instead of opening it. Every
 /// provider whose rows are URLs shares this one action.
 pub fn copy_url_action(item: &ResultItem) -> Vec<ActionItem> {
-    let Some(url) = item
-        .on_click
-        .as_deref()
-        .filter(|on_click| on_click.starts_with("http"))
-    else {
+    let Some(Action::Open { uri }) = item.on_click.as_ref() else {
         return Vec::new();
     };
+    if !uri.starts_with("http") {
+        return Vec::new();
+    }
     vec![ActionItem {
         title: "Copy URL".to_string(),
-        on_click: format!("copy:{}", serde_json::json!({ "text": url })),
+        action: PanelAction::Execute {
+            command: Action::Copy { text: uri.clone() },
+        },
         icon: Some("edit-copy".to_string()),
     }]
 }
@@ -65,11 +66,11 @@ pub fn plugin_map() -> HashMap<&'static str, Box<dyn Plugin>> {
 mod tests {
     use super::*;
 
-    fn row(on_click: Option<&str>) -> ResultItem {
+    fn row(on_click: Option<Action>) -> ResultItem {
         ResultItem {
             title: "x".to_string(),
             summary: None,
-            on_click: on_click.map(str::to_string),
+            on_click,
             icon: None,
             ephemeral: false,
             actions: Vec::new(),
@@ -79,15 +80,26 @@ mod tests {
 
     #[test]
     fn only_a_url_row_offers_a_copy_link() {
-        let actions = copy_url_action(&row(Some("https://example.com")));
+        let actions = copy_url_action(&row(Some(Action::Open {
+            uri: "https://example.com".to_string(),
+        })));
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].title, "Copy URL");
         assert_eq!(
-            actions[0].on_click,
-            r#"copy:{"text":"https://example.com"}"#
+            actions[0].action,
+            PanelAction::Execute {
+                command: Action::Copy {
+                    text: "https://example.com".to_string()
+                }
+            }
         );
 
-        assert!(copy_url_action(&row(Some("run:ls"))).is_empty());
+        assert!(
+            copy_url_action(&row(Some(Action::Run {
+                cmd: "ls".to_string()
+            })))
+            .is_empty()
+        );
         assert!(copy_url_action(&row(None)).is_empty());
     }
 }

@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use crate::plugin::{Meta, Plugin};
 use crate::system::icon::resolve;
-use crate::wire::ResultItem;
+use crate::wire::{Action, ResultItem};
 
 pub struct Runner;
 
@@ -16,7 +16,7 @@ impl Plugin for Runner {
     fn meta(&self) -> &Meta {
         &Meta {
             id: "runner",
-            name: "Run Command",
+            name: "Run Action",
             icon: "utilities-terminal",
             ready: "Run an executable on PATH",
         }
@@ -125,7 +125,7 @@ fn do_search(input: &str) -> Vec<ResultItem> {
                 ResultItem {
                     title: name.clone(),
                     summary: Some(run_cmd.clone()),
-                    on_click: Some(format!("run:{run_cmd}")),
+                    on_click: Some(Action::Run { cmd: run_cmd }),
                     icon: resolve(name),
                     ephemeral: false,
                     actions: Vec::new(),

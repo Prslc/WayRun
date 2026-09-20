@@ -8,7 +8,7 @@ use gio::prelude::{AppInfoExt, IconExt};
 
 use crate::plugin::{Meta, Plugin};
 use crate::system::icon::resolve;
-use crate::wire::{ActionItem, ResultItem};
+use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
 
 // Tiered weights: a strong textual tier wins outright and fuzzy matching is a
 // last resort for 3+ char queries, so a short query hits a strong tier or misses.
@@ -117,16 +117,12 @@ impl Plugin for AppSearch {
     }
 
     /// An application row's declared `[Desktop Action …]` groups, read from the
-    /// same file the row's `launch:` uses.
+    /// same file the row's `launch` command uses.
     fn actions(&self, item: &ResultItem) -> Vec<ActionItem> {
-        let Some(id) = item
-            .on_click
-            .as_deref()
-            .and_then(|on_click| on_click.strip_prefix("launch:"))
-        else {
+        let Some(Action::Launch { desktop_id }) = item.on_click.as_ref() else {
             return Vec::new();
         };
-        let Some(app) = APPS.iter().find(|app| app.id == id) else {
+        let Some(app) = APPS.iter().find(|app| app.id == *desktop_id) else {
             return Vec::new();
         };
         let Some(meta) = app.meta.as_ref() else {
@@ -137,7 +133,12 @@ impl Plugin for AppSearch {
             .iter()
             .map(|action| ActionItem {
                 title: action.name.clone(),
-                on_click: format!("action:{}:{}", id, action.id),
+                action: PanelAction::Execute {
+                    command: Action::DesktopAction {
+                        desktop_id: desktop_id.clone(),
+                        action_id: action.id.clone(),
+                    },
+                },
                 icon: app.icon_path(),
             })
             .collect()
@@ -169,7 +170,9 @@ fn do_search(query: &str) -> Vec<ResultItem> {
                 ResultItem {
                     title: app.title.clone(),
                     summary: app.comment.clone(),
-                    on_click: Some(format!("launch:{}", app.id)),
+                    on_click: Some(Action::Launch {
+                        desktop_id: app.id.clone(),
+                    }),
                     icon: app.icon_path(),
                     ephemeral: false,
                     actions: Vec::new(),
@@ -187,7 +190,10 @@ fn do_search(query: &str) -> Vec<ResultItem> {
                     ResultItem {
                         title: action.name.clone(),
                         summary: Some(app.title.clone()),
-                        on_click: Some(format!("action:{}:{}", app.id, action.id)),
+                        on_click: Some(Action::DesktopAction {
+                            desktop_id: app.id.clone(),
+                            action_id: action.id.clone(),
+                        }),
                         icon: app.icon_path(),
                         ephemeral: false,
                         actions: Vec::new(),

@@ -1,10 +1,10 @@
 # JSON-RPC 2.0
 
-The core (`wayrun --core`, or a `wayrun-core` symlink) also speaks
-[JSON-RPC 2.0](https://www.jsonrpc.org/specification) over the same stdin/stdout.
-Lines that parse to an object with `"jsonrpc":"2.0"` and a `method` are handled
-as RPC requests and can be mixed with the launcher's text protocol. Responses
-are newline-delimited JSON on stdout.
+The core (`wayrun --core`, or a `wayrun-core` symlink) speaks
+[JSON-RPC 2.0](https://www.jsonrpc.org/specification) over stdin/stdout, and
+nothing else: every line must be one JSON-RPC message. A line that is not valid
+JSON is answered with the standard `-32700` parse error. Responses and
+notifications are newline-delimited JSON on stdout.
 
 ```sh
 printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"id":1}' | wayrun --core
@@ -13,31 +13,62 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 
 | Method | Params | Result |
 |--------|--------|--------|
-| `search` | `{"text"}` | array of result items |
-| `top` | — | most-used items |
-| `select` | item object | `null` (records usage; `ephemeral` and `copy:` rows are not) |
-| `forget` | `{"on_click"}` | `{"forgotten": bool}` |
-| `run` | `{"cmd"}` | `null` |
-| `action` | `{"desktop_id","action_id"}` | `null` (runs one `[Desktop Action …]` group of a desktop file) |
-| `launch` | `{"desktop_id"}` | `null` (launches through GLib's `GAppInfo`) |
-| `open` | `{"uri"}` | `null` (opens with the default handler) |
-| `reveal` | `{"uri"}` | `null` (shows a file in the file manager) |
-| `terminal` | `{"uri"}` | `null` (opens a terminal in the URI's directory) |
+| `search` | `{"text"}` | array of result items; sent as a notification, streams a `results` notification |
+| `top` | — | most-used items; sent as a notification, streams a `results` notification |
+| `select` | item object | `null` (records usage; `ephemeral` and `copy` rows are not) |
+| `command` | a [`Command`](#commands) object | `null` (runs one row or panel command) |
 | `pin` | `{"scope","item"}` | `{"pinned": bool}` (pins an item to an exact query) |
-| `unpin` | `{"scope","on_click"}` | `{"unpinned": bool}` |
-| `copy` | `{"text"}` | `null` (writes the Wayland clipboard) |
+| `unpin` | `{"scope","on_click": Command}` | `{"unpinned": bool}` |
+| `forget` | `{"on_click": Command}` | `{"forgotten": bool}` |
 | `resolve_icon` | `{"name"}` | absolute path for an icon spec |
 | `list_plugins` | — | plugin metadata; see [schema](#plugin-metadata-list_plugins) |
 | `theme` | — | theme colors |
 | `ping` | — | `"pong"` |
+
+A request without an `id` is a notification (side effect only, no response).
+Unknown methods return `-32601`; malformed requests `-32600`; bad params
+`-32602`; a non-JSON line `-32700`.
+
+## Notifications
+
+The core also pushes JSON-RPC notifications (no `id`):
+
+| Method | Params | Meaning |
+|--------|--------|---------|
+| `theme` | theme colors | the resolved theme, on connect and on every palette change |
+| `results` | array of result items | a search payload |
+
+`search` and `top` sent **without** an `id` are streaming: the core aborts any
+pending search, then answers with a `results` notification. Sent **with** an
+`id` they answer synchronously with the array, for one-shot clients.
+
+## Commands
+
+A `Command` is an internally tagged object (`{"type": …}`) describing what a row
+runs. It is the params of the `command` method and the type of a result's
+`on_click` and of a panel `execute` action:
+
+| `type` | Fields | Effect |
+|--------|--------|--------|
+| `run` | `cmd` | execute a shell command (one shell line) |
+| `launch` | `desktop_id` | launch an app by desktop id through GLib's `GAppInfo` |
+| `copy` | `text` | write the text to the Wayland clipboard |
+| `desktop_action` | `desktop_id`, `action_id` | run one `[Desktop Action …]` group |
+| `open` | `uri` | open a URI with the default handler (a URL, `file:` or `mailto:`) |
+| `reveal` | `uri` | show a file in the file manager (panel-only) |
+| `terminal` | `uri` | open a terminal in the URI's directory, its parent for a file (panel-only) |
+
+`run`'s `cmd` is a whole shell line; `launch` and `desktop_action` carry an
+unquoted id. File URIs are percent-encoded, so paths with spaces or non-ASCII
+characters survive; a `Terminal=true` handler is started inside a terminal.
 
 `search` takes an object with a `text` key (a non-empty string). An absent
 `params`, an empty `text`, a bare string, `{"query": …}`, or a non-string `text`
 returns `-32602`. Use `top` for the most-used items — `search` does not serve a
 default view.
 
-`forget` drops a row from usage history. When the `on_click` is a `run:` shell
-command whose first token is a registered external host's `command` (absolute
+`forget` drops a row from usage history. When the `on_click` is a `run` command
+whose first token is a registered external host's `command` (absolute
 path, or PATH-resolved when the config uses a bare name), the core also relays
 a `forget` request to that host so it can delete its own data — e.g. the todo
 plugin removes the todo. The answer says whether anything was really dropped:
@@ -49,15 +80,11 @@ nobody made. The host walk runs in a task of its own, so a slow or wedged host
 cannot hold the stdin loop; its reply simply lands later, carrying its `id`.
 
 `pin` stores an item under an exact query string (`scope` is the whole trimmed
-input; `""` is the empty-query history), keyed by its `on_click`; `unpin` removes
+input; `""` is the empty-query history), keyed by its command; `unpin` removes
 it. A later `search` whose `text` trims to that same string prepends the pins,
 most recently pinned first, deduplicated against the fresh results, and decorates
 them with their `actions`; a bare keyword does not match. The item JSON is
 stored whole, because a pinned row is re-emitted before its plugin runs.
-
-A request without an `id` is a notification (side effect only, no response).
-Unknown methods return `-32601`; malformed requests `-32600`; bad params
-`-32602`.
 
 `resolve_icon` resolves any icon spec — an absolute path, a theme icon name, or
 the `papirus:` scheme below — to the absolute path the shell renders. It
@@ -99,9 +126,9 @@ response `result` is an array of objects:
 ## Default views for keyword plugins
 
 A `plugins.toml` entry with a non-empty `keyword` is opened by a query that is
-just the keyword followed by a space (e.g. `todo `) — through the text protocol
-and the `search` RPC alike. Opening asks the external host for its **default
-view**:
+just the keyword followed by a space (e.g. `todo `) — through the `search`
+method and the streaming notification alike. Opening asks the external host for
+its **default view**:
 
 ```sh
 printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1}' | /path/to/todo/main.py
@@ -132,46 +159,35 @@ and `actions`/`badge` only when set:
 |-----|------|---------|
 | `title` | string | primary label (app name, command, file name, …) |
 | `summary` | string \| null | secondary line (command, path, description, …) |
-| `on_click` | string \| null | action bound to Enter; see the schemes below |
+| `on_click` | [`Command`](#commands) \| null | action bound to Enter |
 | `icon` | string \| null | absolute path to an icon image; see [Icon specs](#icon-specs) |
 | `ephemeral` | bool | when true, selecting this row is not recorded in usage history |
 | `actions` | array | optional secondary commands for the shell's `Shift+Enter` panel |
 | `badge` | string \| null | optional status glyph at the row's right edge (a pin for a pinned row) |
 
-An `actions` entry is `{"title": string, "on_click": string, "icon"?: string}`,
-with the same icon-spec resolution as a row's `icon`. The core attaches the
-launcher-level pin/unpin to every actionable row, and history removal to a row
-it sourced from the empty-query history that could have been recorded (not
-`ephemeral`, not `copy:`); the owning built-in
-provider adds its type-specific ones (a file reveal, copy path or open in
-terminal, a `[Desktop Action …]`
-group, a copy-link), and a host's own entries are kept after them. External hosts
-may emit `actions` directly on a result; the shell renders them without knowing the
-scheme. The panel-only schemes are `pin:{"scope","item"}`,
-`unpin:{"scope","on_click"}`, `forget:<on_click>`, `reveal:<uri>` and
-`terminal:<uri>`; every row
-scheme (`run:`, `launch:`, `copy:`, `action:`, a URL) also works.
+An `actions` entry is `{"title": string, "action": PanelAction, "icon"?: string}`,
+with the same icon-spec resolution as a row's `icon`. A `PanelAction` is one of:
 
-`on_click` schemes:
+| `type` | Fields | Meaning |
+|--------|--------|---------|
+| `execute` | `command` | run that [`Command`](#commands) |
+| `pin` | `scope`, `item` | pin the item to an exact query |
+| `unpin` | `scope`, `on_click` | unpin the command from an exact query |
+| `forget` | `on_click` | drop the command from usage history |
 
-| Scheme | Effect |
-|--------|--------|
-| `run:<shell cmd>` | execute a shell command (system commands, clipboard) |
-| `launch:<desktop-id>` | launch an app by desktop id (app-search) |
-| `copy:{"text":"…"}` | write the text to the Wayland clipboard (translate copy) |
-| `action:<desktop-id>:<action-id>` | run a desktop action; the shell forwards it as the `action` command (app-search emits one row per action, DMS-style) |
-| `terminal:<uri>` | open a terminal in the URI's directory (its parent for a file), panel-only |
-| bare URL / `file:` / `mailto:` URI | opened by the core with GLib `g_app_info_launch_default_for_uri` |
-
-File URIs are percent-encoded, so paths with spaces or non-ASCII characters
-survive; a `Terminal=true` handler is started inside a terminal.
+The core attaches the launcher-level pin/unpin to every actionable row, and
+history removal to a row it sourced from the empty-query history that could have
+been recorded (not `ephemeral`, not `copy`); the owning built-in provider adds
+its type-specific ones (a file reveal, copy path or open in terminal, a
+`[Desktop Action …]` group, a copy-link), and a host's own entries are kept
+after them. External hosts may emit `actions` directly on a result.
 
 An item without `on_click` is non-interactive (display only).
 
 Selecting an item records it in usage history — the list behind an empty query
 (`top`). Two kinds of row are exempt: one the host marked `ephemeral: true` (a
-one-shot search hit, say), and one whose `on_click` is a `copy:` write (its
-value is the copied text, not a target to re-open). The field or scheme
+one-shot search hit, say), and one whose `on_click` is a `copy` command (its
+value is the copied text, not a target to re-open). The field or command type
 declares the semantics, so the rule holds for every source — built-in provider
 and external host alike.
 

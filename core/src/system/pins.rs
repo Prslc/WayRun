@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use rusqlite::Connection;
 
 use crate::system::db::with_db;
+use crate::wire::Action;
 
 /// Pin one row to the top of one exact query (`""` is the empty-query history).
 /// The whole item is stored, re-emitted before its plugin runs.
@@ -9,9 +10,9 @@ pub fn pin(scope: &str, item_json: &str) -> Result<()> {
     with_db(|conn| pin_with(conn, scope, item_json))
 }
 
-/// Drop one pin, reporting whether one was really there.
-pub fn unpin(scope: &str, on_click: &str) -> Result<bool> {
-    with_db(|conn| unpin_with(conn, scope, on_click))
+/// Drop one pin by its command key, reporting whether one was really there.
+pub fn unpin(scope: &str, key: &str) -> Result<bool> {
+    with_db(|conn| unpin_with(conn, scope, key))
 }
 
 /// Every pin of one scope, most recently pinned first.
@@ -21,25 +22,27 @@ pub fn get_pins(scope: &str) -> Result<Vec<serde_json::Value>> {
 
 fn pin_with(conn: &Connection, scope: &str, item_json: &str) -> Result<()> {
     let item: serde_json::Value = serde_json::from_str(item_json)?;
-    let on_click = item["on_click"].as_str().context("item missing on_click")?;
+    let command: Action =
+        serde_json::from_value(item["on_click"].clone()).context("item missing on_click")?;
+    let key = command.key();
     // Delete-and-insert, not an upsert: a re-pin must get a fresh `id` so it
     // rises to the top of `id`-descending order.
     conn.execute(
         "DELETE FROM pins WHERE scope = ?1 AND on_click = ?2",
-        rusqlite::params![scope, on_click],
+        rusqlite::params![scope, key],
     )?;
     conn.execute(
         "INSERT INTO pins (scope, on_click, item_json, created_at)
          VALUES (?1, ?2, ?3, datetime('now'))",
-        rusqlite::params![scope, on_click, item_json],
+        rusqlite::params![scope, key, item_json],
     )?;
     Ok(())
 }
 
-fn unpin_with(conn: &Connection, scope: &str, on_click: &str) -> Result<bool> {
+fn unpin_with(conn: &Connection, scope: &str, key: &str) -> Result<bool> {
     let deleted = conn.execute(
         "DELETE FROM pins WHERE scope = ?1 AND on_click = ?2",
-        rusqlite::params![scope, on_click],
+        rusqlite::params![scope, key],
     )?;
     Ok(deleted > 0)
 }
@@ -69,27 +72,23 @@ mod tests {
         conn
     }
 
+    fn item(title: &str, command: serde_json::Value) -> String {
+        serde_json::json!({ "title": title, "on_click": command }).to_string()
+    }
+
+    fn key(command: serde_json::Value) -> String {
+        serde_json::from_value::<Action>(command).unwrap().key()
+    }
+
     #[test]
     fn pins_round_trip_per_scope() {
         let conn = test_conn();
-        pin_with(
-            &conn,
-            "b firefox",
-            r#"{"title":"GitHub","on_click":"https://github.com"}"#,
-        )
-        .unwrap();
-        pin_with(
-            &conn,
-            "b firefox",
-            r#"{"title":"Docs","on_click":"https://docs.rs"}"#,
-        )
-        .unwrap();
-        pin_with(
-            &conn,
-            "",
-            r#"{"title":"Files","on_click":"launch:files.desktop"}"#,
-        )
-        .unwrap();
+        let github = serde_json::json!({ "type": "open", "uri": "https://github.com" });
+        let docs = serde_json::json!({ "type": "open", "uri": "https://docs.rs" });
+        let files = serde_json::json!({ "type": "launch", "desktop_id": "files.desktop" });
+        pin_with(&conn, "b firefox", &item("GitHub", github.clone())).unwrap();
+        pin_with(&conn, "b firefox", &item("Docs", docs.clone())).unwrap();
+        pin_with(&conn, "", &item("Files", files)).unwrap();
 
         // a scope sees only its own pins, most recent first
         let items = get_pins_with(&conn, "b firefox").unwrap();
@@ -97,17 +96,19 @@ mod tests {
         assert_eq!(items[0]["title"], "Docs");
         assert_eq!(get_pins_with(&conn, "").unwrap().len(), 1);
 
-        assert!(unpin_with(&conn, "b firefox", "https://github.com").unwrap());
-        assert!(!unpin_with(&conn, "b firefox", "https://github.com").unwrap());
+        assert!(unpin_with(&conn, "b firefox", &key(github.clone())).unwrap());
+        assert!(!unpin_with(&conn, "b firefox", &key(github)).unwrap());
         assert_eq!(get_pins_with(&conn, "b firefox").unwrap().len(), 1);
     }
 
     #[test]
     fn pinning_the_same_target_moves_it_to_the_front() {
         let conn = test_conn();
-        pin_with(&conn, "gh", r#"{"title":"A","on_click":"run:a"}"#).unwrap();
-        pin_with(&conn, "gh", r#"{"title":"B","on_click":"run:b"}"#).unwrap();
-        pin_with(&conn, "gh", r#"{"title":"A v2","on_click":"run:a"}"#).unwrap();
+        let a = serde_json::json!({ "type": "run", "cmd": "a" });
+        let b = serde_json::json!({ "type": "run", "cmd": "b" });
+        pin_with(&conn, "gh", &item("A", a.clone())).unwrap();
+        pin_with(&conn, "gh", &item("B", b)).unwrap();
+        pin_with(&conn, "gh", &item("A v2", a)).unwrap();
 
         let items = get_pins_with(&conn, "gh").unwrap();
         assert_eq!(items.len(), 2);

@@ -319,12 +319,9 @@ impl Shell {
             }
             // A confirmed forget is the only thing that removes a row; a provider
             // without `forget` answers `false` and the list is left alone.
-            BackendEvent::Forgotten {
-                on_click,
-                forgotten,
-            } => {
+            BackendEvent::Forgotten { key, forgotten } => {
                 if forgotten {
-                    self.app.remove_row(&on_click, Instant::now());
+                    self.app.remove_row(&key, Instant::now());
                 }
             }
             BackendEvent::CoreExited => self.exit = true,

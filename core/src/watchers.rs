@@ -10,18 +10,11 @@ pub fn watch_theme(tx: &mpsc::Sender<String>) -> Option<RecommendedWatcher> {
 
     // Seed the dedup with the theme emitted at startup, so an unchanged file
     // never re-emits.
-    let mut last_sent = serde_json::to_string(&serde_json::json!({
-        "type": "theme",
-        "data": crate::system::theme::load_theme(),
-    }))
-    .ok();
+    let mut last_sent = serde_json::to_string(&crate::protocol::theme_notification()).ok();
     let tx = tx.clone();
 
     watch(&path, move || {
-        let Ok(json) = serde_json::to_string(&serde_json::json!({
-            "type": "theme",
-            "data": crate::system::theme::load_theme(),
-        })) else {
+        let Ok(json) = serde_json::to_string(&crate::protocol::theme_notification()) else {
             return;
         };
         // Dedup: skip unchanged themes (a single write can produce several

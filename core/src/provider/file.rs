@@ -9,7 +9,7 @@ use walkdir::WalkDir;
 use crate::plugin::{Meta, Plugin};
 use crate::system::fs::get_home;
 use crate::system::icon::{find_first_icon_path, resolve};
-use crate::wire::{ActionItem, ResultItem};
+use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
 
 /// The icon the system MIME database assigns to `path`. Its themed-icon list is
 /// a priority order, so the first name the theme actually ships wins.
@@ -60,13 +60,12 @@ macro_rules! search_plugin {
 /// The commands a file or directory row carries: show it in the file manager,
 /// copy its decoded path, or open a terminal in it (its parent when a file).
 fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
-    let Some(uri) = item
-        .on_click
-        .as_deref()
-        .filter(|on_click| on_click.starts_with("file:"))
-    else {
+    let Some(Action::Open { uri }) = item.on_click.as_ref() else {
         return Vec::new();
     };
+    if !uri.starts_with("file:") {
+        return Vec::new();
+    }
     let Some(path) = gio::File::for_uri(uri).path() else {
         return Vec::new();
     };
@@ -74,17 +73,25 @@ fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
     vec![
         ActionItem {
             title: "Reveal in file manager".to_string(),
-            on_click: format!("reveal:{uri}"),
+            action: PanelAction::Execute {
+                command: Action::Reveal { uri: uri.clone() },
+            },
             icon: Some("folder-open".to_string()),
         },
         ActionItem {
             title: "Copy path".to_string(),
-            on_click: format!("copy:{}", serde_json::json!({ "text": path })),
+            action: PanelAction::Execute {
+                command: Action::Copy {
+                    text: path.into_owned(),
+                },
+            },
             icon: Some("edit-copy".to_string()),
         },
         ActionItem {
             title: "Open in terminal".to_string(),
-            on_click: format!("terminal:{uri}"),
+            action: PanelAction::Execute {
+                command: Action::Terminal { uri: uri.clone() },
+            },
             icon: Some("utilities-terminal".to_string()),
         },
     ]
@@ -185,7 +192,7 @@ fn do_search(query: &str, matcher: fn(&str, &str, &str) -> bool) -> Vec<ResultIt
             results.push(ResultItem {
                 title,
                 summary: Some(path),
-                on_click: Some(file_url),
+                on_click: Some(Action::Open { uri: file_url }),
                 icon,
                 ephemeral: false,
                 actions: Vec::new(),
@@ -208,13 +215,12 @@ fn do_search(query: &str, matcher: fn(&str, &str, &str) -> bool) -> Vec<ResultIt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wire::{ActionItem, ResultItem};
 
-    fn row(title: &str, on_click: Option<&str>) -> ResultItem {
+    fn row(title: &str, on_click: Option<Action>) -> ResultItem {
         ResultItem {
             title: title.to_string(),
             summary: None,
-            on_click: on_click.map(str::to_string),
+            on_click,
             icon: None,
             ephemeral: false,
             actions: Vec::new(),
@@ -222,26 +228,68 @@ mod tests {
         }
     }
 
+    fn file(uri: &str) -> Option<Action> {
+        Some(Action::Open {
+            uri: uri.to_string(),
+        })
+    }
+
     #[test]
     fn a_file_row_offers_reveal_copy_and_terminal() {
-        let actions: Vec<ActionItem> = file_actions(&row("a.txt", Some("file:///tmp/a.txt")));
+        let actions: Vec<ActionItem> = file_actions(&row("a.txt", file("file:///tmp/a.txt")));
         let titles: Vec<&str> = actions.iter().map(|a| a.title.as_str()).collect();
         assert_eq!(
             titles,
             ["Reveal in file manager", "Copy path", "Open in terminal"]
         );
-        assert_eq!(actions[0].on_click, "reveal:file:///tmp/a.txt");
-        assert_eq!(actions[1].on_click, r#"copy:{"text":"/tmp/a.txt"}"#);
-        assert_eq!(actions[2].on_click, "terminal:file:///tmp/a.txt");
+        assert_eq!(
+            actions[0].action,
+            PanelAction::Execute {
+                command: Action::Reveal {
+                    uri: "file:///tmp/a.txt".to_string()
+                }
+            }
+        );
+        assert_eq!(
+            actions[1].action,
+            PanelAction::Execute {
+                command: Action::Copy {
+                    text: "/tmp/a.txt".to_string()
+                }
+            }
+        );
+        assert_eq!(
+            actions[2].action,
+            PanelAction::Execute {
+                command: Action::Terminal {
+                    uri: "file:///tmp/a.txt".to_string()
+                }
+            }
+        );
 
-        assert!(file_actions(&row("run", Some("run:ls"))).is_empty());
+        assert!(
+            file_actions(&row(
+                "run",
+                Some(Action::Run {
+                    cmd: "ls".to_string()
+                })
+            ))
+            .is_empty()
+        );
         assert!(file_actions(&row("none", None)).is_empty());
     }
 
     #[test]
     fn the_copied_path_is_percent_decoded() {
-        let actions = file_actions(&row("a b", Some("file:///tmp/a%20b")));
-        assert_eq!(actions[1].on_click, r#"copy:{"text":"/tmp/a b"}"#);
+        let actions = file_actions(&row("a b", file("file:///tmp/a%20b")));
+        assert_eq!(
+            actions[1].action,
+            PanelAction::Execute {
+                command: Action::Copy {
+                    text: "/tmp/a b".to_string()
+                }
+            }
+        );
     }
 
     #[test]

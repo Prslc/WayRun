@@ -7,7 +7,7 @@ use tokio::process::Command;
 
 use crate::plugin::{Meta, Plugin};
 use crate::system::icon::find_icon_path;
-use crate::wire::ResultItem;
+use crate::wire::{Action, ResultItem};
 
 /// Identity of one plugin as described by an external host's `list_plugins`.
 /// The host owns its own name/icon/ready hint; the core just relays them.
@@ -103,10 +103,10 @@ impl Plugin for External {
         Box::pin(async move { query_default(&command, &plugin, &icon).await })
     }
 
-    fn forget(&self, on_click: &str) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + '_>> {
-        let command = self.command.clone();
-        let on_click = on_click.to_string();
-        Box::pin(async move { forget_external(&command, &on_click).await })
+    fn forget(&self, command: &Action) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + '_>> {
+        let host = self.command.clone();
+        let command = command.clone();
+        Box::pin(async move { forget_external(&host, &command).await })
     }
 }
 
@@ -269,14 +269,13 @@ async fn query_default(command: &str, plugin: &str, icon: &str) -> Result<Option
     Ok(parse_result_items(&response, icon))
 }
 
-/// First shell token of a `run:` payload (argv0), or `None` for any other
-/// scheme; hosts emit single-token commands, so a whitespace split suffices.
-fn run_argv0(on_click: &str) -> Option<&str> {
-    let rest = on_click.strip_prefix("run:")?;
-    if rest.is_empty() {
+/// First shell token of a `run` command (argv0), or `None` for any other
+/// variant; hosts emit single-token commands, so a whitespace split suffices.
+fn run_argv0(command: &Action) -> Option<&str> {
+    let Action::Run { cmd } = command else {
         return None;
-    }
-    rest.split_whitespace().next()
+    };
+    cmd.split_whitespace().next()
 }
 
 /// Resolve a plugins.toml `command` to an absolute path when it is a bare
@@ -296,10 +295,10 @@ fn resolve_command(command: &str) -> String {
     command.to_string()
 }
 
-/// Relay a row's removal to its host: `on_click` must be a `run:` command whose
-/// first token is this host's `command`. `true` when the host acknowledged it.
-async fn forget_external(command: &str, on_click: &str) -> Result<bool> {
-    let Some(argv0) = run_argv0(on_click) else {
+/// Relay a row's removal to its host: the command must be a `run` whose first
+/// token is this host's `command`. `true` when the host acknowledged it.
+async fn forget_external(command: &str, row: &Action) -> Result<bool> {
+    let Some(argv0) = run_argv0(row) else {
         return Ok(false);
     };
     let resolved = resolve_command(command);
@@ -309,7 +308,7 @@ async fn forget_external(command: &str, on_click: &str) -> Result<bool> {
     let request = serde_json::json!({
         "jsonrpc": "2.0",
         "method": "forget",
-        "params": { "on_click": on_click },
+        "params": { "on_click": row },
         "id": 1,
     });
     let response = rpc_call(command, &request).await;
@@ -367,8 +366,8 @@ mod tests {
     fn an_ephemeral_host_row_stays_ephemeral() {
         let response = serde_json::json!({
             "result": [
-                { "title": "repo", "on_click": "https://github.com/x/y", "ephemeral": true },
-                { "title": "Firefox", "on_click": "launch:firefox.desktop" },
+                { "title": "repo", "on_click": {"type":"open","uri":"https://github.com/x/y"}, "ephemeral": true },
+                { "title": "Firefox", "on_click": {"type":"launch","desktop_id":"firefox.desktop"} },
             ]
         });
         let items = parse_result_items(&response, "system-search").unwrap();
@@ -404,7 +403,10 @@ mod tests {
     #[tokio::test]
     async fn a_row_another_command_owns_is_left_alone() {
         // No host is contacted: the on_click's command is not this one.
-        let owned = forget_external("/usr/bin/definitely-not-this", "run:/bin/other del 1")
+        let row = Action::Run {
+            cmd: "/bin/other del 1".to_string(),
+        };
+        let owned = forget_external("/usr/bin/definitely-not-this", &row)
             .await
             .unwrap();
         assert!(!owned);
@@ -414,9 +416,10 @@ mod tests {
     async fn a_host_that_answers_owns_the_row() {
         let dir = tempfile::tempdir().unwrap();
         let command = host(&dir, r#"{"jsonrpc":"2.0","result":null,"id":1}"#);
-        let owned = forget_external(&command, &format!("run:{command} del 1"))
-            .await
-            .unwrap();
+        let row = Action::Run {
+            cmd: format!("{command} del 1"),
+        };
+        let owned = forget_external(&command, &row).await.unwrap();
         assert!(owned, "the host dropped its own data, so the row may leave");
     }
 
@@ -426,9 +429,10 @@ mod tests {
         let reply =
             r#"{"jsonrpc":"2.0","error":{"code":-32601,"message":"Method not found"},"id":1}"#;
         let command = host(&dir, reply);
-        let owned = forget_external(&command, &format!("run:{command} del 1"))
-            .await
-            .unwrap();
+        let row = Action::Run {
+            cmd: format!("{command} del 1"),
+        };
+        let owned = forget_external(&command, &row).await.unwrap();
         assert!(!owned, "-32601 means the row is not this host's to drop");
     }
 

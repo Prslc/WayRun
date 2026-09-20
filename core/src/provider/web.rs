@@ -2,7 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use crate::plugin::{Meta, Plugin};
-use crate::wire::{ActionItem, ResultItem};
+use crate::wire::{Action, ActionItem, ResultItem};
 use anyhow::{Context, Result};
 
 use super::copy_url_action;
@@ -152,7 +152,9 @@ fn do_search(engine: &Engine, query: &str) -> Result<Vec<ResultItem>> {
     let mut results = vec![ResultItem {
         title: format!("Search: {query}"),
         summary: Some(engine.summary.to_string()),
-        on_click: Some(result_url(engine, query)),
+        on_click: Some(Action::Open {
+            uri: result_url(engine, query),
+        }),
         icon: icon.clone(),
         ephemeral: true,
         actions: Vec::new(),
@@ -169,7 +171,9 @@ fn do_search(engine: &Engine, query: &str) -> Result<Vec<ResultItem>> {
                 .map(|phrase| ResultItem {
                     title: phrase.to_string(),
                     summary: Some(engine.summary.to_string()),
-                    on_click: Some(result_url(engine, phrase)),
+                    on_click: Some(Action::Open {
+                        uri: result_url(engine, phrase),
+                    }),
                     icon: icon.clone(),
                     ephemeral: true,
                     actions: Vec::new(),

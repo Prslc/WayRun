@@ -12,7 +12,7 @@ use tokio::task;
 use crate::plugin::{Meta, Plugin};
 use crate::system::fs::get_home;
 use crate::system::icon::resolve;
-use crate::wire::{ActionItem, ResultItem};
+use crate::wire::{Action, ActionItem, ResultItem};
 
 use super::copy_url_action;
 
@@ -104,7 +104,7 @@ async fn do_search(mode: Mode, query: &str) -> Result<Vec<ResultItem>> {
             Ok(ResultItem {
                 title: title.unwrap_or_else(|| "[no title]".to_string()),
                 summary: Some(url.clone()),
-                on_click: Some(url),
+                on_click: Some(Action::Open { uri: url }),
                 icon: firefox_icon.clone(),
                 ephemeral: false,
                 actions: Vec::new(),
