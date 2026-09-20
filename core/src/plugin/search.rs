@@ -1,4 +1,5 @@
 use super::actions::{decorate, pin_scope};
+use super::model::Meta;
 use super::registry::{REGISTRY, ensure_loaded, resolve_pending};
 use crate::system::icon::find_icon_path;
 use crate::wire::ResultItem;
@@ -36,15 +37,7 @@ async fn search(input: &str) -> Vec<ResultItem> {
                 } else {
                     format!("{} <query>", entry.keyword)
                 };
-                ResultItem {
-                    title: meta.name.to_string(),
-                    summary: Some(format!("{usage} - {}", meta.ready)),
-                    on_click: None,
-                    icon: find_icon_path(meta.icon).or_else(|| Some(String::new())),
-                    ephemeral: false,
-                    actions: Vec::new(),
-                    badge: None,
-                }
+                identity_card(meta, format!("{usage} - {}", meta.ready))
             })
             .collect();
     }
@@ -69,15 +62,7 @@ async fn search(input: &str) -> Vec<ResultItem> {
                 return fill_icons(entry.plugin.meta().icon, items);
             }
             let meta = entry.plugin.meta();
-            return vec![ResultItem {
-                title: meta.name.to_string(),
-                summary: Some(meta.ready.to_string()),
-                on_click: None,
-                icon: find_icon_path(meta.icon).or_else(|| Some(String::new())),
-                ephemeral: false,
-                actions: Vec::new(),
-                badge: None,
-            }];
+            return vec![identity_card(meta, meta.ready.to_string())];
         }
 
         for entry in reg.iter().filter(|e| e.keyword == keyword) {
@@ -113,6 +98,19 @@ fn fill_icons(meta_icon: &str, mut items: Vec<ResultItem>) -> Vec<ResultItem> {
         }
     }
     items
+}
+
+/// A plugin's identity card, also its `?` help row and empty default view.
+fn identity_card(meta: &Meta, summary: String) -> ResultItem {
+    ResultItem {
+        title: meta.name.to_string(),
+        summary: Some(summary),
+        on_click: None,
+        icon: find_icon_path(meta.icon).or_else(|| Some(String::new())),
+        ephemeral: false,
+        actions: Vec::new(),
+        badge: None,
+    }
 }
 
 #[cfg(test)]
