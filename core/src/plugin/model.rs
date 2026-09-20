@@ -36,6 +36,16 @@ pub struct PendingHost {
     pub command: String,
 }
 
+pub(super) struct Entry {
+    pub(super) plugin: Box<dyn super::Plugin>,
+    pub(super) keyword: String,
+    /// Set while an external plugin runs on its placeholder identity, so startup
+    /// forks nothing; `resolve_pending` clears it on first use.
+    pub(super) pending: Option<PendingHost>,
+}
+
+pub(super) type PluginMap = std::collections::HashMap<&'static str, Box<dyn super::Plugin>>;
+
 /// A discovered host identity, keyed by command and stamped with the file's
 /// `(mtime, size)`, so an unchanged host is never forked again.
 #[derive(Default, serde::Serialize, serde::Deserialize)]

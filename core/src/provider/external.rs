@@ -111,7 +111,7 @@ impl Plugin for External {
 }
 
 /// Ceiling for one host call: a stalled host must cost seconds, never the
-/// session. Discovery holds `plugin::INIT` until it returns.
+/// session. Discovery holds the registry's init lock until it returns.
 const HOST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// One JSON-RPC round trip against `command`: spawn, write, close stdin, reap,
