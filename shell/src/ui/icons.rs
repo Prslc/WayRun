@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use tiny_skia::{Pixmap, PixmapPaint, PixmapRef, PremultipliedColorU8, Transform};
+use tiny_skia::{FilterQuality, Pixmap, PixmapPaint, PixmapRef, PremultipliedColorU8, Transform};
 
 pub struct IconCache {
     /// path → (box size → premultiplied RGBA). The key is a `String` so a
@@ -160,9 +160,13 @@ fn tint(pixmap: &mut Pixmap, color: [u8; 3]) {
 /// so crop to the ink and scale that to a common box, then tint: actions from a
 /// 24px action set and a 32px symbolic set end up the same optical size.
 fn render_glyph(path: &str, size: u32, color: [u8; 3]) -> Option<Pixmap> {
+    if path.to_ascii_lowercase().ends_with(".svg") {
+        return render_svg_glyph(path, size, color);
+    }
+
+    // A raster glyph: crop to its ink, tint, then resample into the box.
     let source = render(path, size)?;
     let (x, y, w, h) = ink_bounds(&source)?;
-
     let mut cropped = Pixmap::new(w, h)?;
     cropped.draw_pixmap(
         -(x as i32),
@@ -175,20 +179,70 @@ fn render_glyph(path: &str, size: u32, color: [u8; 3]) -> Option<Pixmap> {
     tint(&mut cropped, color);
 
     let mut out = Pixmap::new(size, size)?;
-    let box_side = size as f32 * 0.8;
+    let side = size as f32;
+    let box_side = side * GLYPH_BOX;
     let scale = (box_side / w as f32).min(box_side / h as f32);
-    let dx = (size as f32 - w as f32 * scale) / 2.0;
-    let dy = (size as f32 - h as f32 * scale) / 2.0;
     out.draw_pixmap(
         0,
         0,
         cropped.as_ref(),
-        &PixmapPaint::default(),
-        Transform::from_scale(scale, scale).post_translate(dx, dy),
+        &PixmapPaint {
+            quality: FilterQuality::Bilinear,
+            ..PixmapPaint::default()
+        },
+        Transform::from_scale(scale, scale).post_translate(
+            (side - w as f32 * scale) / 2.0,
+            (side - h as f32 * scale) / 2.0,
+        ),
         None,
     );
     Some(out)
 }
+
+/// The SVG path of [`render_glyph`]: probe the ink once, then rasterise the
+/// vector a second time with the ink fitted to the box, so the glyph is drawn
+/// crisp at the final size instead of being scaled after rasterising.
+fn render_svg_glyph(path: &str, size: u32, color: [u8; 3]) -> Option<Pixmap> {
+    let data = std::fs::read(path).ok()?;
+    let tree = resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default()).ok()?;
+    let source = tree.size();
+    if source.width() <= 0.0 || source.height() <= 0.0 {
+        return None;
+    }
+
+    let side = size as f32;
+    let base_scale = (side / source.width()).min(side / source.height());
+    let base = Transform::from_scale(base_scale, base_scale).post_translate(
+        (side - source.width() * base_scale) / 2.0,
+        (side - source.height() * base_scale) / 2.0,
+    );
+
+    let mut probe = Pixmap::new(size, size)?;
+    resvg::render(&tree, base, &mut probe.as_mut());
+    let (x, y, w, h) = ink_bounds(&probe)?;
+
+    let box_side = side * GLYPH_BOX;
+    let fit = (box_side / w as f32).min(box_side / h as f32);
+    let ox = (side - w as f32 * fit) / 2.0;
+    let oy = (side - h as f32 * fit) / 2.0;
+    let fitted = Transform::from_row(
+        base.sx * fit,
+        base.kx * fit,
+        base.ky * fit,
+        base.sy * fit,
+        fit * (base.tx - x as f32) + ox,
+        fit * (base.ty - y as f32) + oy,
+    );
+
+    let mut out = Pixmap::new(size, size)?;
+    resvg::render(&tree, fitted, &mut out.as_mut());
+    tint(&mut out, color);
+    Some(out)
+}
+
+/// The fraction of the box a panel glyph's ink fills, so icons from different
+/// families look the same optical size.
+const GLYPH_BOX: f32 = 0.8;
 
 /// The bounding box `(x, y, w, h)` of a pixmap's non-transparent pixels.
 fn ink_bounds(pixmap: &Pixmap) -> Option<(u32, u32, u32, u32)> {
