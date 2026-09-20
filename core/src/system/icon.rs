@@ -42,6 +42,12 @@ fn parse_papirus_spec(spec: &str) -> (Option<&str>, &str) {
 }
 
 fn find_papirus(spec: &str) -> Option<String> {
+    // `papirus:symbolic/[<category>/]<name>` scans the symbolic tree, which only
+    // ships at the small sizes but is monochrome line art that tints cleanly.
+    let (symbolic, spec) = match spec.strip_prefix("symbolic/") {
+        Some(rest) => (true, rest),
+        None => (false, spec),
+    };
     let (hint, name) = parse_papirus_spec(spec);
 
     // category hint first when it names a real Papirus category, then the rest
@@ -63,11 +69,11 @@ fn find_papirus(spec: &str) -> Option<String> {
     for base in &bases {
         for size in PAPIRUS_SIZES.iter().copied() {
             for category in categories.iter().copied() {
-                let path = base
-                    .join("Papirus")
-                    .join(size)
-                    .join(category)
-                    .join(format!("{name}.svg"));
+                let mut dir = base.join("Papirus").join(size);
+                if symbolic {
+                    dir = dir.join("symbolic");
+                }
+                let path = dir.join(category).join(format!("{name}.svg"));
                 if path.exists() {
                     return Some(path.to_string_lossy().into_owned());
                 }
@@ -219,6 +225,17 @@ mod tests {
         // first, then falls back to the other categories.
         let path = find_icon_path("papirus:apps/system-shutdown").unwrap();
         assert!(path.contains("/apps/system-shutdown.svg"));
+    }
+
+    #[test]
+    fn a_symbolic_spec_resolves_under_the_symbolic_tree() {
+        if !Path::new("/usr/share/icons/Papirus").exists() {
+            return;
+        }
+        // the monochrome line-art variant, which the panel tints to the fg
+        let path = find_icon_path("papirus:symbolic/apps/utilities-terminal-symbolic").unwrap();
+        assert!(path.contains("/symbolic/"), "{path}");
+        assert!(path.ends_with("utilities-terminal-symbolic.svg"), "{path}");
     }
 
     #[test]

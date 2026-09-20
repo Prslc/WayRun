@@ -41,12 +41,7 @@ impl IconCache {
     pub fn warm_tinted(&mut self, path: &str, size: u32, color: [u8; 3]) {
         self.tinted
             .entry((path.to_string(), size, color))
-            .or_insert_with(|| {
-                render(path, size).map(|mut pixmap| {
-                    tint(&mut pixmap, color);
-                    pixmap
-                })
-            });
+            .or_insert_with(|| render_glyph(path, size, color));
     }
 
     /// Draw `path` tinted to `color` when it is a monochrome silhouette; a
@@ -63,12 +58,7 @@ impl IconCache {
         let icon = self
             .tinted
             .entry((path.to_string(), size, color))
-            .or_insert_with(|| {
-                render(path, size).map(|mut pixmap| {
-                    tint(&mut pixmap, color);
-                    pixmap
-                })
-            });
+            .or_insert_with(|| render_glyph(path, size, color));
         let Some(icon) = icon else { return };
         target.draw_pixmap(
             pos.0.round() as i32,
@@ -166,6 +156,58 @@ fn tint(pixmap: &mut Pixmap, color: [u8; 3]) {
     }
 }
 
+/// Render one panel action glyph. Icon families pad their artwork differently,
+/// so crop to the ink and scale that to a common box, then tint: actions from a
+/// 24px action set and a 32px symbolic set end up the same optical size.
+fn render_glyph(path: &str, size: u32, color: [u8; 3]) -> Option<Pixmap> {
+    let source = render(path, size)?;
+    let (x, y, w, h) = ink_bounds(&source)?;
+
+    let mut cropped = Pixmap::new(w, h)?;
+    cropped.draw_pixmap(
+        -(x as i32),
+        -(y as i32),
+        source.as_ref(),
+        &PixmapPaint::default(),
+        Transform::identity(),
+        None,
+    );
+    tint(&mut cropped, color);
+
+    let mut out = Pixmap::new(size, size)?;
+    let box_side = size as f32 * 0.8;
+    let scale = (box_side / w as f32).min(box_side / h as f32);
+    let dx = (size as f32 - w as f32 * scale) / 2.0;
+    let dy = (size as f32 - h as f32 * scale) / 2.0;
+    out.draw_pixmap(
+        0,
+        0,
+        cropped.as_ref(),
+        &PixmapPaint::default(),
+        Transform::from_scale(scale, scale).post_translate(dx, dy),
+        None,
+    );
+    Some(out)
+}
+
+/// The bounding box `(x, y, w, h)` of a pixmap's non-transparent pixels.
+fn ink_bounds(pixmap: &Pixmap) -> Option<(u32, u32, u32, u32)> {
+    let (width, height) = (pixmap.width(), pixmap.height());
+    let (mut min_x, mut min_y, mut max_x, mut max_y) = (width, height, 0, 0);
+    let mut found = false;
+    for y in 0..height {
+        for x in 0..width {
+            if pixmap.pixel(x, y).is_some_and(|pixel| pixel.alpha() > 0) {
+                found = true;
+                min_x = min_x.min(x);
+                min_y = min_y.min(y);
+                max_x = max_x.max(x);
+                max_y = max_y.max(y);
+            }
+        }
+    }
+    found.then(|| (min_x, min_y, max_x - min_x + 1, max_y - min_y + 1))
+}
 /// Render the SVG into a `size`×`size` box, contained (aspect preserved).
 fn render_svg(data: &[u8], size: u32) -> Option<Pixmap> {
     let tree = resvg::usvg::Tree::from_data(data, &resvg::usvg::Options::default()).ok()?;

@@ -25,6 +25,10 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS usage (
         item_json TEXT NOT NULL,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE (scope, on_click)
+    );
+    CREATE TABLE IF NOT EXISTS defaults (
+        scope TEXT PRIMARY KEY,
+        action_id TEXT NOT NULL
     );";
 
 fn db_path() -> Result<PathBuf> {
@@ -43,7 +47,9 @@ fn open_conn() -> Result<Connection> {
 fn prepare(conn: &Connection) -> Result<()> {
     let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version != SCHEMA_VERSION {
-        conn.execute_batch("DROP TABLE IF EXISTS usage; DROP TABLE IF EXISTS pins;")?;
+        conn.execute_batch(
+            "DROP TABLE IF EXISTS usage; DROP TABLE IF EXISTS pins; DROP TABLE IF EXISTS defaults;",
+        )?;
     }
     conn.execute_batch(SCHEMA)?;
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;

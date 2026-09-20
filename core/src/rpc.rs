@@ -179,6 +179,30 @@ pub async fn handle(
                 respond(tx, id, Ok(json!({ "unpinned": unpinned }))).await;
             }
         }
+        "default" => {
+            // scope is the owning plugin id; a null action_id clears the default
+            let Ok(scope) = string_param(params.as_ref(), "scope") else {
+                if has_id {
+                    respond(tx, id, Err(INVALID_PARAMS)).await;
+                }
+                return;
+            };
+            let action_id = params
+                .as_ref()
+                .and_then(|params| params.get("action_id"))
+                .and_then(|value| value.as_str());
+            match action_id {
+                Some(action_id) => {
+                    let _ = crate::system::defaults::set(&scope, action_id);
+                }
+                None => {
+                    let _ = crate::system::defaults::clear(&scope);
+                }
+            }
+            if has_id {
+                respond(tx, id, Ok(Value::Null)).await;
+            }
+        }
         "forget" => {
             let Ok(command) = command_param(params.as_ref(), "on_click") else {
                 if has_id {
@@ -353,6 +377,14 @@ mod tests {
         .await;
         let v: Value = serde_json::from_str(&msgs[0]).unwrap();
         assert_eq!(v["result"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn default_requires_a_scope() {
+        // no scope means no DB write, so this cannot touch real history
+        let (_, msgs) = run(r#"{"jsonrpc":"2.0","method":"default","id":12}"#).await;
+        let v: Value = serde_json::from_str(&msgs[0]).unwrap();
+        assert_eq!(v["error"]["code"], -32602);
     }
 
     #[tokio::test]

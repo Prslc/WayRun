@@ -140,6 +140,9 @@ impl Plugin for AppSearch {
                     },
                 },
                 icon: app.icon_path(),
+                id: Some(format!("desktop_action:{}", action.id)),
+                plugin: None,
+                default: false,
             })
             .collect()
     }

@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::{AppearanceConfig, Mode};
 use crate::ui::theme::{Surfaces, Theme};
-use wayrun_core::wire::{Action, ActionItem, ResultItem};
+use wayrun_core::wire::{Action, ActionItem, PanelAction, ResultItem};
 
 /// Launch dismissals wait this long before the surface goes away.
 pub const EXIT_DELAY_MS: u64 = 150;
@@ -52,7 +52,12 @@ pub struct Launch {
     pub title: String,
     pub summary: Option<String>,
     pub icon: Option<String>,
+    /// The row's own command, recorded in usage so history and forget stay
+    /// keyed to it.
     pub target: Action,
+    /// The command Enter runs: the remembered default action when the row has
+    /// one, else `target`.
+    pub effective: Action,
     pub ephemeral: bool,
 }
 
@@ -477,11 +482,21 @@ impl State {
     pub fn selected_row(&self) -> Option<Launch> {
         let row = self.rows.get(self.selected)?;
         let target = row.on_click.clone()?;
+        let effective = row
+            .actions
+            .iter()
+            .find(|action| action.default)
+            .and_then(|action| match &action.action {
+                PanelAction::Execute { command } => Some(command.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| target.clone());
         Some(Launch {
             title: row.title.clone(),
             summary: row.summary.clone(),
             icon: row.icon.clone(),
             target,
+            effective,
             ephemeral: row.ephemeral,
         })
     }
@@ -1220,6 +1235,49 @@ mod tests {
     }
 
     #[test]
+    fn enter_uses_the_default_action_but_records_the_row_command() {
+        let mut state = state();
+        let uri = "file:///tmp/a.txt";
+        let mut row = item(
+            "a.txt",
+            None,
+            Some(Action::Open {
+                uri: uri.to_string(),
+            }),
+            None,
+        );
+        row.actions = vec![ActionItem {
+            title: "Open in terminal".to_string(),
+            action: PanelAction::Execute {
+                command: Action::Terminal {
+                    uri: uri.to_string(),
+                },
+            },
+            icon: None,
+            id: Some("terminal".to_string()),
+            plugin: Some("file-search".to_string()),
+            default: true,
+        }];
+        state.apply_results(vec![row], std::time::Instant::now());
+
+        let launch = state.selected_row().unwrap();
+        // what Enter runs
+        assert_eq!(
+            launch.effective,
+            Action::Terminal {
+                uri: uri.to_string()
+            }
+        );
+        // what usage records, so history and forget stay keyed to the row
+        assert_eq!(
+            launch.target,
+            Action::Open {
+                uri: uri.to_string()
+            }
+        );
+    }
+
+    #[test]
     fn an_ephemeral_row_is_forwarded_when_selected() {
         let mut state = state();
         let mut row = item(
@@ -1244,6 +1302,9 @@ mod tests {
                     command: run(title),
                 },
                 icon: None,
+                id: None,
+                plugin: None,
+                default: false,
             })
             .collect();
         row
@@ -1282,6 +1343,9 @@ mod tests {
                 item: Box::new(item("Firefox", None, None, None)),
             },
             icon: None,
+            id: None,
+            plugin: None,
+            default: false,
         }];
 
         assert!(state.open_actions());
@@ -1316,6 +1380,9 @@ mod tests {
                 },
             },
             icon: None,
+            id: None,
+            plugin: None,
+            default: false,
         }];
         state.apply_results(vec![row], std::time::Instant::now());
 

@@ -92,6 +92,11 @@ pub fn unpin(scope: &str, on_click: &Action) {
     notify("unpin", json!({ "scope": scope, "on_click": on_click }));
 }
 
+/// Remember (or, with `None`, clear) the default Enter action for a plugin scope.
+pub fn default(scope: &str, action_id: Option<&str>) {
+    notify("default", json!({ "scope": scope, "action_id": action_id }));
+}
+
 /// Ask the core to forget a row; the reply arrives as
 /// [`BackendEvent::Forgotten`] and says whether anything was really dropped.
 pub fn forget_row(action: &Action) {

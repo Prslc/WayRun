@@ -34,6 +34,7 @@ an absolute path (`/etc/hosts`) is opened wherever it points.
 | --- | --- |
 | `Enter` | launch the selected result |
 | `Shift+Enter` | open the selected result's action panel |
+| `Alt+Enter` | in the panel, set the highlighted action as its plugin's default, or clear it |
 | `↑` / `↓` | move the selection |
 | `PageUp` / `PageDown` | move by a page |
 | `Home` / `End` | move the caret to the start/end of the query |
@@ -59,6 +60,12 @@ footer hides its actions hint.
 While the panel is open, `↑`/`↓` (and the wheel) move through it, `Enter` runs
 the highlighted command, and `Esc` or `Shift+Enter` closes it. Typing closes the
 panel and returns to the field.
+
+`Alt+Enter` remembers the highlighted command as the default for its plugin, so
+`Enter` on later rows of that plugin runs it; the row's own command stays
+available in the panel as **Open**. The remembered action carries a dot and the
+footer shows the `Alt+Enter` hint; repeat the gesture to clear it. Launcher-level
+and host actions have no stable id and cannot be made default.
 
 ## Pinned results
 

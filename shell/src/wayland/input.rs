@@ -68,6 +68,12 @@ impl Shell {
                     self.close_panel(now);
                     return;
                 }
+                // Alt+Enter remembers the highlighted action as its plugin's
+                // default (or clears it). A non-defaultable action is ignored.
+                Keysym::Return | Keysym::KP_Enter if self.modifiers.alt => {
+                    self.toggle_default(now);
+                    return;
+                }
                 Keysym::Return | Keysym::KP_Enter => {
                     self.run_action(now);
                     return;
@@ -198,7 +204,9 @@ impl Shell {
 
         backend::select(&usage);
 
-        backend::command(&launch.target);
+        // Enter runs the remembered default action when the row has one, but
+        // usage above stays keyed to the row's own command.
+        backend::command(&launch.effective);
 
         self.schedule_dismiss(now);
     }
@@ -245,6 +253,25 @@ impl Shell {
             return;
         };
         self.execute_action(&action, now);
+    }
+
+    /// Alt+Enter in the panel: remember the highlighted action as its plugin's
+    /// default, or clear it when it already is. A non-defaultable action (no id
+    /// or plugin) is ignored and the panel stays open.
+    fn toggle_default(&mut self, now: Instant) {
+        let Some(action) = self.app.selected_action() else {
+            return;
+        };
+        let (Some(id), Some(plugin)) = (action.id.clone(), action.plugin.clone()) else {
+            return;
+        };
+        if action.default {
+            backend::default(&plugin, None);
+        } else {
+            backend::default(&plugin, Some(&id));
+        }
+        self.close_panel(now);
+        self.query_changed();
     }
 
     /// One action-panel command. Pin/unpin re-search so the launcher stays open;

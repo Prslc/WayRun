@@ -30,10 +30,12 @@ pub async fn decorate(items: Vec<ResultItem>, scope: &str, history: bool) -> Vec
         .filter_map(|value| serde_json::from_value(value).ok())
         .collect();
     let (mut out, pinned) = merge_pins(pins, items);
+    // One query for every plugin's remembered default, not one per row.
+    let defaults = crate::system::defaults::all().unwrap_or_default();
 
     for item in &mut out {
         let plugin_actions = plugin_actions(item).await;
-        attach_actions(item, scope, &pinned, history, plugin_actions);
+        attach_actions(item, scope, &pinned, history, &defaults, plugin_actions);
     }
     out
 }
@@ -58,17 +60,25 @@ fn merge_pins(
     (pins, pinned)
 }
 
-/// The first plugin that recognises the row and declares actions for it, from
-/// its provider or the host's inline `actions`.
-async fn plugin_actions(item: &ResultItem) -> Vec<ActionItem> {
+/// The first plugin that recognises the row and declares actions for it, with
+/// the plugin's id, which scopes a remembered default action.
+async fn plugin_actions(item: &ResultItem) -> (Option<String>, Vec<ActionItem>) {
     let reg = REGISTRY.read().await;
     for entry in reg.iter() {
         let actions = entry.plugin.actions(item);
         if !actions.is_empty() {
-            return actions;
+            return (Some(entry.plugin.meta().id.to_string()), actions);
         }
     }
-    Vec::new()
+    (None, Vec::new())
+}
+
+/// The command an `execute` action runs, if it is one.
+fn action_command(action: &PanelAction) -> Option<&Action> {
+    match action {
+        PanelAction::Execute { command } => Some(command),
+        _ => None,
+    }
 }
 
 /// The launcher-level commands an actionable row gets (pin/unpin always, history
@@ -78,14 +88,52 @@ fn attach_actions(
     scope: &str,
     pinned: &[Action],
     history: bool,
-    mut plugin_actions: Vec<ActionItem>,
+    defaults: &std::collections::HashMap<String, String>,
+    plugin_actions: (Option<String>, Vec<ActionItem>),
 ) {
     let Some(on_click) = item.on_click.clone() else {
         return;
     };
+    let (owner, mut plugin_actions) = plugin_actions;
     let is_pinned = pinned.iter().any(|pin| pin == &on_click);
     if is_pinned {
         item.badge = find_icon_path("pin");
+    }
+
+    // Every plugin action carries its owner, so the shell can scope a default.
+    if let Some(owner) = &owner {
+        for action in &mut plugin_actions {
+            if action.plugin.is_none() {
+                action.plugin = Some(owner.clone());
+            }
+        }
+    }
+
+    // A remembered default elevates its action to Enter. The row's own command
+    // stays reachable as an "Open" action when the default is a different one.
+    if let Some(default_id) = owner.as_deref().and_then(|owner| defaults.get(owner))
+        && let Some(index) = plugin_actions
+            .iter()
+            .position(|action| action.id.as_deref() == Some(default_id.as_str()))
+    {
+        let is_primary = action_command(&plugin_actions[index].action) == Some(&on_click);
+        plugin_actions[index].default = true;
+        if !is_primary {
+            plugin_actions.insert(
+                0,
+                ActionItem {
+                    title: "Open".to_string(),
+                    action: PanelAction::Execute {
+                        command: on_click.clone(),
+                    },
+                    // a monochrome line-art glyph, so the panel reads uniformly
+                    icon: Some("papirus:symbolic/actions/document-open-symbolic".to_string()),
+                    id: None,
+                    plugin: None,
+                    default: false,
+                },
+            );
+        }
     }
 
     let mut actions: Vec<ActionItem> = Vec::new();
@@ -97,6 +145,9 @@ fn attach_actions(
                 on_click: on_click.clone(),
             },
             icon: Some("window-unpin".to_string()),
+            id: None,
+            plugin: None,
+            default: false,
         });
     } else if !item.ephemeral {
         // Snapshot the row before the launcher actions are appended, so the pin
@@ -108,6 +159,9 @@ fn attach_actions(
                 item: Box::new(item.clone()),
             },
             icon: Some("pin".to_string()),
+            id: None,
+            plugin: None,
+            default: false,
         });
     }
 
@@ -118,6 +172,9 @@ fn attach_actions(
                 on_click: on_click.clone(),
             },
             icon: Some("edit-delete".to_string()),
+            id: None,
+            plugin: None,
+            default: false,
         });
     }
 
@@ -141,6 +198,7 @@ fn attach_actions(
 mod tests {
     use super::*;
     use crate::plugin::item;
+    use std::collections::HashMap;
 
     #[test]
     fn a_pin_is_scoped_to_the_exact_query_not_its_keyword() {
@@ -180,7 +238,14 @@ mod tests {
                 desktop_id: "firefox.desktop".to_string(),
             },
         );
-        attach_actions(&mut row, "b", &[], false, Vec::new());
+        attach_actions(
+            &mut row,
+            "b",
+            &[],
+            false,
+            &HashMap::new(),
+            (None, Vec::new()),
+        );
 
         let titles: Vec<&str> = row
             .actions
@@ -214,6 +279,9 @@ mod tests {
                 },
             },
             icon: None,
+            id: Some("reveal".to_string()),
+            plugin: None,
+            default: false,
         };
         attach_actions(
             &mut row,
@@ -222,7 +290,8 @@ mod tests {
                 uri: "file:///tmp/a.txt".to_string(),
             }],
             true,
-            vec![reveal],
+            &HashMap::new(),
+            (Some("file-search".to_string()), vec![reveal]),
         );
 
         let titles: Vec<&str> = row
@@ -251,8 +320,18 @@ mod tests {
                 command: run("host"),
             },
             icon: None,
+            id: None,
+            plugin: None,
+            default: false,
         }];
-        attach_actions(&mut row, "b", &[], false, Vec::new());
+        attach_actions(
+            &mut row,
+            "b",
+            &[],
+            false,
+            &HashMap::new(),
+            (None, Vec::new()),
+        );
 
         // The snapshot is the host's row, not the decorated one: the pin action
         // must not embed itself, and the host action must survive the round trip.
@@ -275,7 +354,14 @@ mod tests {
                 desktop_id: "firefox.desktop".to_string(),
             },
         );
-        attach_actions(&mut history, "", &[], true, Vec::new());
+        attach_actions(
+            &mut history,
+            "",
+            &[],
+            true,
+            &HashMap::new(),
+            (None, Vec::new()),
+        );
         assert_eq!(titles(&history), ["Pin to top", "Remove from history"]);
 
         // a fresh search result is not sourced from the history view
@@ -285,13 +371,27 @@ mod tests {
                 desktop_id: "firefox.desktop".to_string(),
             },
         );
-        attach_actions(&mut search, "fire", &[], false, Vec::new());
+        attach_actions(
+            &mut search,
+            "fire",
+            &[],
+            false,
+            &HashMap::new(),
+            (None, Vec::new()),
+        );
         assert_eq!(titles(&search), ["Pin to top"]);
 
         // an ephemeral row is neither a durable pin target nor recorded
         let mut one_shot = item("window", run("wctl activate 1"));
         one_shot.ephemeral = true;
-        attach_actions(&mut one_shot, "", &[], true, Vec::new());
+        attach_actions(
+            &mut one_shot,
+            "",
+            &[],
+            true,
+            &HashMap::new(),
+            (None, Vec::new()),
+        );
         assert!(titles(&one_shot).is_empty());
 
         // an existing pin must stay removable even on an ephemeral row
@@ -302,7 +402,8 @@ mod tests {
             "",
             &[run("cliphist decode 1")],
             true,
-            Vec::new(),
+            &HashMap::new(),
+            (None, Vec::new()),
         );
         assert_eq!(titles(&pinned), ["Unpin"]);
 
@@ -313,7 +414,107 @@ mod tests {
                 text: "hi".to_string(),
             },
         );
-        attach_actions(&mut copy, "", &[], true, Vec::new());
+        attach_actions(
+            &mut copy,
+            "",
+            &[],
+            true,
+            &HashMap::new(),
+            (None, Vec::new()),
+        );
         assert_eq!(titles(&copy), ["Pin to top"]);
+    }
+
+    fn file_action(title: &str, id: &str, command: Action) -> ActionItem {
+        ActionItem {
+            title: title.to_string(),
+            action: PanelAction::Execute { command },
+            icon: None,
+            id: Some(id.to_string()),
+            plugin: None,
+            default: false,
+        }
+    }
+
+    #[test]
+    fn a_remembered_default_is_marked_and_keeps_the_row_command() {
+        let uri = "file:///tmp/a.txt";
+        let mut row = item(
+            "a.txt",
+            Action::Open {
+                uri: uri.to_string(),
+            },
+        );
+        let actions = vec![
+            file_action(
+                "Reveal in file manager",
+                "reveal",
+                Action::Reveal {
+                    uri: uri.to_string(),
+                },
+            ),
+            file_action(
+                "Open in terminal",
+                "terminal",
+                Action::Terminal {
+                    uri: uri.to_string(),
+                },
+            ),
+        ];
+        let mut defaults = HashMap::new();
+        defaults.insert("file-search".to_string(), "terminal".to_string());
+        attach_actions(
+            &mut row,
+            "",
+            &[],
+            false,
+            &defaults,
+            (Some("file-search".to_string()), actions),
+        );
+
+        // the row's own command survives as an "Open" action
+        assert!(
+            row.actions
+                .iter()
+                .any(|a| a.title == "Open" && a.id.is_none()),
+            "the primary stays reachable"
+        );
+        let default = row.actions.iter().find(|a| a.default).unwrap();
+        assert_eq!(default.id.as_deref(), Some("terminal"));
+        assert_eq!(default.plugin.as_deref(), Some("file-search"));
+        assert!(
+            row.actions.iter().filter(|a| a.default).count() == 1,
+            "only the remembered action is the default"
+        );
+    }
+
+    #[test]
+    fn no_remembered_default_leaves_the_panel_alone() {
+        let uri = "file:///tmp/a.txt";
+        let mut row = item(
+            "a.txt",
+            Action::Open {
+                uri: uri.to_string(),
+            },
+        );
+        attach_actions(
+            &mut row,
+            "",
+            &[],
+            false,
+            &HashMap::new(),
+            (
+                Some("file-search".to_string()),
+                vec![file_action(
+                    "Reveal in file manager",
+                    "reveal",
+                    Action::Reveal {
+                        uri: uri.to_string(),
+                    },
+                )],
+            ),
+        );
+        assert!(row.actions.iter().all(|a| !a.default));
+        assert!(row.actions.iter().all(|a| a.title != "Open"));
     }
 }

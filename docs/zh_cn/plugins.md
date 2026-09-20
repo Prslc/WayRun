@@ -52,7 +52,8 @@ enabled = true
 与“在终端中打开”，`app-search` 列出该条目的 `[Desktop Action …]`，`web-search` 与 Firefox 插件提供“复制链接”，
 没有自带动作的插件至少也有启动器级别的置顶/取消置顶；空查询历史会为它来源的行补上
 “从历史中移除”。外部主机可以在
-结果项上输出自己的 `actions` 数组，后端会把它们排在内置项之后。见
+结果项上输出自己的 `actions` 数组，后端会把它们排在内置项之后。给动作填上 `id`，
+用户就能用 `Alt+Enter` 把它设为默认 Enter 动作。见
 [jsonrpc.md](jsonrpc.md#结果项) 的 `actions` 字段。
 
 ## 外部主机

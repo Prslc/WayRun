@@ -91,7 +91,9 @@ pub(super) fn draw_actions(
         let enter_w = enter
             .as_ref()
             .map_or(0.0, |shaped| shaped.width / canvas.scale + 12.0);
-        let labels_max = (rect.right() - 10.0 - labels_x - enter_w).max(0.0);
+        // The default marker sits left of the Enter glyph; reserve its room.
+        let marker_w = if action.default { 12.0 } else { 0.0 };
+        let labels_max = (rect.right() - 10.0 - labels_x - enter_w - marker_w).max(0.0);
         let title = text.fit(
             &action.title,
             font.title() * canvas.scale,
@@ -122,6 +124,20 @@ pub(super) fn draw_actions(
                 canvas.px(rect.right() - 10.0) - check.width,
                 canvas.px(rect.center_y()) - check.height / 2.0,
                 None,
+            );
+        }
+        if action.default {
+            let cx = rect.right() - 10.0 - enter_w - 6.0;
+            canvas.fill_round(
+                pixmap,
+                Rect {
+                    x: cx - 3.0,
+                    y: rect.center_y() - 3.0,
+                    w: 6.0,
+                    h: 6.0,
+                },
+                3.0,
+                state.fade(theme.primary, 1.0, now),
             );
         }
     }

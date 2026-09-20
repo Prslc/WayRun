@@ -18,6 +18,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 | `command` | 一个 [`Command`](#命令) 对象 | `null`（执行一条行或面板命令） |
 | `pin` | `{"scope","item"}` | `{"pinned": bool}`（把结果项置顶到某条精确查询） |
 | `unpin` | `{"scope","on_click": Command}` | `{"unpinned": bool}` |
+| `default` | `{"scope","action_id"}` | `null`（记录某插件的默认 Enter 动作；`action_id` 为 null 则清除） |
 | `forget` | `{"on_click": Command}` | `{"forgotten": bool}` |
 | `resolve_icon` | `{"name"}` | 图标规范对应的绝对路径 |
 | `list_plugins` | — | 插件元数据；见 [schema](#插件元数据list_plugins) |
@@ -151,7 +152,10 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 | `badge` | string \| null | 可选，行右缘的状态图标（置顶行为图钉） |
 
 `actions` 元素为 `{"title": string, "action": PanelAction, "icon"?: string}`，
-`icon` 与结果行的 `icon` 采用同样的规范解析。`PanelAction` 是以下之一：
+`icon` 与结果行的 `icon` 采用同样的规范解析。核心生成的动作还可能带 `id`（稳定 kind）、
+`plugin`（归属插件，用于限定默认动作的作用域）与 `default`（为 true 表示 Enter 执行它）；
+外部主机可以给自己的动作填 `id` 使其可被设为默认，其余字段可忽略。
+`PanelAction` 是以下之一：
 
 | `type` | 字段 | 含义 |
 |--------|------|------|

@@ -27,6 +27,36 @@ const PANEL_HINTS: &[Hint] = &[
     },
 ];
 
+const PANEL_DEFAULT_HINTS: &[Hint] = &[
+    Hint {
+        key: "⏎",
+        label: "Run",
+    },
+    Hint {
+        key: "Alt⏎",
+        label: "Default",
+    },
+    Hint {
+        key: "Esc",
+        label: "Back",
+    },
+];
+
+const PANEL_CLEAR_DEFAULT_HINTS: &[Hint] = &[
+    Hint {
+        key: "⏎",
+        label: "Run",
+    },
+    Hint {
+        key: "Alt⏎",
+        label: "Clear default",
+    },
+    Hint {
+        key: "Esc",
+        label: "Back",
+    },
+];
+
 const ROW_HINTS: &[Hint] = &[
     Hint {
         key: "⏎",
@@ -60,9 +90,17 @@ pub(super) fn footer_hints(
     query_empty: bool,
     panel: bool,
     has_actions: bool,
+    can_default: bool,
+    is_default: bool,
 ) -> &'static [Hint] {
     if panel {
-        PANEL_HINTS
+        if !can_default {
+            PANEL_HINTS
+        } else if is_default {
+            PANEL_CLEAR_DEFAULT_HINTS
+        } else {
+            PANEL_DEFAULT_HINTS
+        }
     } else if rows > 0 {
         if has_actions { ROW_HINTS } else { LAUNCH_HINT }
     } else if query_empty {
@@ -101,7 +139,25 @@ pub(super) fn draw_footer(
         .rows
         .get(state.selected)
         .is_some_and(|row| !row.actions.is_empty());
-    let hints = footer_hints(state.rows.len(), state.query.is_empty(), panel, has_actions);
+    // A highlighted panel action with a plugin id can be made the default.
+    let (can_default, is_default) = state
+        .menu
+        .as_ref()
+        .and_then(|menu| menu.selected_action())
+        .map_or((false, false), |action| {
+            (
+                action.id.is_some() && action.plugin.is_some(),
+                action.default,
+            )
+        });
+    let hints = footer_hints(
+        state.rows.len(),
+        state.query.is_empty(),
+        panel,
+        has_actions,
+        can_default,
+        is_default,
+    );
 
     let count = if panel {
         count_label(
@@ -235,18 +291,49 @@ mod tests {
     #[test]
     fn the_footer_separates_no_results_from_an_untouched_field() {
         // an empty field is the history view, not a failed search
-        assert_eq!(footer_hints(0, true, false, false), HELP_HINT);
-        assert_eq!(footer_hints(0, false, false, false), NO_MATCH_HINT);
-        assert_eq!(footer_hints(3, false, false, true), ROW_HINTS);
+        assert_eq!(footer_hints(0, true, false, false, false, false), HELP_HINT);
+        assert_eq!(
+            footer_hints(0, false, false, false, false, false),
+            NO_MATCH_HINT
+        );
+        assert_eq!(footer_hints(3, false, false, true, false, false), ROW_HINTS);
         // the panel owns the footer while it is open
-        assert_eq!(footer_hints(3, false, true, true), PANEL_HINTS);
+        assert_eq!(
+            footer_hints(3, false, true, true, false, false),
+            PANEL_HINTS
+        );
     }
 
     #[test]
     fn a_row_without_actions_drops_the_actions_hint() {
-        assert_eq!(footer_hints(3, false, false, false), LAUNCH_HINT);
+        assert_eq!(
+            footer_hints(3, false, false, false, false, false),
+            LAUNCH_HINT
+        );
         // the panel hint outlives the selected row's actions while it is open
-        assert_eq!(footer_hints(3, false, true, false), PANEL_HINTS);
+        assert_eq!(
+            footer_hints(3, false, true, false, false, false),
+            PANEL_HINTS
+        );
+    }
+
+    #[test]
+    fn a_defaultable_panel_action_shows_the_alt_hint() {
+        // a plugin action that is not yet the default
+        assert_eq!(
+            footer_hints(3, false, true, true, true, false),
+            PANEL_DEFAULT_HINTS
+        );
+        // already the default: the hint offers to clear it
+        assert_eq!(
+            footer_hints(3, false, true, true, true, true),
+            PANEL_CLEAR_DEFAULT_HINTS
+        );
+        // a launcher-level or host action has no id, so no hint
+        assert_eq!(
+            footer_hints(3, false, true, true, false, false),
+            PANEL_HINTS
+        );
     }
 
     #[test]

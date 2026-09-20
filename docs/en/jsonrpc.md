@@ -19,6 +19,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 | `command` | a [`Command`](#commands) object | `null` (runs one row or panel command) |
 | `pin` | `{"scope","item"}` | `{"pinned": bool}` (pins an item to an exact query) |
 | `unpin` | `{"scope","on_click": Command}` | `{"unpinned": bool}` |
+| `default` | `{"scope","action_id"}` | `null` (remembers the default Enter action for a plugin; a null `action_id` clears it) |
 | `forget` | `{"on_click": Command}` | `{"forgotten": bool}` |
 | `resolve_icon` | `{"name"}` | absolute path for an icon spec |
 | `list_plugins` | — | plugin metadata; see [schema](#plugin-metadata-list_plugins) |
@@ -166,7 +167,12 @@ and `actions`/`badge` only when set:
 | `badge` | string \| null | optional status glyph at the row's right edge (a pin for a pinned row) |
 
 An `actions` entry is `{"title": string, "action": PanelAction, "icon"?: string}`,
-with the same icon-spec resolution as a row's `icon`. A `PanelAction` is one of:
+with the same icon-spec resolution as a row's `icon`. A core-built entry may also
+carry `id` (its stable kind), `plugin` (the owner, which scopes a remembered
+default) and `default` (true when Enter runs it); a host may set `id` on its own
+actions to make them defaultable, and may ignore the rest.
+
+A `PanelAction` is one of:
 
 | `type` | Fields | Meaning |
 |--------|--------|---------|

@@ -78,7 +78,10 @@ fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
             action: PanelAction::Execute {
                 command: Action::Reveal { uri: uri.clone() },
             },
-            icon: Some("folder-open".to_string()),
+            icon: Some("papirus:symbolic/apps/system-file-manager-symbolic".to_string()),
+            id: Some("reveal".to_string()),
+            plugin: None,
+            default: false,
         },
         ActionItem {
             title: "Copy path".to_string(),
@@ -88,13 +91,19 @@ fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
                 },
             },
             icon: Some("edit-copy".to_string()),
+            id: Some("copy_path".to_string()),
+            plugin: None,
+            default: false,
         },
         ActionItem {
             title: "Open in terminal".to_string(),
             action: PanelAction::Execute {
                 command: Action::Terminal { uri: uri.clone() },
             },
-            icon: Some("utilities-terminal".to_string()),
+            icon: Some("papirus:symbolic/apps/utilities-terminal-symbolic".to_string()),
+            id: Some("terminal".to_string()),
+            plugin: None,
+            default: false,
         },
     ]
 }

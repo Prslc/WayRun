@@ -57,7 +57,7 @@ pub enum PanelAction {
     },
 }
 
-/// One action-panel entry of a row, never run by Enter.
+/// One action-panel entry of a row, never run by Enter unless it is the default.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ActionItem {
     pub title: String,
@@ -66,6 +66,20 @@ pub struct ActionItem {
     /// like a row's `icon`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// The stable action kind (`reveal`, `terminal`, …) a remembered default
+    /// names; a host may omit it, and then the action cannot be made default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// The plugin that owns the action, so the shell can scope a default to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<String>,
+    /// Whether Enter runs this action, when its plugin has a remembered default.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub default: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
