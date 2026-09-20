@@ -170,7 +170,12 @@ impl Shell {
     /// Every query change is one search line (the core debounces); every editing
     /// path — typing, paste, IME, ✕ — goes through here.
     pub(super) fn query_changed(&self) {
-        backend::send(&self.app.query);
+        if self.app.query.is_empty() {
+            // an empty query means the usage-ranked history
+            backend::top();
+        } else {
+            backend::search(&self.app.query);
+        }
     }
 
     /// Usage recording first, then exactly one command line to the core.
