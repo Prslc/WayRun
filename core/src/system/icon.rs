@@ -83,20 +83,32 @@ fn cache() -> &'static Mutex<HashMap<String, Option<String>>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::default()))
 }
 
-pub fn find_icon_path(name: &str) -> Option<String> {
+/// A real icon file for `name`, or `None` when nothing matches. Cached, because
+/// a miss scans the whole theme space.
+fn find_exact(name: &str) -> Option<String> {
     if let Ok(cache) = cache().lock()
         && let Some(cached) = cache.get(name)
     {
         return cached.clone();
     }
 
-    let result = do_find(name);
+    let result = lookup(name);
 
     if let Ok(mut cache) = cache().lock() {
         cache.insert(name.to_string(), result.clone());
     }
 
     result
+}
+
+pub fn find_icon_path(name: &str) -> Option<String> {
+    find_exact(name).or_else(|| xdg::resource_path("images/application_default.png"))
+}
+
+/// The first name in `names` that resolves to a real icon file, without the
+/// bundled default: a MIME type's themed-icon list is a priority chain.
+pub fn find_first_icon_path<'a>(names: impl IntoIterator<Item = &'a str>) -> Option<String> {
+    names.into_iter().find_map(find_exact)
 }
 
 /// A theme name found under any `base/{theme}/{size}/{category}/`. The scan is
@@ -136,11 +148,9 @@ fn find_pixmap_icon(name: &str) -> Option<String> {
     None
 }
 
-fn do_find(name: &str) -> Option<String> {
-    let fallback = || xdg::resource_path("images/application_default.png");
-
+fn lookup(name: &str) -> Option<String> {
     if name.is_empty() {
-        return fallback();
+        return None;
     }
     if name.starts_with('/') {
         return Some(name.to_string());
@@ -148,7 +158,7 @@ fn do_find(name: &str) -> Option<String> {
     // `papirus:<name>` (or `papirus:<category>/<name>`) is an explicit Papirus
     // reference; resolve it here, the UI renders only absolute paths.
     if let Some(spec) = name.strip_prefix("papirus:") {
-        return find_papirus(spec).or_else(fallback);
+        return find_papirus(spec);
     }
 
     if let Some(p) = find_theme_icon(name) {
@@ -165,7 +175,7 @@ fn do_find(name: &str) -> Option<String> {
         }
     }
 
-    fallback()
+    None
 }
 
 #[cfg(test)]
@@ -222,5 +232,16 @@ mod tests {
         // what answers.
         let path = find_icon_path("application_default").unwrap();
         assert!(path.ends_with("images/application_default.png"), "{path}");
+    }
+
+    #[test]
+    fn the_first_resolving_name_in_a_chain_wins() {
+        if !Path::new("/usr/share/icons/Papirus").exists() {
+            return;
+        }
+        let path = find_first_icon_path(["definitely-not-an-icon-xyz", "text-x-generic"]).unwrap();
+        assert!(path.ends_with("text-x-generic.svg"), "{path}");
+        // The bundled default is a `find_icon_path` concern, not a chain entry.
+        assert!(find_first_icon_path(["definitely-not-an-icon-xyz"]).is_none());
     }
 }

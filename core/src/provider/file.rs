@@ -1,27 +1,24 @@
 use std::future::Future;
+use std::path::Path;
 use std::pin::Pin;
 
 use anyhow::Result;
-use gio::prelude::FileExt;
+use gio::prelude::{Cast, FileExt};
 use walkdir::WalkDir;
 
 use crate::plugin::{Meta, Plugin};
 use crate::system::fs::get_home;
-use crate::system::icon::find_icon_path;
+use crate::system::icon::{find_first_icon_path, find_icon_path};
 use crate::wire::{ActionItem, ResultItem};
 
-fn file_icon(name: &str) -> &'static str {
-    match name.rsplit('.').next().unwrap_or("") {
-        "jpg" | "jpeg" | "png" | "gif" | "svg" | "webp" | "bmp" | "ico" => "image-x-generic",
-        "mp4" | "mkv" | "avi" | "webm" | "mov" | "flv" => "video-x-generic",
-        "mp3" | "wav" | "flac" | "ogg" | "aac" | "opus" => "audio-x-generic",
-        "pdf" => "application-pdf",
-        "zip" | "tar" | "gz" | "rar" | "7z" | "bz2" | "xz" => "package-x-generic",
-        "txt" | "rs" | "py" | "js" | "ts" | "c" | "cpp" | "h" | "java" | "go" | "rb" | "lua"
-        | "sh" | "bash" | "zsh" | "toml" | "yaml" | "yml" | "json" | "xml" | "html" | "css"
-        | "md" | "conf" | "ini" | "cfg" | "log" => "text-x-generic",
-        _ => "text-x-generic",
-    }
+/// The icon the system MIME database assigns to `path`. Its themed-icon list is
+/// a priority order, so the first name the theme actually ships wins.
+fn mime_icon(path: &Path) -> Option<String> {
+    let (content_type, _) = gio::content_type_guess(Some(path), None);
+    let icon = gio::content_type_get_icon(&content_type);
+    let themed = icon.downcast::<gio::ThemedIcon>().ok()?;
+    let names = themed.names();
+    find_first_icon_path(names.iter().map(|name| name.as_str()))
 }
 
 macro_rules! search_plugin {
@@ -157,18 +154,22 @@ fn do_search(query: &str, matcher: fn(&str, &str, &str) -> bool) -> Vec<ResultIt
             // GLib builds the URI: raw paths are invalid for spaces/non-ASCII.
             let file_url = gio::File::for_path(&path).uri().to_string();
 
-            let (title, icon) = if is_dir {
-                (format!("{name}/"), "folder")
+            let title = if is_dir {
+                format!("{name}/")
             } else {
-                let icon = file_icon(&name);
-                (name.into_owned(), icon)
+                name.into_owned()
+            };
+            let icon = if is_dir {
+                find_icon_path("folder")
+            } else {
+                mime_icon(Path::new(&path)).or_else(|| find_icon_path("text-x-generic"))
             };
 
             results.push(ResultItem {
                 title,
                 summary: Some(path),
                 on_click: Some(file_url),
-                icon: find_icon_path(icon).or_else(|| Some(String::new())),
+                icon,
                 ephemeral: false,
                 actions: Vec::new(),
                 badge: None,
@@ -213,6 +214,26 @@ mod tests {
 
         assert!(reveal_action(&row("run", Some("run:ls"))).is_empty());
         assert!(reveal_action(&row("none", None)).is_empty());
+    }
+
+    #[test]
+    fn a_suffix_maps_to_its_mime_icon_without_a_hand_kept_table() {
+        if !Path::new("/usr/share/icons/Papirus").exists() {
+            return;
+        }
+        // `g_content_type_guess` needs only the name; no file is read.
+        let script = mime_icon(Path::new("/tmp/build.sh")).unwrap();
+        assert!(
+            script.ends_with("text-x-shellscript.svg") || script.ends_with("text-x-script.svg"),
+            "{script}"
+        );
+        let unknown = mime_icon(Path::new("/tmp/notes.zzz")).unwrap();
+        assert!(
+            unknown.ends_with("application-octet-stream.svg")
+                || unknown.ends_with("application-x-generic.svg"),
+            "{unknown}"
+        );
+        assert_ne!(script, unknown);
     }
 
     #[test]
