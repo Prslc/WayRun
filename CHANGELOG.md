@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-21
+
+### Added
+
+- Window search on Hyprland: compositor backends are a compile-time toggle
+  (`compositor-niri` default, `compositor-hyprland` experimental), and a build
+  can drop both so `w` simply returns nothing.
+- Path queries reach the whole home tree: a `f`/`d` query containing `/` or a
+  leading `~` is stat'd directly, opening `~/Project/WayRun` even past the
+  depth-3 walk; an absolute path is taken wherever it points.
+- File rows offer *Copy path* and *Open in terminal*, and a `$PATH` hit launches
+  through its `.desktop` app (honoring `Terminal=`) or in a terminal.
+- `Alt+Enter` remembers a panel action as its plugin's Enter default (the
+  `default` JSON-RPC method), marked in the panel and stored in `usage.db`.
+- Web suggestions honor `https_proxy` / `http_proxy` from the environment.
+
+### Changed
+
+- **Breaking**: the wire protocol is JSON-RPC 2.0 with typed commands only. A
+  non-JSON line answers `-32700`, `search`/`top` stream a `results` notification
+  without an `id` and answer synchronously with one, and `on_click`/panel actions
+  are `Command`/`PanelAction` objects instead of scheme strings. See
+  `docs/en/jsonrpc.md`.
+- File and path results are ranked by match quality (exact name, then prefix,
+  substring, parent-path) with depth as a tie-break, instead of walk order.
+- Firefox history is ordered by `moz_places.last_visit_date`, so one row per
+  place replaces the per-visit duplicates.
+- File icons come from the system MIME database's themed-icon chain, replacing
+  the hand-kept suffix table.
+- Parsing a core notification is one typed pass, so the results path no longer
+  materialises a `serde_json::Value` tree.
+- A window search caches the compositor's list for 500ms across a typing burst,
+  and a bookmark/history search reads a cached `places.sqlite` copy keyed by
+  `(mtime, size)` instead of copying 30MB per keystroke.
+- The plugin registry is split into `model`/`registry`/`actions`/`search`
+  modules, with no behaviour change.
+
+### Fixed
+
+- Send query changes as JSON-RPC searches; a raw line was answered `-32700` and
+  left every list empty.
+- Record the selected row in usage history when its action runs from the panel,
+  not only on Enter.
+- Scope a remembered default action's id to its app, and reject a non-string
+  `action_id` instead of treating it as a clear.
+- Attach *Remove from history* only to a recordable history row and *Pin to top*
+  only to a non-`ephemeral` row.
+- Rank window rows by the shared name tier, so an exact `app_id` leads a title
+  that merely contains the query.
+- Render an SVG panel glyph crisp at its final size rather than scaling the
+  cropped ink.
+- An iconless row falls back to its plugin's icon, so a command or window row no
+  longer shows the bundled placeholder.
+
 ## [0.1.3] - 2026-09-20
 
 ### Added
@@ -125,7 +179,8 @@ and, with `--core`, the backend service.
 - Resident mode over `$XDG_RUNTIME_DIR/wayrun.sock` for zero cold-start
   (`wayrun toggle`).
 
-[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Prslc/WayRun/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/Prslc/WayRun/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Prslc/WayRun/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Prslc/WayRun/compare/v0.1.0...v0.1.1
