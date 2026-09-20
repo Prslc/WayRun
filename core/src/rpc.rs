@@ -187,10 +187,16 @@ pub async fn handle(
                 }
                 return;
             };
-            let action_id = params
-                .as_ref()
-                .and_then(|params| params.get("action_id"))
-                .and_then(|value| value.as_str());
+            let action_id = match params.as_ref().and_then(|params| params.get("action_id")) {
+                None | Some(Value::Null) => None,
+                Some(Value::String(action_id)) => Some(action_id.as_str()),
+                Some(_) => {
+                    if has_id {
+                        respond(tx, id, Err(INVALID_PARAMS)).await;
+                    }
+                    return;
+                }
+            };
             match action_id {
                 Some(action_id) => {
                     let _ = crate::system::defaults::set(&scope, action_id);
@@ -383,6 +389,16 @@ mod tests {
     async fn default_requires_a_scope() {
         // no scope means no DB write, so this cannot touch real history
         let (_, msgs) = run(r#"{"jsonrpc":"2.0","method":"default","id":12}"#).await;
+        let v: Value = serde_json::from_str(&msgs[0]).unwrap();
+        assert_eq!(v["error"]["code"], -32602);
+    }
+
+    #[tokio::test]
+    async fn default_rejects_a_non_string_action_id() {
+        let (_, msgs) = run(
+            r#"{"jsonrpc":"2.0","method":"default","params":{"scope":"x","action_id":42},"id":13}"#,
+        )
+        .await;
         let v: Value = serde_json::from_str(&msgs[0]).unwrap();
         assert_eq!(v["error"]["code"], -32602);
     }

@@ -194,7 +194,7 @@ impl Shell {
             return;
         };
 
-        self.record_selected_row();
+        self.record_row_for(&launch.effective);
 
         // Enter runs the remembered default action when the row has one, but
         // usage above stays keyed to the row's own command.
@@ -203,9 +203,13 @@ impl Shell {
         self.schedule_dismiss(now);
     }
 
-    /// Record the selected row in usage history; a panel action shares the
-    /// row's key, so running one from the panel is recorded like Enter.
-    fn record_selected_row(&self) {
+    /// Record the selected row in usage history, unless the command about to run
+    /// is a clipboard write: a copy is not a re-launchable target, so it stays
+    /// out of history exactly as a `copy` row does.
+    fn record_row_for(&self, command: &Action) {
+        if matches!(command, Action::Copy { .. }) {
+            return;
+        }
         let Some(launch) = self.app.selected_row() else {
             return;
         };
@@ -287,7 +291,7 @@ impl Shell {
     fn execute_action(&mut self, action: &ActionItem, now: Instant) {
         match &action.action {
             PanelAction::Execute { command } => {
-                self.record_selected_row();
+                self.record_row_for(command);
                 backend::command(command);
                 self.schedule_dismiss(now);
             }

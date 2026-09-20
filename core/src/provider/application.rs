@@ -140,7 +140,8 @@ impl Plugin for AppSearch {
                     },
                 },
                 icon: app.icon_path(),
-                id: Some(format!("desktop_action:{}", action.id)),
+                // scope the id to the app, so a remembered default stays with it
+                id: Some(format!("desktop_action:{}:{}", desktop_id, action.id)),
                 plugin: None,
                 default: false,
             })
