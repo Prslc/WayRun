@@ -46,6 +46,16 @@ fn normalize_icons(items: Vec<ResultItem>) -> Vec<ResultItem> {
         .collect()
 }
 
+/// Whether two payload rows are the same result, by its command (a display-only
+/// row falls back to its title). Used to keep the highlight across a re-emit.
+fn same_row(a: &ResultItem, b: &ResultItem) -> bool {
+    match (&a.on_click, &b.on_click) {
+        (Some(x), Some(y)) => x == y,
+        (None, None) => a.title == b.title,
+        _ => false,
+    }
+}
+
 /// The selected row's fields that `select` and the launch command need.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Launch {
@@ -699,6 +709,10 @@ impl State {
         };
 
         self.rows.remove(index);
+        // A row above the selection shifting down must not move the highlight.
+        if index < self.selected {
+            self.selected -= 1;
+        }
         self.selected = self.selected.min(self.rows.len().saturating_sub(1));
         // The panel was about the list that just changed under it.
         self.menu = None;
@@ -714,11 +728,17 @@ impl State {
             return;
         }
 
+        // Keep the highlight on the same row when the payload is a re-emit (a
+        // pin, a default action); a row that is gone starts at the top.
+        let previous = self.rows.get(self.selected).cloned();
         self.rows = items;
+        self.selected = previous
+            .as_ref()
+            .and_then(|previous| self.rows.iter().position(|row| same_row(row, previous)))
+            .unwrap_or(0);
 
-        // A fresh payload starts at the top row, and any open panel is stale; a
-        // local removal and an identical re-send keep the cursor.
-        self.selected = 0;
+        // Any open panel referenced the old list; a local removal and an
+        // identical re-send keep the cursor.
         self.menu = None;
         self.contain();
         self.retarget_height(now);
@@ -974,10 +994,58 @@ mod tests {
             ),
         ];
         state.apply_results(changed, now);
-        // a genuinely new payload starts from the top row: what the cursor
-        // pointed at has changed
+        // the highlighted row's command changed, so it is a different row and
+        // the list starts from the top
         assert_eq!(state.selected, 0);
         assert_eq!(state.rows[1].on_click.as_ref(), Some(&run("firefox")));
+    }
+
+    #[test]
+    fn a_re_emit_keeps_the_highlight_on_the_same_row() {
+        let mut state = state();
+        let now = std::time::Instant::now();
+        state.apply_results(
+            vec![
+                item("A", None, Some(run("a")), None),
+                item("B", None, Some(run("b")), None),
+                item("C", None, Some(run("c")), None),
+            ],
+            now,
+        );
+        state.selected = 2;
+
+        // a pin or a default toggle prepends a row and re-emits the same query
+        state.apply_results(
+            vec![
+                item("Pinned", None, Some(run("pinned")), None),
+                item("A", None, Some(run("a")), None),
+                item("B", None, Some(run("b")), None),
+                item("C", None, Some(run("c")), None),
+            ],
+            now,
+        );
+        assert_eq!(state.rows[state.selected].title, "C");
+
+        // a row that is gone falls back to the top
+        state.apply_results(vec![item("X", None, Some(run("x")), None)], now);
+        assert_eq!(state.selected, 0);
+    }
+
+    #[test]
+    fn removing_a_row_above_keeps_the_highlight_on_its_row() {
+        let mut state = state();
+        let now = std::time::Instant::now();
+        state.apply_results(
+            vec![
+                item("A", None, Some(run("a")), None),
+                item("B", None, Some(run("b")), None),
+                item("C", None, Some(run("c")), None),
+            ],
+            now,
+        );
+        state.selected = 2;
+        assert!(state.remove_row(&run("a").key(), now));
+        assert_eq!(state.rows[state.selected].title, "C");
     }
 
     #[test]
