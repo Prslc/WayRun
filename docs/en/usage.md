@@ -23,10 +23,10 @@ highlighted one.
 | `2 + 3` | inline calculator |
 | _(empty)_ | show most-used items |
 
-A query containing `/` or starting with `~` is a **path query**: it resolves
-under `$HOME` and matches against the path, and a path that exists is opened
-directly even when it sits past the depth-3 walk. Nothing outside `$HOME` is
-ever searched.
+A query containing `/` or starting with `~` is a **path query**: it is stat'd
+directly and opened when it exists, even past the depth-3 walk. `~` and a
+relative path resolve under `$HOME`; the walk itself never leaves `$HOME`, but
+an absolute path (`/etc/hosts`) is opened wherever it points.
 
 ## Keys
 

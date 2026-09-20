@@ -162,10 +162,15 @@ fn resolve_path_query(query: &str, home: &Path) -> Option<PathBuf> {
     }
 }
 
-/// The existing path a query names, canonicalized and confined to `$HOME`; a
-/// path outside the home scope is out of bounds, as is one that does not exist.
-fn exact_under_home(query: &str, home: &Path) -> Option<PathBuf> {
+/// The existing path a query names, canonicalized. An absolute path is taken
+/// as-is, wherever it points; `~` and a relative path resolve under `$HOME` and
+/// may not climb back out of it.
+fn exact_path(query: &str, home: &Path) -> Option<PathBuf> {
+    let absolute = query.starts_with('/');
     let candidate = resolve_path_query(query, home)?.canonicalize().ok()?;
+    if absolute {
+        return Some(candidate);
+    }
     let home = home.canonicalize().ok()?;
     candidate.starts_with(home).then_some(candidate)
 }
@@ -221,9 +226,9 @@ fn do_search(query: &str, want_dir: bool, by_name: bool) -> Vec<ResultItem> {
         return vec![];
     };
 
-    // An existing path under home is the answer itself, outside the walk's
-    // depth and roots; a path outside home is out of scope.
-    if let Some(path) = exact_under_home(query, &home)
+    // An existing path is the answer itself, outside the walk's depth and
+    // roots; an absolute path may point anywhere, a relative one stays home.
+    if let Some(path) = exact_path(query, &home)
         && let Some(item) = path_item(&path, want_dir)
     {
         return vec![item];
@@ -448,12 +453,14 @@ mod tests {
     }
 
     #[test]
-    fn an_exact_path_outside_home_is_out_of_scope() {
-        // `exact_under_home` only stats real paths; use whatever exists here.
+    fn an_absolute_path_is_allowed_outside_home_but_a_relative_escape_is_not() {
         let home = std::env::temp_dir();
         if Path::new("/etc/hosts").exists() {
-            assert!(exact_under_home("/etc/hosts", &home).is_none());
-            assert!(exact_under_home("~/../etc/hosts", &home).is_none());
+            let canonical = Path::new("/etc/hosts").canonicalize().unwrap();
+            assert_eq!(exact_path("/etc/hosts", &home), Some(canonical));
+            // `~` and relative paths resolve under home and cannot climb out
+            assert!(exact_path("~/../etc/hosts", &home).is_none());
+            assert!(exact_path("../../etc/hosts", &home).is_none());
         }
     }
 
