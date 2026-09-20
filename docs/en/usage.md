@@ -15,7 +15,7 @@ highlighted one.
 | `f <query>` | search files by name or path |
 | `d <query>` | search directories by path (multi-token) |
 | `r <query>` | fuzzy-search `$PATH` executables and run one |
-| `w <query>` | switch focus to a matching open niri window |
+| `w <query>` | switch focus to a matching open window |
 | `c <query>` | search clipboard history (cliphist) |
 | `s <query>` | web search suggestions (engine set in `config.toml`) |
 | `?` | show keyword modes, default functions, and hints |

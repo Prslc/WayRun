@@ -115,6 +115,17 @@ layer-rule {
 
 其中 namespace 为 `WayRun`。非 xray 模糊会在其下方内容变化时重新计算，因此开销高于默认。
 
+Hyprland 不实现 `ext-background-effect-v1`，会忽略该区域；改为打开它自己的模糊，并按 namespace 模糊该图层：
+
+```ini
+decoration {
+    blur {
+        enabled = true
+    }
+}
+layerrule = blur, WayRun
+```
+
 | 键 | 类型 | 默认值 | 含义 |
 | --- | --- | --- | --- |
 | `enabled` | bool | `true` | 是否向合成器声明背景模糊区域。`false` 时不再声明，背景保持清晰；卡片的半透明填充不变。 |

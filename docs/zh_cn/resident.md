@@ -31,6 +31,8 @@ WantedBy=default.target
 systemctl --user enable --now wayrun-launcher
 # niri 热键 —— 切换而非重新拉起：
 #   Alt+Space { spawn-sh "wayrun toggle"; }
+# Hyprland 热键：
+#   bind = SUPER, SPACE, exec, wayrun toggle
 ```
 
 命令为 `open` / `close` / `toggle` / `status`，都发给常驻实例持有的这个 socket；

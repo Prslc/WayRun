@@ -37,7 +37,7 @@ registry, the JSON-RPC protocol and the usage database.
   the GLib `GAppInfo` registry (Exec quoting, field codes, `DBusActivatable`),
   with Flatpak and themed icons resolved per row.
 - **Quick search** — files and paths, Firefox bookmarks and history, clipboard
-  history, web suggestions, `$PATH` commands, open niri windows, system commands,
+  history, web suggestions, `$PATH` commands, open windows, system commands,
   and inline math.
 - **Usage history** — most-used items on an empty query.
 - **Action panel & pins** — `Shift+Enter` opens a per-type action menu (reveal a
@@ -73,6 +73,19 @@ wayrun
 The launcher is a full-screen overlay with a dimmed backdrop and a centered card.
 In the default spawn-per-hotkey flow, `Esc` / clicking outside quits it; in
 resident mode the hotkey toggles the surface and dismiss hides it.
+
+## Compositor backends
+
+Open-window search (`w`) is compiled per compositor behind cargo features:
+`compositor-niri` (the default) and `compositor-hyprland` (experimental). Build
+just the one you run; with no backend compiled the launcher still runs and `w`
+returns nothing.
+
+```bash
+cargo build --release                                            # niri
+cargo build --release -p wayrun-shell --no-default-features --features compositor-hyprland
+cargo build --release -p wayrun-shell --no-default-features      # no window search
+```
 
 ## Documentation
 

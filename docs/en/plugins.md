@@ -48,7 +48,7 @@ everything.
 | `file-search` | `f` | Files under the home directory. |
 | `path-search` | `d` | Directories under the home directory. |
 | `clipboard` | `c` | Clipboard history. |
-| `window` | `w` | Open windows on niri. |
+| `window` | `w` | Open windows (niri or Hyprland, per build). |
 
 ## Result actions
 

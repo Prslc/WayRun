@@ -29,7 +29,7 @@ WayRun 是一款 Wayland 原生的 Linux 应用启动器和快速搜索工具。
 - **应用启动** — 跨 XDG 数据目录的 `.desktop` 模糊搜索，经 GLib `GAppInfo`
   启动（正确处理 Exec 引号、字段码与 `DBusActivatable`），并逐行解析 Flatpak 与主题图标。
 - **快速搜索** — 文件与路径、Firefox 书签与历史、剪贴板历史、网页建议、`$PATH`
-  命令、打开的 niri 窗口、系统命令，以及即时计算。
+  命令、打开的窗口、系统命令，以及即时计算。
 - **使用历史** — 留空时展示高频项。
 - **二级菜单与置顶** — `Shift+Enter` 打开按类型区分的动作菜单（定位文件、运行
   Desktop Action、复制链接）；“置顶”让结果在其关键词下始终排在前面。
@@ -62,6 +62,18 @@ wayrun
 
 启动器以全屏覆盖方式打开，带调暗背景与居中卡片。默认的按热键拉起流程下，
 `Esc`/点击卡片外会退出；常驻模式下热键切换窗口，关闭改为隐藏。
+
+## 合成器后端
+
+窗口搜索（`w`）按合成器编译，通过 cargo feature 开关：`compositor-niri`（默认）
+与 `compositor-hyprland`（实验性）。只编你实际使用的那一个；一个后端都不编时，
+启动器照常运行，只是 `w` 没有结果。
+
+```bash
+cargo build --release                                            # niri
+cargo build --release -p wayrun-shell --no-default-features --features compositor-hyprland
+cargo build --release -p wayrun-shell --no-default-features      # 不做窗口搜索
+```
 
 ## 文档
 

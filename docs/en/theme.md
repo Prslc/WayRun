@@ -135,6 +135,18 @@ layer-rule {
 The namespace is `WayRun`. niri recomputes non-xray blur whenever the content
 underneath changes, so it is costlier than the default.
 
+Hyprland does not implement `ext-background-effect-v1`, so it ignores the
+region; turn on its own blur and blur the layer by namespace instead:
+
+```ini
+decoration {
+    blur {
+        enabled = true
+    }
+}
+layerrule = blur, WayRun
+```
+
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `enabled` | bool | `true` | Declare the blur region. `false` declares nothing, so the backdrop stays sharp; the card's translucent fill is unchanged. |

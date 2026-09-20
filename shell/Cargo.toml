@@ -8,8 +8,15 @@ edition = "2024"
 name = "wayrun"
 path = "src/main.rs"
 
+# Compositor backends are a compile-time toggle; forward them so a build of
+# `wayrun` can drop the default. `hyprland` is experimental.
+[features]
+default = ["compositor-niri"]
+compositor-niri = ["wayrun-core/compositor-niri"]
+compositor-hyprland = ["wayrun-core/compositor-hyprland"]
+
 [dependencies]
-wayrun-core = { path = "../core" }
+wayrun-core = { path = "../core", default-features = false }
 calloop = "0.14"
 calloop-wayland-source = "0.4"
 cosmic-text = "0.15"

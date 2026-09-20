@@ -43,7 +43,7 @@ enabled = true
 | `file-search` | `f` | 主目录下的文件。 |
 | `path-search` | `d` | 主目录下的目录。 |
 | `clipboard` | `c` | 剪贴板历史。 |
-| `window` | `w` | niri 上的打开窗口。 |
+| `window` | `w` | 打开窗口（niri 或 Hyprland，取决于编译的后端）。 |
 
 ## 结果动作
 

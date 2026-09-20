@@ -34,6 +34,8 @@ WantedBy=default.target
 systemctl --user enable --now wayrun-launcher
 # niri hotkey — toggle instead of spawn:
 #   Alt+Space { spawn-sh "wayrun toggle"; }
+# Hyprland hotkey:
+#   bind = SUPER, SPACE, exec, wayrun toggle
 ```
 
 The commands are `open` / `close` / `toggle` / `status`, spoken to the socket the

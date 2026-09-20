@@ -1,3 +1,6 @@
+#[cfg(feature = "compositor-hyprland")]
+mod hyprland;
+#[cfg(feature = "compositor-niri")]
 mod niri;
 
 use anyhow::Result;
@@ -29,8 +32,14 @@ pub trait Compositor: Send + Sync {
     fn focus_argv(&self, id: &str) -> Vec<String>;
 }
 
-/// Every compiled-in backend, probed in declaration order by [`detect`].
-static BACKENDS: &[&dyn Compositor] = &[&niri::Niri];
+/// Every compiled-in backend, probed in declaration order by [`detect`]; a
+/// build with no compositor feature carries an empty list.
+static BACKENDS: &[&dyn Compositor] = &[
+    #[cfg(feature = "compositor-niri")]
+    &niri::Niri,
+    #[cfg(feature = "compositor-hyprland")]
+    &hyprland::Hyprland,
+];
 
 /// The compositor hosting this process, or `None` when no backend recognises
 /// the environment.

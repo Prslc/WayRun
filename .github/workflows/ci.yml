@@ -56,10 +56,16 @@ jobs:
         run: cargo fmt --all --check
 
       - name: cargo clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
       - name: cargo test
-        run: cargo test --all --locked
+        run: cargo test --all --all-features --locked
+
+      # niri-only is the default build below; these pin the two remaining combos.
+      - name: cargo check (feature combos)
+        run: |
+          cargo check --locked -p wayrun-shell --no-default-features --features compositor-hyprland
+          cargo check --locked -p wayrun-shell --no-default-features
 
       - name: cargo build --release
         run: cargo build --release --locked
