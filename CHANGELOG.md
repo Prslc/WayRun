@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-20
+
+### Added
+
+- `config.toml` (`~/.config/wayrun/config.toml`): the core's user settings, every
+  key optional. `[web_search].engine` picks Google or DuckDuckGo, and
+  `[font].family` sets the shaping family (a restart applies it).
+- The rest of the card in `theme.toml`: `[layout]` exposes the radii, width
+  ratio/bounds, top ratio, alignment and offsets, `[colors].dim` the backdrop,
+  and `[font].size` the interface size.
+- Per-mode colour tables: `[colors.dark]` and `[colors.light]` layer on
+  `[colors]` for the mode the core reports, so a table states only what it
+  changes.
+- The footer is redrawn as keycap hints plus a result-count pill.
+- The README demo is an animated AVIF, embedded as a plain `<img>`: smaller than
+  the WebP and free of its lossy blocking.
+
+### Changed
+
+- `plugins.toml`'s `enable` field is now `enabled`.
+- `theme.toml` colour overrides converge on the `primary` / `fg` / `container`
+  roles plus per-surface colours, replacing the older per-field table.
+- The clear button and return hints use `×` and `⏎`, glyphs the shaping family
+  covers, so a missing one no longer triggers a full fallback-font scan.
+- Dependencies shrink (`itertools` and `rustc-hash` dropped, unused features
+  trimmed) and CI collapses to one job that ships a `.tar.gz` artifact.
+
+### Fixed
+
+- A `theme.toml` / `config.toml` reload needs no debounce, and a reload never
+  rewrites the file: the shipped template is written once with `create_new`, so
+  an editor's atomic save is not truncated.
+
 ## [0.1.2] - 2026-09-19
 
 ### Added
@@ -92,7 +125,8 @@ and, with `--core`, the backend service.
 - Resident mode over `$XDG_RUNTIME_DIR/wayrun.sock` for zero cold-start
   (`wayrun toggle`).
 
-[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/Prslc/WayRun/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Prslc/WayRun/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Prslc/WayRun/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Prslc/WayRun/releases/tag/v0.1.0
