@@ -138,8 +138,10 @@ and `actions`/`badge` only when set:
 | `badge` | string \| null | optional status glyph at the row's right edge (a pin for a pinned row) |
 
 An `actions` entry is `{"title": string, "on_click": string, "icon"?: string}`,
-with the same icon-spec resolution as a row's `icon`. The core attaches
-the launcher-level pin/unpin and history-removal entries, the owning built-in
+with the same icon-spec resolution as a row's `icon`. The core attaches the
+launcher-level pin/unpin to every actionable row, and history removal to a row
+it sourced from the empty-query history that could have been recorded (not
+`ephemeral`, not `copy:`); the owning built-in
 provider adds its type-specific ones (a file reveal, a `[Desktop Action …]`
 group, a copy-link), and a host's own entries are kept after them. External hosts
 may emit `actions` directly on a result; the shell renders them without knowing the

@@ -379,7 +379,7 @@ pub async fn dispatch(input: &str) -> Vec<ResultItem> {
     let Some(scope) = pin_scope(input) else {
         return items;
     };
-    decorate(items, scope).await
+    decorate(items, scope, false).await
 }
 
 /// A pin's scope is the exact trimmed query, so a bare keyword never summons it;
@@ -391,7 +391,7 @@ fn pin_scope(input: &str) -> Option<&str> {
 
 /// Prepend the scope's pins and attach each row's actions. A pinned row is
 /// re-emitted from storage, so its fresh copy is dropped as a duplicate.
-pub async fn decorate(items: Vec<ResultItem>, scope: &str) -> Vec<ResultItem> {
+pub async fn decorate(items: Vec<ResultItem>, scope: &str, history: bool) -> Vec<ResultItem> {
     let pins: Vec<ResultItem> = crate::system::pins::get_pins(scope)
         .unwrap_or_default()
         .into_iter()
@@ -401,7 +401,7 @@ pub async fn decorate(items: Vec<ResultItem>, scope: &str) -> Vec<ResultItem> {
 
     for item in &mut out {
         let plugin_actions = plugin_actions(item).await;
-        attach_actions(item, scope, &pinned, plugin_actions);
+        attach_actions(item, scope, &pinned, history, plugin_actions);
     }
     out
 }
@@ -439,12 +439,13 @@ async fn plugin_actions(item: &ResultItem) -> Vec<crate::wire::ActionItem> {
     Vec::new()
 }
 
-/// The launcher-level commands every actionable row gets — pin/unpin, history
-/// removal — followed by the row's own type-specific and host-supplied actions.
+/// The launcher-level commands an actionable row gets (pin/unpin always, history
+/// removal only on a recordable history row), before its type and host actions.
 fn attach_actions(
     item: &mut ResultItem,
     scope: &str,
     pinned: &[String],
+    history: bool,
     mut plugin_actions: Vec<crate::wire::ActionItem>,
 ) {
     let Some(on_click) = item.on_click.clone() else {
@@ -463,7 +464,7 @@ fn attach_actions(
             on_click: format!("unpin:{payload}"),
             icon: Some("window-unpin".to_string()),
         });
-    } else {
+    } else if !item.ephemeral {
         // Snapshot the row before the launcher actions are appended, so the pin
         // never embeds the action that stores it. A host's own actions stay.
         let payload = json!({ "scope": scope, "item": item });
@@ -474,11 +475,13 @@ fn attach_actions(
         });
     }
 
-    actions.push(crate::wire::ActionItem {
-        title: "Remove from history".to_string(),
-        on_click: format!("forget:{on_click}"),
-        icon: Some("edit-delete".to_string()),
-    });
+    if history && crate::system::usage::is_recordable(item.ephemeral, Some(&on_click)) {
+        actions.push(crate::wire::ActionItem {
+            title: "Remove from history".to_string(),
+            on_click: format!("forget:{on_click}"),
+            icon: Some("edit-delete".to_string()),
+        });
+    }
 
     actions.append(&mut plugin_actions);
     actions.append(&mut item.actions);
@@ -799,17 +802,16 @@ mod tests {
     #[test]
     fn launcher_actions_lead_the_row_and_carry_its_scope() {
         let mut row = item("Firefox", "launch:firefox.desktop");
-        attach_actions(&mut row, "b", &[], Vec::new());
+        attach_actions(&mut row, "b", &[], false, Vec::new());
 
         let titles: Vec<&str> = row
             .actions
             .iter()
             .map(|action| action.title.as_str())
             .collect();
-        assert_eq!(titles, ["Pin to top", "Remove from history"]);
+        assert_eq!(titles, ["Pin to top"]);
         assert!(row.actions[0].on_click.starts_with("pin:"));
         assert!(row.actions[0].on_click.contains(r#""scope":"b""#));
-        assert_eq!(row.actions[1].on_click, "forget:launch:firefox.desktop");
         assert!(row.badge.is_none(), "an unpinned row carries no badge");
     }
 
@@ -825,6 +827,7 @@ mod tests {
             &mut row,
             "",
             &["file:///tmp/a.txt".to_string()],
+            true,
             vec![reveal],
         );
 
@@ -848,12 +851,51 @@ mod tests {
             on_click: "run:host".to_string(),
             icon: None,
         }];
-        attach_actions(&mut row, "b", &[], Vec::new());
+        attach_actions(&mut row, "b", &[], false, Vec::new());
 
         // The snapshot is the host's row, not the decorated one: the pin action
         // must not embed itself, and the host action must survive the round trip.
         let payload = row.actions[0].on_click.clone();
         assert!(payload.contains(r#""title":"Host""#));
         assert!(!payload.contains("Pin to top"));
+    }
+
+    #[test]
+    fn launcher_entries_follow_the_row() {
+        fn titles(row: &ResultItem) -> Vec<&str> {
+            row.actions.iter().map(|a| a.title.as_str()).collect()
+        }
+
+        let mut history = item("Firefox", "launch:firefox.desktop");
+        attach_actions(&mut history, "", &[], true, Vec::new());
+        assert_eq!(titles(&history), ["Pin to top", "Remove from history"]);
+
+        // a fresh search result is not sourced from the history view
+        let mut search = item("Firefox", "launch:firefox.desktop");
+        attach_actions(&mut search, "fire", &[], false, Vec::new());
+        assert_eq!(titles(&search), ["Pin to top"]);
+
+        // an ephemeral row is neither a durable pin target nor recorded
+        let mut one_shot = item("window", "run:wctl activate 1");
+        one_shot.ephemeral = true;
+        attach_actions(&mut one_shot, "", &[], true, Vec::new());
+        assert!(titles(&one_shot).is_empty());
+
+        // an existing pin must stay removable even on an ephemeral row
+        let mut pinned = item("clip", "run:cliphist decode 1");
+        pinned.ephemeral = true;
+        attach_actions(
+            &mut pinned,
+            "",
+            &["run:cliphist decode 1".to_string()],
+            true,
+            Vec::new(),
+        );
+        assert_eq!(titles(&pinned), ["Unpin"]);
+
+        // a copy: row is not recorded, but it is a stable pin target
+        let mut copy = item("translated", r#"copy:{"text":"hi"}"#);
+        attach_actions(&mut copy, "", &[], true, Vec::new());
+        assert_eq!(titles(&copy), ["Pin to top"]);
     }
 }

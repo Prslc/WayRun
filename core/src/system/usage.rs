@@ -18,16 +18,16 @@ pub fn get_top(limit: i32) -> Result<Vec<serde_json::Value>> {
 
 /// An `ephemeral` row or a `copy:` write is not re-launchable and stays out of
 /// history; the field/scheme carries the semantics for every source.
-fn is_ephemeral(item: &serde_json::Value) -> bool {
-    item["ephemeral"].as_bool().unwrap_or(false)
-        || item["on_click"]
-            .as_str()
-            .is_some_and(|on_click| on_click.starts_with("copy:"))
+pub(crate) fn is_recordable(ephemeral: bool, on_click: Option<&str>) -> bool {
+    !ephemeral && !on_click.is_some_and(|on_click| on_click.starts_with("copy:"))
 }
 
 fn record_with(conn: &Connection, item_json: &str) -> Result<()> {
     let item: serde_json::Value = serde_json::from_str(item_json)?;
-    if is_ephemeral(&item) {
+    if !is_recordable(
+        item["ephemeral"].as_bool().unwrap_or(false),
+        item["on_click"].as_str(),
+    ) {
         return Ok(());
     }
     let on_click = item["on_click"].as_str().context("item missing on_click")?;

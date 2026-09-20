@@ -57,10 +57,10 @@ action panel. The menu is defined by the plugin that owns the row, not by the
 shell, so it differs by result type: `file-search`/`path-search` offer "Reveal
 in file manager", `app-search` lists the entry's `[Desktop Action …]` groups,
 `web-search` and the Firefox plugins offer "Copy URL", and a plugin with none
-simply gets the launcher-level entries (pin/unpin, remove from history). An
-external host may put its own `actions` array on a result item; the core appends
-them after the built-ins. See the `actions` field in
-[jsonrpc.md](jsonrpc.md#result-items).
+simply gets the launcher-level pin/unpin. The empty-query history adds "Remove
+from history" to the rows it sourced. An external host may put its own `actions`
+array on a result item; the core appends them after the built-ins. See the
+`actions` field in [jsonrpc.md](jsonrpc.md#result-items).
 
 ## External hosts
 

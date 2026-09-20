@@ -38,6 +38,11 @@ const ROW_HINTS: &[Hint] = &[
     },
 ];
 
+const LAUNCH_HINT: &[Hint] = &[Hint {
+    key: "⏎",
+    label: "Launch",
+}];
+
 const HELP_HINT: &[Hint] = &[Hint {
     key: "",
     label: "Type ? for help",
@@ -50,11 +55,16 @@ const NO_MATCH_HINT: &[Hint] = &[Hint {
 
 /// The footer's left hints: the panel's keys when open, the launch keys once
 /// rows exist, a help note for an untouched field, else "No results".
-pub(super) fn footer_hints(rows: usize, query_empty: bool, panel: bool) -> &'static [Hint] {
+pub(super) fn footer_hints(
+    rows: usize,
+    query_empty: bool,
+    panel: bool,
+    has_actions: bool,
+) -> &'static [Hint] {
     if panel {
         PANEL_HINTS
     } else if rows > 0 {
-        ROW_HINTS
+        if has_actions { ROW_HINTS } else { LAUNCH_HINT }
     } else if query_empty {
         HELP_HINT
     } else {
@@ -87,7 +97,11 @@ pub(super) fn draw_footer(
     let panel = state.menu.is_some();
     let empty = state.rows.is_empty();
     let no_match = empty && !state.query.is_empty();
-    let hints = footer_hints(state.rows.len(), state.query.is_empty(), panel);
+    let has_actions = state
+        .rows
+        .get(state.selected)
+        .is_some_and(|row| !row.actions.is_empty());
+    let hints = footer_hints(state.rows.len(), state.query.is_empty(), panel, has_actions);
 
     let count = if panel {
         count_label(
@@ -221,11 +235,18 @@ mod tests {
     #[test]
     fn the_footer_separates_no_results_from_an_untouched_field() {
         // an empty field is the history view, not a failed search
-        assert_eq!(footer_hints(0, true, false), HELP_HINT);
-        assert_eq!(footer_hints(0, false, false), NO_MATCH_HINT);
-        assert_eq!(footer_hints(3, false, false), ROW_HINTS);
+        assert_eq!(footer_hints(0, true, false, false), HELP_HINT);
+        assert_eq!(footer_hints(0, false, false, false), NO_MATCH_HINT);
+        assert_eq!(footer_hints(3, false, false, true), ROW_HINTS);
         // the panel owns the footer while it is open
-        assert_eq!(footer_hints(3, false, true), PANEL_HINTS);
+        assert_eq!(footer_hints(3, false, true, true), PANEL_HINTS);
+    }
+
+    #[test]
+    fn a_row_without_actions_drops_the_actions_hint() {
+        assert_eq!(footer_hints(3, false, false, false), LAUNCH_HINT);
+        // the panel hint outlives the selected row's actions while it is open
+        assert_eq!(footer_hints(3, false, true, false), PANEL_HINTS);
     }
 
     #[test]

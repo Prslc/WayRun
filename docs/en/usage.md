@@ -46,7 +46,10 @@ the commands that type of result offers. Its entries come from the plugin that
 produced the row, so a file row offers "Reveal in file manager", an application
 row lists its `[Desktop Action …]` groups, a bookmark or search hit offers "Copy
 URL", and an external host may attach its own. Every actionable row also gets
-the launcher-level **Pin to top** / **Unpin** and **Remove from history**.
+the launcher-level **Pin to top** / **Unpin**; a row in the empty-query history
+— and only one that was really recorded there — additionally offers **Remove
+from history**. A row with no command to offer has no panel at all, so the
+footer hides its actions hint.
 
 While the panel is open, `↑`/`↓` (and the wheel) move through it, `Enter` runs
 the highlighted command, and `Esc` or `Shift+Enter` closes it. Typing closes the

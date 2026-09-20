@@ -166,7 +166,7 @@ async fn emit_history(tx: &mpsc::Sender<String>) {
         .into_iter()
         .filter_map(|value| serde_json::from_value(value).ok())
         .collect();
-    let items = plugin::decorate(items, "").await;
+    let items = plugin::decorate(items, "", true).await;
     emit(tx, &serde_json::json!({ "type": "results", "data": items })).await;
 }
 

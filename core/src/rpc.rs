@@ -140,7 +140,7 @@ pub async fn handle(
                 .into_iter()
                 .filter_map(|value| serde_json::from_value(value).ok())
                 .collect();
-            let items = crate::plugin::decorate(items, "").await;
+            let items = crate::plugin::decorate(items, "", true).await;
             if has_id {
                 respond(tx, id, Ok(json!(items))).await;
             }

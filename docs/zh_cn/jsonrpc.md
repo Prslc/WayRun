@@ -126,8 +126,9 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 | `badge` | string \| null | 可选，行右缘的状态图标（置顶行为图钉） |
 
 `actions` 元素为 `{"title": string, "on_click": string, "icon"?: string}`，
-`icon` 与结果行的 `icon` 采用同样的规范解析。后端补上启动器级别的
-置顶/取消置顶与移除历史两项，产出该行的内置提供者再补上类型专属项（文件定位、
+`icon` 与结果行的 `icon` 采用同样的规范解析。后端为每个可操作的行补上启动器级别的
+置顶/取消置顶；对空查询历史来源、且本可被记入历史（非 `ephemeral`、非 `copy:`）的行
+再补上移除历史。产出该行的内置提供者补上类型专属项（文件定位、
 `[Desktop Action …]`、复制链接），外部主机自带的项排在其后。外部主机可以直接在结果项上
 输出 `actions`，前端无需理解 scheme 即可渲染。二级菜单专属 scheme 有
 `pin:{"scope","item"}`、`unpin:{"scope","on_click"}`、`forget:<on_click>` 与
