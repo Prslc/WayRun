@@ -12,8 +12,8 @@ highlighted one.
 | `firefox` | fuzzy-search installed applications |
 | `b <query>` | search Firefox bookmarks |
 | `h <query>` | search Firefox history |
-| `f <query>` | search files by name |
-| `d <query>` | search files by path (multi-token fuzzy) |
+| `f <query>` | search files by name or path |
+| `d <query>` | search directories by path (multi-token) |
 | `r <query>` | fuzzy-search `$PATH` executables and run one |
 | `w <query>` | switch focus to a matching open niri window |
 | `c <query>` | search clipboard history (cliphist) |
@@ -22,6 +22,11 @@ highlighted one.
 | `lock` / `reboot` / `shutdown` | system commands |
 | `2 + 3` | inline calculator |
 | _(empty)_ | show most-used items |
+
+A query containing `/` or starting with `~` is a **path query**: it resolves
+under `$HOME` and matches against the path, and a path that exists is opened
+directly even when it sits past the depth-3 walk. Nothing outside `$HOME` is
+ever searched.
 
 ## Keys
 

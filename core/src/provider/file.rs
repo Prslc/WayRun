@@ -1,5 +1,5 @@
 use std::future::Future;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
 use anyhow::Result;
@@ -22,7 +22,7 @@ fn mime_icon(path: &Path) -> Option<String> {
 }
 
 macro_rules! search_plugin {
-    ($name:ident, $id:literal, $display:literal, $scorer:ident, $ready:literal) => {
+    ($name:ident, $id:literal, $display:literal, $by_name:literal, $dirs:literal, $ready:literal) => {
         pub struct $name;
 
         impl Plugin for $name {
@@ -40,10 +40,12 @@ macro_rules! search_plugin {
                 query: &str,
                 _full: &str,
             ) -> Pin<Box<dyn Future<Output = Result<Vec<ResultItem>>> + Send + '_>> {
-                let query = query.to_lowercase();
+                // Keep the query's case: a path query is stat'd against the real
+                // filesystem, where case matters.
+                let query = query.to_string();
                 Box::pin(async move {
                     Ok(
-                        tokio::task::spawn_blocking(move || do_search(&query, $scorer))
+                        tokio::task::spawn_blocking(move || do_search(&query, $dirs, $by_name))
                             .await
                             .unwrap_or_default(),
                     )
@@ -101,15 +103,17 @@ search_plugin!(
     FileSearch,
     "file-search",
     "Files",
-    score_name,
-    "Search files by name"
+    true,
+    false,
+    "Search files by name or path"
 );
 search_plugin!(
     PathSearch,
     "path-search",
-    "Paths",
-    score_path,
-    "Search files by path"
+    "Directories",
+    false,
+    true,
+    "Search directories by path"
 );
 
 /// Exact, then prefix, then substring, so a short exact name outranks a longer
@@ -143,6 +147,53 @@ fn score_path(name: &str, path: &str, query: &str, depth: usize) -> u32 {
         .saturating_sub(depth as u32)
 }
 
+/// The path a path-like query names, before it is checked against the disk:
+/// `~` and a relative path resolve under `home`, an absolute path stays put.
+/// `None` when the query has no path syntax.
+fn resolve_path_query(query: &str, home: &Path) -> Option<PathBuf> {
+    if query.starts_with('~') {
+        Some(home.join(query.trim_start_matches('~').trim_start_matches('/')))
+    } else if query.starts_with('/') {
+        Some(PathBuf::from(query))
+    } else if query.contains('/') {
+        Some(home.join(query))
+    } else {
+        None
+    }
+}
+
+/// The existing path a query names, canonicalized and confined to `$HOME`; a
+/// path outside the home scope is out of bounds, as is one that does not exist.
+fn exact_under_home(query: &str, home: &Path) -> Option<PathBuf> {
+    let candidate = resolve_path_query(query, home)?.canonicalize().ok()?;
+    let home = home.canonicalize().ok()?;
+    candidate.starts_with(home).then_some(candidate)
+}
+
+/// One walked or stat'd path as a result row. GLib builds the URI, because raw
+/// paths are invalid for spaces and non-ASCII.
+fn entry_item(path: &Path, is_dir: bool) -> ResultItem {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    ResultItem {
+        on_click: Some(Action::Open {
+            uri: gio::File::for_path(path).uri().to_string(),
+        }),
+        title: if is_dir { format!("{name}/") } else { name },
+        summary: Some(path.to_string_lossy().into_owned()),
+        icon: if is_dir {
+            resolve("folder")
+        } else {
+            mime_icon(path)
+        },
+        ephemeral: false,
+        actions: Vec::new(),
+        badge: None,
+    }
+}
+
 /// Walk filter: skip hidden dirs and build caches, and skip the three roots at
 /// depth 1 under `~` (they are walked on their own), so nothing is doubled.
 fn keep_entry(name: &str, depth: usize) -> bool {
@@ -157,13 +208,33 @@ fn keep_entry(name: &str, depth: usize) -> bool {
 /// the best 50, so one keystroke cannot walk an unbounded tree.
 const MATCH_CAP: usize = 200;
 
-fn do_search(query: &str, scorer: fn(&str, &str, &str, usize) -> u32) -> Vec<ResultItem> {
+/// `want_dir` keeps `f` to files and `d` to directories, so the two providers
+/// stay complementary. `by_name` is `f`'s name-only match; a path query always
+/// matches the path, whichever provider is asking.
+fn do_search(query: &str, want_dir: bool, by_name: bool) -> Vec<ResultItem> {
+    let query = query.trim();
     if query.is_empty() {
         return vec![];
     }
 
     let Ok(home) = get_home() else {
         return vec![];
+    };
+
+    // An existing path under home is the answer itself, outside the walk's
+    // depth and roots; a path outside home is out of scope.
+    if let Some(path) = exact_under_home(query, &home)
+        && let Some(item) = path_item(&path, want_dir)
+    {
+        return vec![item];
+    }
+
+    let path_mode = query.starts_with('~') || query.contains('/');
+    let query_lower = query.to_lowercase();
+    let scorer = if by_name && !path_mode {
+        score_name
+    } else {
+        score_path
     };
 
     let roots = [
@@ -188,44 +259,18 @@ fn do_search(query: &str, scorer: fn(&str, &str, &str, usize) -> u32) -> Vec<Res
         for entry in walker.filter_map(Result::ok) {
             let ft = entry.file_type();
             let is_dir = ft.is_dir();
-            if !is_dir && !ft.is_file() {
+            if (!is_dir && !ft.is_file()) || is_dir != want_dir {
                 continue;
             }
 
-            let path = entry.path().to_string_lossy().into_owned();
+            let path = entry.path();
             let name = entry.file_name().to_string_lossy();
-
-            let score = scorer(&name, &path, query, entry.depth());
+            let score = scorer(&name, &path.to_string_lossy(), &query_lower, entry.depth());
             if score == 0 {
                 continue;
             }
 
-            // GLib builds the URI: raw paths are invalid for spaces/non-ASCII.
-            let file_url = gio::File::for_path(&path).uri().to_string();
-
-            let title = if is_dir {
-                format!("{name}/")
-            } else {
-                name.into_owned()
-            };
-            let icon = if is_dir {
-                resolve("folder")
-            } else {
-                mime_icon(Path::new(&path))
-            };
-
-            scored.push((
-                score,
-                ResultItem {
-                    title,
-                    summary: Some(path),
-                    on_click: Some(Action::Open { uri: file_url }),
-                    icon,
-                    ephemeral: false,
-                    actions: Vec::new(),
-                    badge: None,
-                },
-            ));
+            scored.push((score, entry_item(path, is_dir)));
 
             if scored.len() >= MATCH_CAP {
                 break;
@@ -238,6 +283,13 @@ fn do_search(query: &str, scorer: fn(&str, &str, &str, usize) -> u32) -> Vec<Res
     }
 
     crate::provider::rank_results(scored, false, 50)
+}
+
+/// A stat'd path as one row, or `None` when it is not the kind this provider
+/// lists (`f` files, `d` directories).
+fn path_item(path: &Path, want_dir: bool) -> Option<ResultItem> {
+    let is_dir = std::fs::metadata(path).ok()?.is_dir();
+    (is_dir == want_dir).then(|| entry_item(path, is_dir))
 }
 
 #[cfg(test)]
@@ -342,8 +394,8 @@ mod tests {
 
     #[test]
     fn empty_query_matches_nothing() {
-        assert!(do_search("", score_name).is_empty());
-        assert!(do_search("", score_path).is_empty());
+        assert!(do_search("", false, true).is_empty());
+        assert!(do_search("", true, false).is_empty());
     }
 
     #[test]
@@ -370,6 +422,39 @@ mod tests {
     fn a_shallower_path_breaks_a_tier_tie() {
         let query = "wayrun";
         assert!(score_name("wayrun", "", query, 1) > score_name("wayrun", "", query, 3));
+    }
+
+    #[test]
+    fn a_path_query_resolves_under_home() {
+        let home = Path::new("/home/u");
+        assert_eq!(
+            resolve_path_query("~/Project/WayRun", home),
+            Some(PathBuf::from("/home/u/Project/WayRun"))
+        );
+        assert_eq!(
+            resolve_path_query("~", home),
+            Some(PathBuf::from("/home/u"))
+        );
+        assert_eq!(
+            resolve_path_query("/etc/hosts", home),
+            Some(PathBuf::from("/etc/hosts"))
+        );
+        assert_eq!(
+            resolve_path_query("Project/WayRun", home),
+            Some(PathBuf::from("/home/u/Project/WayRun"))
+        );
+        // a bare name is not a path query
+        assert_eq!(resolve_path_query("wayrun", home), None);
+    }
+
+    #[test]
+    fn an_exact_path_outside_home_is_out_of_scope() {
+        // `exact_under_home` only stats real paths; use whatever exists here.
+        let home = std::env::temp_dir();
+        if Path::new("/etc/hosts").exists() {
+            assert!(exact_under_home("/etc/hosts", &home).is_none());
+            assert!(exact_under_home("~/../etc/hosts", &home).is_none());
+        }
     }
 
     #[test]

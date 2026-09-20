@@ -46,7 +46,7 @@ everything.
 | `firefox-history` | `h` | Firefox history. |
 | `web-search` | `s` | Web search suggestions (engine set in `config.toml`). |
 | `file-search` | `f` | Files under the home directory. |
-| `path-search` | `d` | Directories and paths. |
+| `path-search` | `d` | Directories under the home directory. |
 | `clipboard` | `c` | Clipboard history. |
 | `window` | `w` | Open windows on niri. |
 

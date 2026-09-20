@@ -41,7 +41,7 @@ enabled = true
 | `firefox-history` | `h` | Firefox 历史。 |
 | `web-search` | `s` | 网页搜索建议（引擎在 `config.toml` 中设置）。 |
 | `file-search` | `f` | 主目录下的文件。 |
-| `path-search` | `d` | 目录与路径。 |
+| `path-search` | `d` | 主目录下的目录。 |
 | `clipboard` | `c` | 剪贴板历史。 |
 | `window` | `w` | niri 上的打开窗口。 |
 
