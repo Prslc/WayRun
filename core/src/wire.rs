@@ -88,8 +88,8 @@ pub struct ResultItem {
     pub badge: Option<String>,
 }
 
-/// The `{"type":"theme","data":{…}}` payload. Every role is optional, so a
-/// partial payload still applies; the shell draws only the roles it models.
+/// The `theme` notification's params. Every role is optional, so a partial
+/// payload still applies; the shell draws only the roles it models.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ThemeConfig {
     /// `"dark"` or `"light"`: which palette was resolved, so a host's per-mode
