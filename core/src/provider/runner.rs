@@ -7,7 +7,7 @@ use anyhow::Result;
 use std::collections::HashSet;
 
 use crate::plugin::{Meta, Plugin};
-use crate::system::icon::find_icon_path;
+use crate::system::icon::resolve;
 use crate::wire::ResultItem;
 
 pub struct Runner;
@@ -126,7 +126,7 @@ fn do_search(input: &str) -> Vec<ResultItem> {
                     title: name.clone(),
                     summary: Some(run_cmd.clone()),
                     on_click: Some(format!("run:{run_cmd}")),
-                    icon: find_icon_path(name).or_else(|| Some(String::new())),
+                    icon: resolve(name),
                     ephemeral: false,
                     actions: Vec::new(),
                     badge: None,

@@ -2,7 +2,6 @@ use std::future::Future;
 use std::pin::Pin;
 
 use crate::plugin::{Meta, Plugin};
-use crate::system::icon::find_icon_path;
 use crate::wire::{ActionItem, ResultItem};
 use anyhow::{Context, Result};
 
@@ -129,13 +128,13 @@ fn do_search(engine: &Engine, query: &str) -> Result<Vec<ResultItem>> {
     let json: Vec<serde_json::Value> = response.json().context("parsing web suggestions")?;
 
     // one resolved engine icon shared by every row (header + suggestions)
-    let icon = find_icon_path(engine.icon).unwrap_or_default();
+    let icon = crate::system::icon::resolve(engine.icon);
 
     let mut results = vec![ResultItem {
         title: format!("Search: {query}"),
         summary: Some(engine.summary.to_string()),
         on_click: Some(result_url(engine, query)),
-        icon: Some(icon.clone()),
+        icon: icon.clone(),
         ephemeral: true,
         actions: Vec::new(),
         badge: None,
@@ -152,7 +151,7 @@ fn do_search(engine: &Engine, query: &str) -> Result<Vec<ResultItem>> {
                     title: phrase.to_string(),
                     summary: Some(engine.summary.to_string()),
                     on_click: Some(result_url(engine, phrase)),
-                    icon: Some(icon.clone()),
+                    icon: icon.clone(),
                     ephemeral: true,
                     actions: Vec::new(),
                     badge: None,

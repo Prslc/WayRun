@@ -95,8 +95,7 @@ fn row(compositor: &dyn Compositor, window: Window) -> ResultItem {
         icon: window
             .app_id
             .as_deref()
-            .and_then(desktop_action::icon_for_app_id)
-            .or_else(|| Some(String::new())),
+            .and_then(desktop_action::icon_for_app_id),
         ephemeral: true,
         actions: Vec::new(),
         badge: None,

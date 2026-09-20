@@ -2,7 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use crate::plugin::{Meta, Plugin};
-use crate::system::icon::find_icon_path;
+use crate::system::icon::resolve;
 use crate::wire::ResultItem;
 use anyhow::Result;
 
@@ -103,7 +103,7 @@ fn do_search(expr: &str) -> Vec<ResultItem> {
                 title: formatted,
                 summary: Some(expr.to_string()),
                 on_click: None,
-                icon: find_icon_path("calc"),
+                icon: resolve("calc"),
                 ephemeral: true,
                 actions: Vec::new(),
                 badge: None,

@@ -38,11 +38,11 @@ pub fn icon_for_app_id(app_id: &str) -> Option<String> {
         return None;
     }
     if let Some(icon) = entry(app_id, None).and_then(|e| e.icon().map(str::to_owned))
-        && let Some(path) = crate::system::icon::find_icon_path(&icon)
+        && let Some(path) = crate::system::icon::resolve(&icon)
     {
         return Some(path);
     }
-    crate::system::icon::find_icon_path(app_id)
+    crate::system::icon::resolve(app_id)
 }
 
 /// What this entry's field codes stand for. `%i` names the action group's own

@@ -2,7 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use crate::plugin::{Meta, Plugin};
-use crate::system::icon::find_icon_path;
+use crate::system::icon::resolve;
 use crate::wire::ResultItem;
 use anyhow::Result;
 
@@ -67,7 +67,7 @@ fn do_search(input: &str) -> Vec<ResultItem> {
             title: name.to_string(),
             summary: Some(cmd.to_string()),
             on_click: Some(format!("run:{cmd}")),
-            icon: find_icon_path(icon).or_else(|| Some(String::new())),
+            icon: resolve(icon),
             ephemeral: true,
             actions: Vec::new(),
             badge: None,

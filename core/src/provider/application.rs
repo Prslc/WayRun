@@ -7,7 +7,7 @@ use freedesktop_desktop_entry::DesktopEntry;
 use gio::prelude::{AppInfoExt, IconExt};
 
 use crate::plugin::{Meta, Plugin};
-use crate::system::icon::find_icon_path;
+use crate::system::icon::resolve;
 use crate::wire::{ActionItem, ResultItem};
 
 // Tiered weights: a strong textual tier wins outright and fuzzy matching is a
@@ -59,7 +59,7 @@ impl CachedApp {
         if let Some(path) = spec.strip_prefix("!!") {
             (!path.is_empty()).then(|| path.to_string())
         } else {
-            find_icon_path(spec)
+            resolve(spec)
         }
     }
 }

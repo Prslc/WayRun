@@ -84,8 +84,9 @@ fn cache() -> &'static Mutex<HashMap<String, Option<String>>> {
 }
 
 /// A real icon file for `name`, or `None` when nothing matches. Cached, because
-/// a miss scans the whole theme space.
-fn find_exact(name: &str) -> Option<String> {
+/// a miss scans the whole theme space. A row's own spec uses this, so a miss
+/// stays empty and the owning plugin's identity icon can answer for it.
+pub fn resolve(name: &str) -> Option<String> {
     if let Ok(cache) = cache().lock()
         && let Some(cached) = cache.get(name)
     {
@@ -102,13 +103,13 @@ fn find_exact(name: &str) -> Option<String> {
 }
 
 pub fn find_icon_path(name: &str) -> Option<String> {
-    find_exact(name).or_else(|| xdg::resource_path("images/application_default.png"))
+    resolve(name).or_else(|| xdg::resource_path("images/application_default.png"))
 }
 
 /// The first name in `names` that resolves to a real icon file, without the
 /// bundled default: a MIME type's themed-icon list is a priority chain.
 pub fn find_first_icon_path<'a>(names: impl IntoIterator<Item = &'a str>) -> Option<String> {
-    names.into_iter().find_map(find_exact)
+    names.into_iter().find_map(resolve)
 }
 
 /// A theme name found under any `base/{theme}/{size}/{category}/`. The scan is
@@ -232,6 +233,12 @@ mod tests {
         // what answers.
         let path = find_icon_path("application_default").unwrap();
         assert!(path.ends_with("images/application_default.png"), "{path}");
+    }
+
+    #[test]
+    fn resolve_leaves_a_miss_empty_and_find_icon_path_fills_it() {
+        assert!(resolve("definitely-not-an-icon-xyz").is_none());
+        assert!(find_icon_path("definitely-not-an-icon-xyz").is_some());
     }
 
     #[test]

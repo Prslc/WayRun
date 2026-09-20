@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::process::Command;
 
 use crate::plugin::{Meta, Plugin};
-use crate::system::icon::find_icon_path;
+use crate::system::icon::resolve;
 use crate::wire::ResultItem;
 use anyhow::Result;
 
@@ -43,7 +43,7 @@ fn do_search(query: &str) -> Vec<ResultItem> {
     };
     let text = String::from_utf8_lossy(&output.stdout);
     let mut results = parse_entries(query, &text);
-    let icon = find_icon_path("clipboard").or_else(|| Some(String::new()));
+    let icon = resolve("clipboard");
     for r in &mut results {
         r.icon = icon.clone();
     }

@@ -11,7 +11,7 @@ use tokio::task;
 
 use crate::plugin::{Meta, Plugin};
 use crate::system::fs::get_home;
-use crate::system::icon::find_icon_path;
+use crate::system::icon::resolve;
 use crate::wire::{ActionItem, ResultItem};
 
 use super::copy_url_action;
@@ -96,7 +96,7 @@ async fn do_search(mode: Mode, query: &str) -> Result<Vec<ResultItem>> {
         };
 
         let pattern = format!("%{query}%");
-        let firefox_icon = find_icon_path("firefox");
+        let firefox_icon = resolve("firefox");
         let mut stmt = conn.prepare(sql)?;
         let rows = stmt.query_map([query.as_str(), &pattern], move |row| {
             let title: Option<String> = row.get(0)?;

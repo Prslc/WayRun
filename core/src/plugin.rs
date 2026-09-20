@@ -549,7 +549,7 @@ async fn search(input: &str) -> Vec<ResultItem> {
             if let Ok(Some(items)) = entry.plugin.default_view().await
                 && !items.is_empty()
             {
-                return items;
+                return fill_icons(entry.plugin.meta().icon, items);
             }
             let meta = entry.plugin.meta();
             return vec![ResultItem {
@@ -567,7 +567,7 @@ async fn search(input: &str) -> Vec<ResultItem> {
             if let Ok(results) = entry.plugin.search(query, input).await
                 && !results.is_empty()
             {
-                return results;
+                return fill_icons(entry.plugin.meta().icon, results);
             }
         }
 
@@ -578,11 +578,24 @@ async fn search(input: &str) -> Vec<ResultItem> {
         if let Ok(results) = entry.plugin.search(query, input).await
             && !results.is_empty()
         {
-            return results;
+            return fill_icons(entry.plugin.meta().icon, results);
         }
     }
 
     vec![]
+}
+
+/// Rows a provider left iconless take its identity icon, so a command or window
+/// row never shows the app placeholder before the shell sees it. Running before
+/// `decorate`, this is also what pins and usage history store.
+fn fill_icons(meta_icon: &str, mut items: Vec<ResultItem>) -> Vec<ResultItem> {
+    let fallback = find_icon_path(meta_icon);
+    for item in &mut items {
+        if item.icon.as_deref().is_none_or(str::is_empty) {
+            item.icon.clone_from(&fallback);
+        }
+    }
+    items
 }
 
 #[cfg(test)]
@@ -742,6 +755,21 @@ mod tests {
         // a command that no longer exists is never fresh
         std::fs::remove_file(&cmd).unwrap();
         assert!(cache.fresh(&command).is_none());
+    }
+
+    #[test]
+    fn rows_without_an_icon_take_the_plugin_identity_icon() {
+        let mut items = vec![item("blank", "run:blank"), item("kept", "run:kept")];
+        items[0].icon = Some(String::new());
+        items[1].icon = Some("/tmp/kept.svg".into());
+
+        let filled = fill_icons("utilities-terminal", items);
+        assert_eq!(
+            filled[0].icon,
+            find_icon_path("utilities-terminal"),
+            "an empty spec is a miss, not an icon"
+        );
+        assert_eq!(filled[1].icon.as_deref(), Some("/tmp/kept.svg"));
     }
 
     #[test]

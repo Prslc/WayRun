@@ -8,7 +8,7 @@ use walkdir::WalkDir;
 
 use crate::plugin::{Meta, Plugin};
 use crate::system::fs::get_home;
-use crate::system::icon::{find_first_icon_path, find_icon_path};
+use crate::system::icon::{find_first_icon_path, resolve};
 use crate::wire::{ActionItem, ResultItem};
 
 /// The icon the system MIME database assigns to `path`. Its themed-icon list is
@@ -160,9 +160,9 @@ fn do_search(query: &str, matcher: fn(&str, &str, &str) -> bool) -> Vec<ResultIt
                 name.into_owned()
             };
             let icon = if is_dir {
-                find_icon_path("folder")
+                resolve("folder")
             } else {
-                mime_icon(Path::new(&path)).or_else(|| find_icon_path("text-x-generic"))
+                mime_icon(Path::new(&path))
             };
 
             results.push(ResultItem {
