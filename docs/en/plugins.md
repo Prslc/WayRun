@@ -36,19 +36,21 @@ everything.
 
 ## Built-in plugins
 
-| Id | Keyword | What it searches |
-| --- | --- | --- |
-| `calculator` | `""` | Inline arithmetic. |
-| `system-commands` | `""` | `lock`, `reboot`, `shutdown`, `suspend`, `logout`. |
-| `app-search` | `""` | Installed applications (desktop entries). |
-| `runner` | `r` | Fuzzy `$PATH` executables; accepts arguments. An installed app launches through GLib (honoring `Terminal=`), anything else runs in a terminal. |
-| `firefox-bookmarks` | `b` | Firefox bookmarks. |
-| `firefox-history` | `h` | Firefox history. |
-| `web-search` | `s` | Web search suggestions (engine set in `config.toml`). |
-| `file-search` | `f` | Files under the home directory. |
-| `path-search` | `d` | Directories under the home directory. |
-| `clipboard` | `c` | Clipboard history. |
-| `window` | `w` | Open windows (niri or Hyprland, per build). |
+| Id | Keyword | What it searches | Needs |
+| --- | --- | --- | --- |
+| `calculator` | `""` | Inline arithmetic. | — |
+| `system-commands` | `""` | `lock`, `reboot`, `shutdown`, `suspend`, `logout`. | — |
+| `app-search` | `""` | Installed applications (desktop entries). | — |
+| `runner` | `r` | Fuzzy `$PATH` executables; accepts arguments. An installed app launches through GLib (honoring `Terminal=`), anything else runs in a terminal. | a terminal emulator |
+| `firefox-bookmarks` | `b` | Firefox bookmarks. | Firefox with a profile |
+| `firefox-history` | `h` | Firefox history. | Firefox with a profile |
+| `web-search` | `s` | Web search suggestions (engine set in `config.toml`). | network access |
+| `file-search` | `f` | Files under the home directory. | — |
+| `path-search` | `d` | Directories under the home directory. | — |
+| `clipboard` | `c` | Clipboard history. | `cliphist` running |
+| `window` | `w` | Open windows (niri or Hyprland, per build). | the matching compositor backend |
+
+A keyword whose dependency is absent returns no rows instead of failing.
 
 ## Result actions
 

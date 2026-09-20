@@ -23,6 +23,11 @@ highlighted one.
 | `2 + 3` | inline calculator |
 | _(empty)_ | show most-used items |
 
+Some prefixes need an optional component: `w` a compositor backend, `b`/`h`
+Firefox, `c` cliphist, and copy/paste `wl-clipboard`. Without it, the keyword
+returns no rows. The full list is in the
+[README](../../README.md#feature-dependencies).
+
 A query containing `/` or starting with `~` is a **path query**: it is stat'd
 directly and opened when it exists, even past the depth-3 walk. `~` and a
 relative path resolve under `$HOME`; the walk itself never leaves `$HOME`, but

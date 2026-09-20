@@ -27,6 +27,9 @@ Environment=WAYRUN_RESIDENT=1
 WantedBy=default.target
 ```
 
+在合成器配置里绑定 `wayrun toggle` 即可；凡是能在按键上执行命令的合成器都可以，
+下面仅以 niri 与 Hyprland 举例：
+
 ```sh
 systemctl --user enable --now wayrun-launcher
 # niri 热键 —— 切换而非重新拉起：

@@ -30,6 +30,9 @@ Environment=WAYRUN_RESIDENT=1
 WantedBy=default.target
 ```
 
+Bind `wayrun toggle` in your compositor's config. Any compositor that can run
+a command on a key works; niri and Hyprland are just the two shown here:
+
 ```sh
 systemctl --user enable --now wayrun-launcher
 # niri hotkey — toggle instead of spawn:

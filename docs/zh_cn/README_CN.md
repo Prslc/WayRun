@@ -7,16 +7,23 @@
 中文 | [English](../../README.md)
 
 [![CI](https://github.com/Prslc/WayRun/actions/workflows/ci.yml/badge.svg)](https://github.com/Prslc/WayRun/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Prslc/WayRun?color=4a90d9&label=release)](https://github.com/Prslc/WayRun/releases)
 [![License](https://img.shields.io/github/license/Prslc/WayRun?color=yellow)](../../LICENSE)
 [![Rust](https://img.shields.io/badge/rust-stable-orange?logo=rust)](https://www.rust-lang.org/)
 [![Wayland](https://img.shields.io/badge/Wayland-native-4a90d9?logo=wayland&logoColor=white)](https://wayland.freedesktop.org/)
 
 </div>
 
+一款 Wayland 原生的 Linux 应用启动器与快速搜索工具。在悬浮窗口中输入关键词，即可搜索
+已安装应用、文件、Firefox 书签、网页建议，并进行即时数学计算。
+
 ## 概述
 
-WayRun 是一款 Wayland 原生的 Linux 应用启动器和快速搜索工具。在悬浮窗口中输入关键词，即可搜索已安装应用、Firefox 书签、网页建议，并进行即时数学计算。整个项目只产出一个 Rust 可执行文件 `wayrun`：默认作为覆盖层前端（shell）运行，带 `--core` 时作为后端服务运行。前端自己持有 `wlr-layer-shell` 表面，用
-[tiny-skia](https://github.com/RazrFalcon/tiny-skia) 把卡片、列表与动画直接光栅化进 `wl_shm` 缓冲，因此不需要 GPU 栈，也不依赖任何 GUI 工具包；后端负责插件注册表、JSON-RPC 协议与使用历史库。
+整个项目只产出一个 Rust 可执行文件 `wayrun`：默认作为覆盖层前端（shell）运行，带 `--core`
+时作为后端服务运行。前端自己持有 `wlr-layer-shell` 表面，用
+[tiny-skia](https://github.com/RazrFalcon/tiny-skia) 把卡片、列表与动画直接光栅化进 `wl_shm`
+缓冲，因此不需要 GPU 栈，也不依赖任何 GUI 工具包；后端负责插件注册表、JSON-RPC 协议与
+使用历史库。
 
 ## 演示
 
@@ -39,11 +46,27 @@ WayRun 是一款 Wayland 原生的 Linux 应用启动器和快速搜索工具。
 
 ## 环境要求
 
-- 支持 `wlr-layer-shell` 协议的 **Wayland** 合成器
-- Rust 工具链（前后端都是 Rust，前端只依赖 tiny-skia/cosmic-text 等普通 crate）
-- 覆盖中日文输入的字体（如 Source Han Sans）
-- Firefox（可选，用于书签和历史搜索）
-- [cliphist](https://github.com/sentriz/cliphist)（可选，用于剪贴板历史）
+- **Wayland** 合成器，需实现 `wlr-layer-shell`（`zwlr_layer_shell_v1`）。包括
+  wlroots 系（niri、Hyprland、Sway、river、Wayfire、labwc 等）、KDE Plasma 的
+  Wayland 会话，以及基于 Mir 的合成器；GNOME/Mutter 未实现该协议，无法显示覆盖层。
+- Rust 工具链与常见系统库（GLib、SQLite、xkbcommon、fontconfig 等）；
+  `cargo build --release` 会构建整个工作区。前端本身不引入 GUI 工具包，
+  只用 tiny-skia、cosmic-text 等纯 Rust crate。
+- 覆盖中日文输入的字体（如 Source Han Sans）。
+
+## 功能依赖
+
+覆盖层本身，以及内置的应用、文件、计算与网页搜索，只需一个支持上述协议的合成器。其余
+功能各自还依赖一个可选组件；缺少时，对应前缀只会返回空结果，而不会报错：
+
+| 功能 | 依赖 |
+| --- | --- |
+| `w` 打开窗口搜索 | 编译时选择 niri（默认）或 Hyprland 后端，见[合成器后端](#合成器后端) |
+| `b` / `h` Firefox 搜索 | 已配置 profile 的 Firefox |
+| `c` 剪贴板历史 | [cliphist](https://github.com/sentriz/cliphist) 正在运行 |
+| 复制/粘贴与“复制…”动作 | `wl-clipboard`（`wl-copy` / `wl-paste`） |
+| 仅能在终端中运行的 `$PATH` 结果（`r`） | 终端模拟器（`$TERMINAL`，否则取 `PATH` 上的一个） |
+| 卡片模糊 | `ext-background-effect-v1`（niri），或由合成器按 namespace 自行模糊 |
 
 ## 快速开始
 
@@ -54,7 +77,8 @@ cargo build --release
 ln -s "$(pwd)/target/release/wayrun" ~/.local/bin/wayrun
 ```
 
-然后在合成器配置中绑定快捷键（如 `Alt+Space`）来启动：
+在合成器配置中绑定一个快捷键（如 `Alt+Space`）来启动即可；绑定写法因合成器而异，
+niri 与 Hyprland 的示例见[常驻模式](resident.md)：
 
 ```bash
 wayrun
@@ -65,9 +89,9 @@ wayrun
 
 ## 合成器后端
 
-窗口搜索（`w`）按合成器编译，通过 cargo feature 开关：`compositor-niri`（默认）
-与 `compositor-hyprland`（实验性）。只编你实际使用的那一个；一个后端都不编时，
-启动器照常运行，只是 `w` 没有结果。
+覆盖层与合成器无关；只有窗口搜索（`w`）需要按合成器单独编译，由 cargo feature 选择
+后端：`compositor-niri`（默认）与 `compositor-hyprland`（实验性）。只编译你要用的
+那一个；一个后端都不编译时，启动器照常运行，只是 `w` 没有结果。
 
 ```bash
 cargo build --release                                            # niri

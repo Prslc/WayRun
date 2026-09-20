@@ -7,20 +7,22 @@
 English | [Chinese](docs/zh_cn/README_CN.md)
 
 [![CI](https://github.com/Prslc/WayRun/actions/workflows/ci.yml/badge.svg)](https://github.com/Prslc/WayRun/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Prslc/WayRun?color=4a90d9&label=release)](https://github.com/Prslc/WayRun/releases)
 [![License](https://img.shields.io/github/license/Prslc/WayRun?color=yellow)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-stable-orange?logo=rust)](https://www.rust-lang.org/)
 [![Wayland](https://img.shields.io/badge/Wayland-native-4a90d9?logo=wayland&logoColor=white)](https://wayland.freedesktop.org/)
 
 </div>
 
+A Wayland-native application launcher and quick-search tool for Linux. Type to
+search installed apps, files, Firefox bookmarks, web suggestions and inline
+math, all from a single floating overlay.
+
 ## Overview
 
-WayRun is a Wayland-native application launcher and quick-search tool for Linux.
-Type to search installed apps, Firefox bookmarks, web suggestions, and
-inline math — all from a single floating overlay. It ships as one Rust binary,
-`wayrun`, which runs as the overlay shell or, with `--core`, as the backend
-service. The shell owns a `wlr-layer-shell` surface and rasterises its own card,
-list and animations with
+It ships as one Rust binary, `wayrun`, which runs as the overlay shell or, with
+`--core`, as the backend service. The shell owns a `wlr-layer-shell` surface and
+rasterises its own card, list and animations with
 [tiny-skia](https://github.com/RazrFalcon/tiny-skia) into a `wl_shm` buffer, so
 the frontend needs no GPU stack and no GUI toolkit; the core owns the plugin
 registry, the JSON-RPC protocol and the usage database.
@@ -49,11 +51,30 @@ registry, the JSON-RPC protocol and the usage database.
 
 ## Requirements
 
-- **Wayland** compositor with `wlr-layer-shell` support
-- Rust toolchain (`cargo build --release` builds the whole workspace; the shell is plain tiny-skia/cosmic-text crates)
-- A font with CJK coverage for Chinese/Japanese queries (e.g. Source Han Sans)
-- Firefox (optional, for bookmarks / history)
-- [cliphist](https://github.com/sentriz/cliphist) (optional, for clipboard history)
+- A **Wayland** compositor that implements `wlr-layer-shell`
+  (`zwlr_layer_shell_v1`): the wlroots family (niri, Hyprland, Sway, river,
+  Wayfire, labwc, ...), KDE Plasma on Wayland, and Mir-based compositors.
+  GNOME/Mutter does not implement it, so the overlay cannot be shown there.
+- A Rust toolchain and the usual system libraries (GLib, SQLite, xkbcommon,
+  fontconfig, ...); `cargo build --release` builds the whole workspace. The
+  shell itself pulls in no GUI toolkit, only tiny-skia and cosmic-text.
+- A font with CJK coverage for Chinese/Japanese queries (e.g. Source Han Sans).
+
+## Feature dependencies
+
+The overlay, and the built-in app, file, calculator and web search, need
+nothing beyond the compositor above. Every other feature depends on an optional
+component; when one is missing, the keyword returns no rows rather than an
+error:
+
+| Feature | Needs |
+| --- | --- |
+| `w` open-window search | the niri (default) or Hyprland build — see [Compositor backends](#compositor-backends) |
+| `b` / `h` Firefox search | Firefox with a profile |
+| `c` clipboard history | [cliphist](https://github.com/sentriz/cliphist) running |
+| copy / paste and the "Copy …" actions | `wl-clipboard` (`wl-copy` / `wl-paste`) |
+| a terminal-only `$PATH` hit (`r`) | a terminal emulator (`$TERMINAL`, else one on `PATH`) |
+| a blurred card | `ext-background-effect-v1` (niri) or the compositor's own blur by namespace |
 
 ## Quick Start
 
@@ -64,7 +85,9 @@ cargo build --release
 ln -s "$(pwd)/target/release/wayrun" ~/.local/bin/wayrun
 ```
 
-Bind a hotkey (e.g. Alt+Space) to launch the shell:
+Bind a hotkey (e.g. Alt+Space) to launch the shell — the syntax is
+compositor-specific (niri and Hyprland examples are in
+[resident mode](docs/en/resident.md)):
 
 ```bash
 wayrun
@@ -76,10 +99,10 @@ resident mode the hotkey toggles the surface and dismiss hides it.
 
 ## Compositor backends
 
-Open-window search (`w`) is compiled per compositor behind cargo features:
-`compositor-niri` (the default) and `compositor-hyprland` (experimental). Build
-just the one you run; with no backend compiled the launcher still runs and `w`
-returns nothing.
+The overlay works on any supported compositor; only open-window search (`w`)
+needs a per-compositor build, selected by cargo features: `compositor-niri`
+(the default) and `compositor-hyprland` (experimental). Build just the one you
+run; with no backend compiled the launcher still runs and `w` returns nothing.
 
 ```bash
 cargo build --release                                            # niri
