@@ -194,6 +194,21 @@ impl Shell {
             return;
         };
 
+        self.record_selected_row();
+
+        // Enter runs the remembered default action when the row has one, but
+        // usage above stays keyed to the row's own command.
+        backend::command(&launch.effective);
+
+        self.schedule_dismiss(now);
+    }
+
+    /// Record the selected row in usage history; a panel action shares the
+    /// row's key, so running one from the panel is recorded like Enter.
+    fn record_selected_row(&self) {
+        let Some(launch) = self.app.selected_row() else {
+            return;
+        };
         let usage = serde_json::json!({
             "title": launch.title,
             "summary": launch.summary.unwrap_or_default(),
@@ -201,14 +216,7 @@ impl Shell {
             "icon": launch.icon.unwrap_or_default(),
             "ephemeral": launch.ephemeral,
         });
-
         backend::select(&usage);
-
-        // Enter runs the remembered default action when the row has one, but
-        // usage above stays keyed to the row's own command.
-        backend::command(&launch.effective);
-
-        self.schedule_dismiss(now);
     }
 
     /// The surface outlives a launch by 150ms. Without it a non-resident run can
@@ -279,6 +287,7 @@ impl Shell {
     fn execute_action(&mut self, action: &ActionItem, now: Instant) {
         match &action.action {
             PanelAction::Execute { command } => {
+                self.record_selected_row();
                 backend::command(command);
                 self.schedule_dismiss(now);
             }
