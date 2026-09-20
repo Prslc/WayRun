@@ -130,19 +130,73 @@ pub fn open_terminal(uri: &str) {
     if let Some(extra) = terminal_dir_arg(&argv, &dir) {
         argv.extend(extra);
     }
+    spawn_argv(&argv, Some(&dir));
+}
 
+/// Run a command in a terminal: a PATH binary needs a tty to be usable (btop,
+/// htop, nvim), so it gets an interactive shell instead of a detached run.
+pub fn run_in_terminal(cmd: &str) {
+    let Some(argv) = terminal_run_argv(std::env::var("TERMINAL").ok().as_deref(), cmd) else {
+        return;
+    };
+    spawn_argv(&argv, None);
+}
+
+/// Spawn an argv detached in its own session, stdio discarded.
+fn spawn_argv(argv: &[String], dir: Option<&Path>) {
     let Some((program, args)) = argv.split_first() else {
         return;
     };
-    process::Command::new("setsid")
+    let mut command = process::Command::new("setsid");
+    command
         .arg(program)
         .args(args)
-        .current_dir(&dir)
         .stdin(process::Stdio::null())
         .stdout(process::Stdio::null())
-        .stderr(process::Stdio::null())
-        .spawn()
-        .ok();
+        .stderr(process::Stdio::null());
+    if let Some(dir) = dir {
+        command.current_dir(dir);
+    }
+    command.spawn().ok();
+}
+
+/// The terminal argv that runs `cmd`: the emulator, its command separator and
+/// `sh -c cmd`, so a run keeps the shell semantics `run:` already had.
+fn terminal_run_argv(terminal: Option<&str>, cmd: &str) -> Option<Vec<String>> {
+    let mut argv = terminal_command_from(terminal)?;
+    if let Some(flag) = terminal_exec_flag(&argv) {
+        argv.extend(flag);
+    }
+    argv.push("sh".to_string());
+    argv.push("-c".to_string());
+    argv.push(cmd.to_string());
+    Some(argv)
+}
+
+/// The tokens a known emulator needs before the program; a terminal that takes
+/// the program directly (kitty, foot) needs none.
+fn terminal_exec_flag(argv: &[String]) -> Option<Vec<String>> {
+    let program = argv.first()?;
+    let name = Path::new(program.as_str())
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(program.as_str());
+    match name {
+        "gnome-terminal" | "kgx" => Some(vec!["--".to_string()]),
+        "konsole" | "xterm" | "alacritty" => Some(vec!["-e".to_string()]),
+        "wezterm" => {
+            let mut flag = Vec::new();
+            if !argv
+                .iter()
+                .any(|arg| matches!(arg.as_str(), "start" | "connect" | "ssh"))
+            {
+                flag.push("start".to_string());
+            }
+            flag.push("--".to_string());
+            Some(flag)
+        }
+        _ => None,
+    }
 }
 
 /// The directory a terminal starts in: the path itself when a directory, else
@@ -226,6 +280,7 @@ pub fn execute(command: &crate::wire::Action) {
     use crate::wire::Action;
     match command {
         Action::Run { cmd } => execute_command(cmd),
+        Action::RunInTerminal { cmd } => run_in_terminal(cmd),
         Action::Launch { desktop_id } => launch_app(desktop_id),
         Action::Copy { text } => copy_text(text),
         Action::DesktopAction {
@@ -339,6 +394,34 @@ mod tests {
         assert_eq!(
             terminal_dir_arg(&argv(&["wezterm", "start"]), dir),
             Some(argv(&["--cwd", "/tmp/project"]))
+        );
+    }
+
+    #[test]
+    fn a_terminal_runs_the_command_through_a_shell() {
+        assert_eq!(
+            terminal_run_argv(Some("kitty"), "/usr/bin/btop"),
+            Some(argv(&["kitty", "sh", "-c", "/usr/bin/btop"]))
+        );
+        assert_eq!(
+            terminal_run_argv(Some("alacritty"), "htop"),
+            Some(argv(&["alacritty", "-e", "sh", "-c", "htop"]))
+        );
+        assert_eq!(
+            terminal_run_argv(Some("gnome-terminal"), "nvim"),
+            Some(argv(&["gnome-terminal", "--", "sh", "-c", "nvim"]))
+        );
+        assert_eq!(
+            terminal_run_argv(Some("wezterm"), "btop"),
+            Some(argv(&["wezterm", "start", "--", "sh", "-c", "btop"]))
+        );
+    }
+
+    #[test]
+    fn a_wezterm_already_given_a_subcommand_does_not_repeat_it() {
+        assert_eq!(
+            terminal_run_argv(Some("wezterm start"), "btop"),
+            Some(argv(&["wezterm", "start", "--", "sh", "-c", "btop"]))
         );
     }
 }

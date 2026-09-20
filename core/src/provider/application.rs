@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::LazyLock;
 
@@ -48,6 +49,9 @@ struct CachedApp {
     comment: Option<String>,
     comment_lower: Option<String>,
     icon_spec: Option<String>,
+    /// Basename of the entry's `Exec=`, so the runner can match a PATH hit to a
+    /// desktop app without reading every `.desktop` file again.
+    exec: Option<String>,
     meta: Option<DesktopMeta>,
 }
 
@@ -65,6 +69,7 @@ impl CachedApp {
 }
 
 static APPS: LazyLock<Vec<CachedApp>> = LazyLock::new(|| {
+    let locales = desktop_locales();
     gio::AppInfo::all()
         .into_iter()
         .filter_map(|app| {
@@ -78,10 +83,14 @@ static APPS: LazyLock<Vec<CachedApp>> = LazyLock::new(|| {
                 .icon()
                 .and_then(|i| i.to_string())
                 .map(|s| s.to_string());
+            let entry = crate::system::desktop_action::entry(&id, Some(&locales));
+            let exec = entry.as_ref().and_then(exec_basename);
+            let meta = entry.as_ref().map(|entry| parse_meta(entry, &locales));
             Some(CachedApp {
                 title_lower: title.to_lowercase(),
                 comment_lower: comment.as_ref().map(|c| c.to_lowercase()),
-                meta: desktop_meta(&id),
+                meta,
+                exec,
                 title,
                 comment,
                 id,
@@ -90,6 +99,14 @@ static APPS: LazyLock<Vec<CachedApp>> = LazyLock::new(|| {
         })
         .collect()
 });
+
+/// The desktop id of the app whose `Exec=` names `executable`: a PATH hit that
+/// is an installed app launches through `gio`, so its `Terminal=` decides.
+pub fn desktop_id_for_exec(executable: &str) -> Option<&'static str> {
+    APPS.iter()
+        .find(|app| app.exec.as_deref() == Some(executable))
+        .map(|app| app.id.as_str())
+}
 
 pub struct AppSearch;
 
@@ -412,13 +429,41 @@ fn parse_meta(entry: &DesktopEntry, locales: &[String]) -> DesktopMeta {
     }
 }
 
-/// Read `GenericName`/`Keywords`/`Actions` from the `.desktop` file the XDG data
-/// dirs resolve for `id`; gio-rs binds no `GDesktopAppInfo`.
-fn desktop_meta(id: &str) -> Option<DesktopMeta> {
-    let locales = desktop_locales();
-    let entry = crate::system::desktop_action::entry(id, Some(&locales))?;
+/// The program a desktop `Exec=` runs, from its parsed argv. `env` is unwrapped
+/// (`Exec=env VAR=… prog`) so the real program is the match; a shell, sandbox or
+/// interpreter wrapper runs no PATH program of its own, so it maps to nothing.
+fn exec_program(argv: &[String]) -> Option<String> {
+    let mut words = argv.iter();
+    let first = program_name(words.next()?)?;
+    let program = if first == "env" {
+        let found = words.find(|word| !word.starts_with('-') && !word.contains('='))?;
+        program_name(found)
+    } else {
+        Some(first)
+    }?;
+    const WRAPPERS: [&str; 8] = [
+        "sh", "bash", "dash", "zsh", "flatpak", "snap", "python", "python3",
+    ];
+    (!WRAPPERS.contains(&program.as_str())).then_some(program)
+}
 
-    Some(parse_meta(&entry, &locales))
+/// The basename of a program word, e.g. `/usr/bin/foo` or `foo` -> `foo`.
+fn program_name(word: &str) -> Option<String> {
+    Path::new(word)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_owned)
+}
+
+/// Basename of the program a desktop entry's `Exec=` runs, for the runner's PATH
+/// hits.
+fn exec_basename(entry: &DesktopEntry) -> Option<String> {
+    let argv: Vec<String> = gio::glib::shell_parse_argv(entry.exec()?)
+        .ok()?
+        .iter()
+        .map(|word| word.to_string_lossy().into_owned())
+        .collect();
+    exec_program(&argv)
 }
 
 /// The locale list gio localises `.desktop` keys with, from
@@ -597,6 +642,34 @@ mod tests {
         let locales: Vec<String> = locales.iter().map(|l| (*l).to_string()).collect();
         let entry = DesktopEntry::from_str("app.desktop", content, Some(&locales)).unwrap();
         parse_meta(&entry, &locales)
+    }
+
+    #[test]
+    fn an_env_wrapper_maps_to_the_real_program() {
+        let argv = |words: &[&str]| {
+            words
+                .iter()
+                .map(|word| (*word).to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            exec_program(&argv(&[
+                "env",
+                "GTK_IM_MODULE=fcitx",
+                "nautilus",
+                "--new-window"
+            ])),
+            Some("nautilus".into())
+        );
+        assert_eq!(
+            exec_program(&argv(&["/usr/lib/firefox/firefox", "%u"])),
+            Some("firefox".into())
+        );
+        assert_eq!(exec_program(&argv(&["sh", "-c", "scrcpy"])), None);
+        assert_eq!(
+            exec_program(&argv(&["env", "A=1", "flatpak", "run", "x"])),
+            None
+        );
     }
 
     #[test]

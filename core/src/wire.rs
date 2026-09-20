@@ -8,6 +8,10 @@ pub enum Action {
     Run {
         cmd: String,
     },
+    /// Run a command inside a terminal emulator, for a binary that needs a tty.
+    RunInTerminal {
+        cmd: String,
+    },
     Launch {
         desktop_id: String,
     },

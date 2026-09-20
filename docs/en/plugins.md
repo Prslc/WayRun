@@ -41,7 +41,7 @@ everything.
 | `calculator` | `""` | Inline arithmetic. |
 | `system-commands` | `""` | `lock`, `reboot`, `shutdown`, `suspend`, `logout`. |
 | `app-search` | `""` | Installed applications (desktop entries). |
-| `runner` | `r` | Fuzzy `$PATH` executables; accepts arguments. |
+| `runner` | `r` | Fuzzy `$PATH` executables; accepts arguments. An installed app launches through GLib (honoring `Terminal=`), anything else runs in a terminal. |
 | `firefox-bookmarks` | `b` | Firefox bookmarks. |
 | `firefox-history` | `h` | Firefox history. |
 | `web-search` | `s` | Web search suggestions (engine set in `config.toml`). |

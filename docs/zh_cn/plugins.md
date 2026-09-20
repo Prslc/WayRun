@@ -36,7 +36,7 @@ enabled = true
 | `calculator` | `""` | 行内算术。 |
 | `system-commands` | `""` | `lock`、`reboot`、`shutdown`、`suspend`、`logout`。 |
 | `app-search` | `""` | 已安装应用（desktop 条目）。 |
-| `runner` | `r` | 模糊匹配 `$PATH` 可执行文件；可带参数。 |
+| `runner` | `r` | 模糊匹配 `$PATH` 可执行文件；可带参数。命中已安装应用时经 GLib 启动（遵循 `Terminal=`），其余在终端中运行。 |
 | `firefox-bookmarks` | `b` | Firefox 书签。 |
 | `firefox-history` | `h` | Firefox 历史。 |
 | `web-search` | `s` | 网页搜索建议（引擎在 `config.toml` 中设置）。 |

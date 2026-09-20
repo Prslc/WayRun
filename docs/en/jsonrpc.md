@@ -52,6 +52,7 @@ runs. It is the params of the `command` method and the type of a result's
 | `type` | Fields | Effect |
 |--------|--------|--------|
 | `run` | `cmd` | execute a shell command (one shell line) |
+| `run_in_terminal` | `cmd` | run a shell command inside a terminal emulator |
 | `launch` | `desktop_id` | launch an app by desktop id through GLib's `GAppInfo` |
 | `copy` | `text` | write the text to the Wayland clipboard |
 | `desktop_action` | `desktop_id`, `action_id` | run one `[Desktop Action …]` group |

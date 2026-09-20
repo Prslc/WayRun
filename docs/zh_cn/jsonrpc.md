@@ -48,6 +48,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 | `type` | 字段 | 效果 |
 |--------|------|------|
 | `run` | `cmd` | 执行 shell 命令（整条 shell 行） |
+| `run_in_terminal` | `cmd` | 在终端模拟器中执行 shell 命令 |
 | `launch` | `desktop_id` | 经 GLib 的 `GAppInfo` 按 desktop id 启动应用 |
 | `copy` | `text` | 写入 Wayland 剪贴板 |
 | `desktop_action` | `desktop_id`、`action_id` | 运行一个 `[Desktop Action …]` 组 |
