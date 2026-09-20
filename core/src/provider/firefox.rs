@@ -1,12 +1,12 @@
 use std::fs;
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::{LazyLock, Mutex};
 use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
-use tempfile::NamedTempFile;
 use tokio::task;
 
 use crate::plugin::{Meta, Plugin};
@@ -50,6 +50,79 @@ fn find_db() -> Result<PathBuf> {
         .context("finding a Firefox profile with places.sqlite")
 }
 
+/// One copy at a time: a concurrent bookmark and history search share the cache.
+static COPY_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+/// The cached copy of `source` at its current `(mtime, size)`, under
+/// `$XDG_CACHE_HOME/wayrun`. The live profile is never locked, and the 30MB copy
+/// is paid only when the profile changed, not on every keystroke.
+fn cached_copy(source: &Path) -> Result<PathBuf> {
+    let meta = fs::metadata(source)?;
+    let size = meta.len();
+    let nanos = meta
+        .modified()?
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+
+    let dir = cache_dir()?;
+    let stem = format!("places-{:016x}", hash_path(source));
+    let target = dir.join(format!("{stem}-{nanos}-{size}.sqlite"));
+    if target.is_file() {
+        return Ok(target);
+    }
+
+    let _guard = COPY_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+    if target.is_file() {
+        return Ok(target);
+    }
+    let tmp = dir.join(format!("{stem}.tmp"));
+    fs::copy(source, &tmp)?;
+    fs::rename(&tmp, &target)?;
+    // Prune under the lock, so no concurrent copy owns a `.tmp` we remove.
+    prune(&dir, &target);
+    Ok(target)
+}
+
+/// The cache directory, created on demand; `$XDG_CACHE_HOME` or `~/.cache`.
+fn cache_dir() -> Result<PathBuf> {
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir);
+    let dir = base.join("wayrun");
+    fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+/// Drop a superseded copy (an older snapshot or another profile) and a crashed
+/// copy's `.tmp`, so the cache holds one `places` copy.
+fn prune(dir: &Path, keep: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for path in entries.flatten().map(|entry| entry.path()) {
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let stale = (name.starts_with("places-") && name.ends_with(".sqlite") && path != keep)
+            || (name.starts_with("places-") && name.ends_with(".tmp"));
+        if stale {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+/// A stable FNV-1a hash of the source path, for a profile-specific cache name.
+fn hash_path(path: &Path) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in path.as_os_str().as_encoded_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
 async fn do_search(mode: Mode, query: &str) -> Result<Vec<ResultItem>> {
     if query.is_empty() {
         return Ok(vec![]);
@@ -58,10 +131,9 @@ async fn do_search(mode: Mode, query: &str) -> Result<Vec<ResultItem>> {
     let query = query.to_string();
     task::spawn_blocking(move || {
         let db_path = find_db()?;
-        let tmp = NamedTempFile::new()?;
-        fs::copy(&db_path, tmp.path())?;
+        let copy = cached_copy(&db_path)?;
 
-        let conn = Connection::open(tmp.path())?;
+        let conn = Connection::open(&copy)?;
 
         let sql = match mode {
             Mode::Bookmarks => {
@@ -170,5 +242,32 @@ mod tests {
     async fn empty_query_matches_nothing() {
         assert!(do_search(Mode::Bookmarks, "").await.unwrap().is_empty());
         assert!(do_search(Mode::History, "").await.unwrap().is_empty());
+    }
+
+    #[test]
+    fn prune_keeps_only_the_current_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let keep = dir.path().join("places-aa-1-2.sqlite");
+        let old = dir.path().join("places-aa-0-2.sqlite");
+        let tmp = dir.path().join("places-aa.tmp");
+        let other = dir.path().join("plugin-hosts.json");
+        for path in [&keep, &old, &tmp, &other] {
+            fs::write(path, b"x").unwrap();
+        }
+
+        prune(dir.path(), &keep);
+
+        assert!(keep.exists());
+        assert!(!old.exists(), "a superseded snapshot is removed");
+        assert!(!tmp.exists(), "a crashed copy's tmp is removed");
+        assert!(other.exists(), "an unrelated cache file is left alone");
+    }
+
+    #[test]
+    fn a_profile_path_hashes_stably() {
+        let a = Path::new("/home/x/.mozilla/firefox/aaa/places.sqlite");
+        let b = Path::new("/home/x/.mozilla/firefox/bbb/places.sqlite");
+        assert_eq!(hash_path(a), hash_path(a));
+        assert_ne!(hash_path(a), hash_path(b));
     }
 }
