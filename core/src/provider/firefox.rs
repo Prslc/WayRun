@@ -81,13 +81,15 @@ async fn do_search(mode: Mode, query: &str) -> Result<Vec<ResultItem>> {
             "
             }
             Mode::History => {
+                // `moz_places.last_visit_date` is the newest visit time, so the
+                // join to `moz_historyvisits` only multiplies rows per visit.
                 "
                 SELECT moz_places.title, moz_places.url
                 FROM moz_places
-                JOIN moz_historyvisits ON moz_places.id = moz_historyvisits.place_id
                 WHERE moz_places.url <> ''
+                  AND moz_places.last_visit_date IS NOT NULL
                   AND (?1 = '' OR moz_places.title LIKE ?2 OR moz_places.url LIKE ?2)
-                ORDER BY moz_historyvisits.visit_date DESC
+                ORDER BY moz_places.last_visit_date DESC
                 LIMIT 50
             "
             }
