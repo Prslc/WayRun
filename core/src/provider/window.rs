@@ -1,5 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
@@ -32,6 +34,29 @@ impl Plugin for WindowPlugin {
     }
 }
 
+/// A typing burst shares one `niri msg` round trip; a stale row's focus is a
+/// harmless no-op, so a short lag is fine.
+const CACHE_TTL: Duration = Duration::from_millis(500);
+
+/// The cached window list and when it was fetched.
+type WindowCache = Mutex<Option<(Instant, Vec<Window>)>>;
+
+static WINDOWS: LazyLock<WindowCache> = LazyLock::new(|| Mutex::new(None));
+
+/// The compositor's windows from a short-lived cache, so a burst of keystrokes
+/// does not shell out to the compositor on every one.
+fn cached_windows(compositor: &dyn Compositor) -> Option<Vec<Window>> {
+    let mut cache = WINDOWS.lock().unwrap_or_else(|err| err.into_inner());
+    if let Some((at, windows)) = cache.as_ref()
+        && at.elapsed() < CACHE_TTL
+    {
+        return Some(windows.clone());
+    }
+    let windows = compositor.windows().ok()?;
+    *cache = Some((Instant::now(), windows.clone()));
+    Some(windows)
+}
+
 /// Fuzzy-match the query against every open window's title/app_id and emit a
 /// `run:` row that focuses the winner; empty without a compositor backend.
 fn do_search(query: &str) -> Vec<ResultItem> {
@@ -42,7 +67,7 @@ fn do_search(query: &str) -> Vec<ResultItem> {
     let Some(compositor) = compositor::detect() else {
         return Vec::new();
     };
-    let Ok(windows) = compositor.windows() else {
+    let Some(windows) = cached_windows(compositor) else {
         return Vec::new();
     };
 
@@ -115,6 +140,41 @@ fn row(compositor: &dyn Compositor, window: Window) -> ResultItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Counting {
+        calls: AtomicUsize,
+    }
+
+    impl Compositor for Counting {
+        fn available(&self) -> bool {
+            true
+        }
+        fn windows(&self) -> Result<Vec<Window>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(vec![Window {
+                id: "1".into(),
+                title: "kitty".into(),
+                app_id: Some("kitty".into()),
+                workspace: None,
+            }])
+        }
+        fn focus_argv(&self, _id: &str) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn a_typing_burst_shells_out_once() {
+        *WINDOWS.lock().unwrap() = None;
+        let fake = Counting {
+            calls: AtomicUsize::new(0),
+        };
+        let first = cached_windows(&fake).unwrap();
+        let second = cached_windows(&fake).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(fake.calls.load(Ordering::SeqCst), 1);
+    }
 
     #[test]
     fn empty_query_matches_nothing() {
