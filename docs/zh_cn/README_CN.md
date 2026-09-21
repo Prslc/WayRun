@@ -70,9 +70,7 @@
 | 结果行图标 | 桌面**图标主题**（可选）；没有时回退到内置占位图 |
 
 面板、徽标与内置插件的图形都已编入二进制，因此完全不装图标主题也能正常使用。应用与文件
-结果行图标跟随桌面自身的主题（如
-[Papirus](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme)，覆盖面广）；
-可用 `[icon]` 覆盖，见 [config.md](config.md)。
+结果行图标跟随桌面自身的图标主题；可用 `[icon]` 覆盖，见 [config.md](config.md)。
 
 ## 快速开始
 
@@ -120,4 +118,10 @@ cargo build --release -p wayrun-shell --no-default-features      # 不做窗口�
 - **[tiny-skia](https://github.com/RazrFalcon/tiny-skia)** —— 覆盖层的软件光栅化。
 - **[cosmic-text](https://github.com/pop-os/cosmic-text)** —— 覆盖层的文本整形。
 - **[smithay-client-toolkit](https://github.com/Smithay/client-toolkit)** —— Wayland layer-shell 客户端管线。
-- **[Papirus](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme)** —— 图标主题。
+
+## 许可证
+
+WayRun 采用 [MIT 许可证](../../LICENSE)。
+
+内置 UI 字形为 Google Material Symbols，采用 Apache License 2.0；
+署名与许可证全文见 [core/assets/icons/NOTICE](../../core/assets/icons/NOTICE)。

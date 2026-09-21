@@ -79,9 +79,8 @@ error:
 
 The action panel, badge and built-in plugin glyphs are compiled into the binary,
 so the launcher is fully usable with no icon theme at all. App and file rows
-follow the desktop's theme (e.g.
-[Papirus](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme), a
-wide-coverage choice); see [config.md](docs/en/config.md) for the `[icon]` override.
+follow the desktop's icon theme; see [config.md](docs/en/config.md) for the
+`[icon]` override.
 
 ## Quick Start
 
@@ -134,4 +133,11 @@ cargo build --release -p wayrun-shell --no-default-features      # no window sea
 - **[tiny-skia](https://github.com/RazrFalcon/tiny-skia)** — software rasterisation for the overlay.
 - **[cosmic-text](https://github.com/pop-os/cosmic-text)** — text shaping for the overlay.
 - **[smithay-client-toolkit](https://github.com/Smithay/client-toolkit)** — Wayland layer-shell client plumbing.
-- **[Papirus](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme)** — the icon theme.
+
+## License
+
+WayRun is [MIT licensed](LICENSE).
+
+The built-in UI glyphs are Google Material Symbols under the Apache License 2.0;
+see [core/assets/icons/NOTICE](core/assets/icons/NOTICE) for the attribution and
+the full license text.
