@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-22
+
+### Changed
+
+- **Breaking**: an external plugin host must return absolute paths for every
+  icon it emits — its `list_plugins` identity, result rows, their actions and a
+  row's `badge`. The core no longer resolves a theme icon name, a `papirus:`
+  spec or a `builtin:` glyph for a host; a missing or non-absolute icon falls
+  back to the plugin identity icon, then the built-in placeholder. The
+  `resolve_icon` JSON-RPC method is removed and answers `-32601`.
+- Icons are resolved through the desktop's icon theme instead of a hardcoded
+  Papirus scan: `system/icon.rs` reads each theme's `index.theme` (directories,
+  size ranges and `Inherits`) and walks the theme chain, then `hicolor`, then
+  `/usr/share/pixmaps`.
+- The README demo is re-recorded over new wallpapers, showing file search and a
+  Firefox bookmark search.
+- The docs state the real platform scope: any compositor that implements
+  `wlr-layer-shell` works (GNOME/Mutter does not), and each quick-search prefix
+  lists the optional piece it needs.
+
+### Added
+
+- Built-in UI glyphs: `builtin:` Material Symbols compiled into the binary for
+  the panel, badges and built-in plugin identities, so the launcher works with
+  no icon theme installed. A miss falls back to `builtin:app`, and the core
+  warns on stderr when no icon theme is found.
+- A new launcher mark (the `app` glyph) and a `NOTICE` crediting the bundled
+  Material Symbols.
+
 ## [0.2.0] - 2026-09-21
 
 ### Added
@@ -179,7 +208,8 @@ and, with `--core`, the backend service.
 - Resident mode over `$XDG_RUNTIME_DIR/wayrun.sock` for zero cold-start
   (`wayrun toggle`).
 
-[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Prslc/WayRun/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Prslc/WayRun/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/Prslc/WayRun/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Prslc/WayRun/compare/v0.1.1...v0.1.2
