@@ -53,10 +53,6 @@
   `cargo build --release` 会构建整个工作区。前端本身不引入 GUI 工具包，
   只用 tiny-skia、cosmic-text 等纯 Rust crate。
 - 覆盖中日文输入的字体（如 Source Han Sans）。
-- 一套**图标主题**，用于结果行与动作图标（
-  [Papirus](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme)
-  是内置 symbolic 图形所面向的主题）。没有安装时，图标回退到内置占位图，core 会向
-  stderr 打一行警告。
 
 ## 功能依赖
 
@@ -71,6 +67,12 @@
 | 复制/粘贴与“复制…”动作 | `wl-clipboard`（`wl-copy` / `wl-paste`） |
 | 仅能在终端中运行的 `$PATH` 结果（`r`） | 终端模拟器（`$TERMINAL`，否则取 `PATH` 上的一个） |
 | 卡片模糊 | `ext-background-effect-v1`（niri），或由合成器按 namespace 自行模糊 |
+| 结果行图标 | 桌面**图标主题**（可选）；没有时回退到内置占位图 |
+
+面板、徽标与内置插件的图形都已编入二进制，因此完全不装图标主题也能正常使用。应用与文件
+结果行图标跟随桌面自身的主题（如
+[Papirus](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme)，覆盖面广）；
+可用 `[icon]` 覆盖，见 [config.md](config.md)。
 
 ## 快速开始
 

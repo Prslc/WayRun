@@ -16,7 +16,7 @@ impl Plugin for Runner {
         &Meta {
             id: "runner",
             name: "Run Action",
-            icon: "utilities-terminal",
+            icon: "builtin:terminal",
             ready: "Run an executable on PATH",
         }
     }

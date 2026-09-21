@@ -28,8 +28,47 @@ const PAPIRUS_SIZES: &[&str] = &[
 const TARGET_SIZE: u16 = 48;
 const ICON_EXTS: &[&str] = &["svg", "png"];
 
-const DEFAULT_ICON_NAME: &str = "application_default.png";
-const DEFAULT_ICON_PNG: &[u8] = include_bytes!("../../../images/application_default.png");
+/// The glyph a miss falls back to, so a row always has an icon.
+const APP_ICON: &str = "builtin:app";
+
+/// UI glyphs compiled in and referenced as `builtin:<name>`, so the panel, badges
+/// and built-in plugin identities never depend on an installed theme. See the
+/// NOTICE beside them.
+const BUILTIN_ICONS: &[(&str, &[u8])] = &[
+    ("app", include_bytes!("../../assets/icons/app.svg")),
+    (
+        "bookmark",
+        include_bytes!("../../assets/icons/bookmark.svg"),
+    ),
+    (
+        "calculator",
+        include_bytes!("../../assets/icons/calculator.svg"),
+    ),
+    (
+        "clipboard",
+        include_bytes!("../../assets/icons/clipboard.svg"),
+    ),
+    ("clock", include_bytes!("../../assets/icons/clock.svg")),
+    ("copy", include_bytes!("../../assets/icons/copy.svg")),
+    ("file", include_bytes!("../../assets/icons/file.svg")),
+    ("folder", include_bytes!("../../assets/icons/folder.svg")),
+    ("globe", include_bytes!("../../assets/icons/globe.svg")),
+    ("lock", include_bytes!("../../assets/icons/lock.svg")),
+    ("logout", include_bytes!("../../assets/icons/logout.svg")),
+    ("open", include_bytes!("../../assets/icons/open.svg")),
+    ("pin", include_bytes!("../../assets/icons/pin.svg")),
+    ("power", include_bytes!("../../assets/icons/power.svg")),
+    ("reboot", include_bytes!("../../assets/icons/reboot.svg")),
+    ("remove", include_bytes!("../../assets/icons/remove.svg")),
+    ("reveal", include_bytes!("../../assets/icons/reveal.svg")),
+    ("suspend", include_bytes!("../../assets/icons/suspend.svg")),
+    (
+        "terminal",
+        include_bytes!("../../assets/icons/terminal.svg"),
+    ),
+    ("unpin", include_bytes!("../../assets/icons/unpin.svg")),
+    ("window", include_bytes!("../../assets/icons/window.svg")),
+];
 
 /// `papirus:name` -> `(None, "name")`; `papirus:category/name` ->
 /// `(Some("category"), "name")`.
@@ -107,28 +146,27 @@ pub fn resolve(name: &str) -> Option<String> {
     result
 }
 
-static DEFAULT_ICON: OnceLock<Option<String>> = OnceLock::new();
-
 pub fn find_icon_path(name: &str) -> Option<String> {
-    resolve(name).or_else(default_icon_path)
+    resolve(name).or_else(|| resolve(APP_ICON))
 }
 
-/// The shell renders paths, not bytes, so a miss caches the embedded PNG.
-fn default_icon_path() -> Option<String> {
-    DEFAULT_ICON
-        .get_or_init(|| {
-            xdg::resource_path(&format!("images/{DEFAULT_ICON_NAME}"))
-                .or_else(|| materialize_default(&crate::system::fs::cache_dir()?))
-        })
-        .clone()
-}
-
-fn materialize_default(dir: &Path) -> Option<String> {
-    let target = dir.join(DEFAULT_ICON_NAME);
-    if !target.exists() {
-        std::fs::write(&target, DEFAULT_ICON_PNG).ok()?;
+/// Write `bytes` as `name` under `dir`, replacing a stale copy; returns the path
+/// the shell reads. A glyph's bytes change with the binary, so the cache cannot
+/// be trusted to match it.
+fn write_cached(dir: &Path, name: &str, bytes: &[u8]) -> Option<String> {
+    std::fs::create_dir_all(dir).ok()?;
+    let target = dir.join(name);
+    if std::fs::read(&target).ok().as_deref() != Some(bytes) {
+        std::fs::write(&target, bytes).ok()?;
     }
     Some(target.to_string_lossy().into_owned())
+}
+
+/// A `builtin:<name>` glyph written into the cache.
+fn builtin_icon(name: &str) -> Option<String> {
+    let (name, bytes) = BUILTIN_ICONS.iter().find(|(n, _)| *n == name)?;
+    let dir = crate::system::fs::cache_dir()?.join("builtin");
+    write_cached(&dir, &format!("{name}.svg"), bytes)
 }
 
 pub fn warn_if_no_icon_theme() {
@@ -409,6 +447,9 @@ fn lookup(name: &str) -> Option<String> {
     if let Some(spec) = name.strip_prefix("papirus:") {
         return find_papirus(spec);
     }
+    if let Some(builtin) = name.strip_prefix("builtin:") {
+        return builtin_icon(builtin);
+    }
 
     if let Some(p) = find_theme_icon(name) {
         return Some(p);
@@ -417,7 +458,7 @@ fn lookup(name: &str) -> Option<String> {
         return Some(p);
     }
 
-    // project images (plugin identity icons, e.g. application_default)
+    // a bundled image in the resource dir, named directly
     for ext in ICON_EXTS {
         if let Some(p) = xdg::resource_path(&format!("images/{name}.{ext}")) {
             return Some(p);
@@ -487,43 +528,56 @@ mod tests {
     }
 
     #[test]
-    fn a_bundled_image_resolves_when_the_theme_misses() {
-        // No theme ships `application_default`, so the bundled `images/` copy is
-        // what answers.
-        let path = find_icon_path("application_default").unwrap();
-        assert!(path.ends_with("images/application_default.png"), "{path}");
-    }
-
-    #[test]
     fn resolve_leaves_a_miss_empty_and_find_icon_path_fills_it() {
         assert!(resolve("definitely-not-an-icon-xyz").is_none());
-        assert!(find_icon_path("definitely-not-an-icon-xyz").is_some());
+        let path = find_icon_path("definitely-not-an-icon-xyz").unwrap();
+        assert!(path.ends_with("builtin/app.svg"), "{path}");
     }
 
     #[test]
     fn the_first_resolving_name_in_a_chain_wins() {
         let path = find_first_icon_path(["definitely-not-an-icon-xyz", "/tmp/icon.svg"]).unwrap();
         assert_eq!(path, "/tmp/icon.svg");
-        // The bundled default is a `find_icon_path` concern, not a chain entry.
+        // The app glyph is a `find_icon_path` concern, not a chain entry.
         assert!(find_first_icon_path(["definitely-not-an-icon-xyz"]).is_none());
     }
 
     #[test]
-    fn materialize_writes_the_embedded_placeholder() {
-        let dir = std::env::temp_dir().join(format!("wayrun-default-icon-{}", std::process::id()));
+    fn a_stale_cached_glyph_is_replaced() {
+        let dir = std::env::temp_dir().join(format!("wayrun-glyph-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("pin.svg"), b"stale").unwrap();
 
-        let path = materialize_default(&dir).unwrap();
-        assert_eq!(std::fs::read(&path).unwrap(), DEFAULT_ICON_PNG);
-        assert!(path.ends_with(DEFAULT_ICON_NAME), "{path}");
+        let path = write_cached(&dir, "pin.svg", b"fresh").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"fresh");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn the_embedded_placeholder_is_a_png() {
-        assert!(DEFAULT_ICON_PNG.starts_with(&[0x89, b'P', b'N', b'G']));
+    fn every_builtin_is_a_colourful_svg() {
+        for (name, bytes) in BUILTIN_ICONS {
+            let text = std::str::from_utf8(bytes).unwrap();
+            assert!(
+                text.contains("<svg") && !text.contains("currentColor"),
+                "{name} is not a colourful svg"
+            );
+        }
+        assert!(builtin_icon("definitely-not-a-glyph").is_none());
+    }
+
+    #[test]
+    fn the_notice_names_every_builtin() {
+        let notice = include_str!("../../assets/icons/NOTICE");
+        for (name, _) in BUILTIN_ICONS {
+            assert!(
+                notice
+                    .lines()
+                    .any(|line| line.split_whitespace().next() == Some(*name)),
+                "NOTICE does not name the {name} glyph"
+            );
+        }
     }
 
     #[test]

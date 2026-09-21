@@ -59,10 +59,6 @@ registry, the JSON-RPC protocol and the usage database.
   fontconfig, ...); `cargo build --release` builds the whole workspace. The
   shell itself pulls in no GUI toolkit, only tiny-skia and cosmic-text.
 - A font with CJK coverage for Chinese/Japanese queries (e.g. Source Han Sans).
-- An **icon theme** for per-row and action icons
-  ([Papirus](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme) is the
-  one the built-in symbolic glyphs target). With none installed, icons fall back
-  to a bundled placeholder and the core logs a warning to stderr.
 
 ## Feature dependencies
 
@@ -79,6 +75,13 @@ error:
 | copy / paste and the "Copy …" actions | `wl-clipboard` (`wl-copy` / `wl-paste`) |
 | a terminal-only `$PATH` hit (`r`) | a terminal emulator (`$TERMINAL`, else one on `PATH`) |
 | a blurred card | `ext-background-effect-v1` (niri) or the compositor's own blur by namespace |
+| per-row icons | a desktop **icon theme** (optional); without one, rows fall back to a bundled placeholder |
+
+The action panel, badge and built-in plugin glyphs are compiled into the binary,
+so the launcher is fully usable with no icon theme at all. App and file rows
+follow the desktop's theme (e.g.
+[Papirus](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme), a
+wide-coverage choice); see [config.md](docs/en/config.md) for the `[icon]` override.
 
 ## Quick Start
 

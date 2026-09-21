@@ -97,7 +97,7 @@ fn attach_actions(
     let (owner, mut plugin_actions) = plugin_actions;
     let is_pinned = pinned.iter().any(|pin| pin == &on_click);
     if is_pinned {
-        item.badge = find_icon_path("pin");
+        item.badge = find_icon_path("builtin:pin");
     }
 
     // Every plugin action carries its owner, so the shell can scope a default.
@@ -126,8 +126,7 @@ fn attach_actions(
                     action: PanelAction::Execute {
                         command: on_click.clone(),
                     },
-                    // a monochrome line-art glyph, so the panel reads uniformly
-                    icon: Some("papirus:symbolic/actions/document-open-symbolic".to_string()),
+                    icon: Some("builtin:open".to_string()),
                     id: None,
                     plugin: None,
                     default: false,
@@ -144,7 +143,7 @@ fn attach_actions(
                 scope: scope.to_string(),
                 on_click: on_click.clone(),
             },
-            icon: Some("window-unpin".to_string()),
+            icon: Some("builtin:unpin".to_string()),
             id: None,
             plugin: None,
             default: false,
@@ -158,7 +157,7 @@ fn attach_actions(
                 scope: scope.to_string(),
                 item: Box::new(item.clone()),
             },
-            icon: Some("pin".to_string()),
+            icon: Some("builtin:pin".to_string()),
             id: None,
             plugin: None,
             default: false,
@@ -171,7 +170,7 @@ fn attach_actions(
             action: PanelAction::Forget {
                 on_click: on_click.clone(),
             },
-            icon: Some("edit-delete".to_string()),
+            icon: Some("builtin:remove".to_string()),
             id: None,
             plugin: None,
             default: false,

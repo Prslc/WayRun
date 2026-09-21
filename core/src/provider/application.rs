@@ -115,7 +115,7 @@ impl Plugin for AppSearch {
         &Meta {
             id: "app-search",
             name: "Applications",
-            icon: "application_default",
+            icon: "builtin:app",
             ready: "Search installed applications",
         }
     }

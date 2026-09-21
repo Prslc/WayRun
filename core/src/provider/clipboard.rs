@@ -14,7 +14,7 @@ impl Plugin for Clipboard {
         &Meta {
             id: "clipboard",
             name: "Clipboard History",
-            icon: "clipboard",
+            icon: "builtin:clipboard",
             ready: "Search clipboard history",
         }
     }
@@ -43,7 +43,7 @@ fn do_search(query: &str) -> Vec<ResultItem> {
     };
     let text = String::from_utf8_lossy(&output.stdout);
     let mut results = parse_entries(query, &text);
-    let icon = resolve("clipboard");
+    let icon = resolve("builtin:clipboard");
     for r in &mut results {
         r.icon = icon.clone();
     }

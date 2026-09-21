@@ -452,4 +452,29 @@ mod tests {
         cache.draw(&mut target, "/nonexistent/icon.png", 0.0, 0.0, 30, 1.0);
         assert!(target.pixels().iter().all(|p| p.alpha() == 0));
     }
+
+    #[test]
+    fn every_bundled_glyph_renders() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/assets/icons");
+        let mut cache = IconCache::new();
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("svg") {
+                continue;
+            }
+            let mut target = Pixmap::new(64, 64).unwrap();
+            cache.draw(&mut target, path.to_str().unwrap(), 0.0, 0.0, 64, 1.0);
+            assert!(
+                target.pixels().iter().any(|p| p.alpha() > 0),
+                "{} rendered empty",
+                path.display()
+            );
+            checked += 1;
+        }
+        assert!(
+            checked >= 20,
+            "expected the bundled glyphs, found {checked}"
+        );
+    }
 }

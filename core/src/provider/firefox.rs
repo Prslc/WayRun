@@ -157,7 +157,10 @@ async fn do_search(mode: Mode, query: &str) -> Result<Vec<ResultItem>> {
         };
 
         let pattern = format!("%{query}%");
-        let firefox_icon = resolve("firefox");
+        let firefox_icon = resolve(match mode {
+            Mode::Bookmarks => "builtin:bookmark",
+            Mode::History => "builtin:clock",
+        });
         let mut stmt = conn.prepare(sql)?;
         let rows = stmt.query_map([query.as_str(), &pattern], move |row| {
             let title: Option<String> = row.get(0)?;
@@ -179,7 +182,7 @@ async fn do_search(mode: Mode, query: &str) -> Result<Vec<ResultItem>> {
 }
 
 macro_rules! firefox_plugin {
-    ($name:ident, $mode:ident, $id:literal, $display:literal, $ready:literal) => {
+    ($name:ident, $mode:ident, $id:literal, $display:literal, $icon:literal, $ready:literal) => {
         pub struct $name;
 
         impl Plugin for $name {
@@ -187,7 +190,7 @@ macro_rules! firefox_plugin {
                 &Meta {
                     id: $id,
                     name: $display,
-                    icon: "firefox",
+                    icon: $icon,
                     ready: $ready,
                 }
             }
@@ -213,6 +216,7 @@ firefox_plugin!(
     Bookmarks,
     "firefox-bookmarks",
     "Firefox Bookmarks",
+    "builtin:bookmark",
     "Search Firefox bookmarks"
 );
 firefox_plugin!(
@@ -220,6 +224,7 @@ firefox_plugin!(
     History,
     "firefox-history",
     "Firefox History",
+    "builtin:clock",
     "Search Firefox history"
 );
 

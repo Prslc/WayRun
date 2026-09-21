@@ -22,7 +22,7 @@ struct Engine {
 
 const GOOGLE: Engine = Engine {
     name: "Google",
-    icon: "google",
+    icon: "builtin:globe",
     ready: "Search Google suggestions",
     summary: "Search on Google",
     search_url: "https://www.google.com/search?q=",
@@ -31,7 +31,7 @@ const GOOGLE: Engine = Engine {
 
 const DUCKDUCKGO: Engine = Engine {
     name: "DuckDuckGo",
-    icon: "duckduckgo",
+    icon: "builtin:globe",
     ready: "Search DuckDuckGo suggestions",
     summary: "Search on DuckDuckGo",
     search_url: "https://duckduckgo.com/?q=",

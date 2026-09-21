@@ -19,7 +19,7 @@ impl Plugin for WindowPlugin {
         &Meta {
             id: "window",
             name: "Window",
-            icon: "window-duplicate",
+            icon: "builtin:window",
             ready: "Switch open windows",
         }
     }

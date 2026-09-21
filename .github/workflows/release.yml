@@ -44,7 +44,8 @@ jobs:
       - name: Package
         run: |
           tar -czf "wayrun-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz" \
-            -C target/release wayrun
+            -C target/release wayrun \
+            -C "${GITHUB_WORKSPACE}/core/assets/icons" NOTICE
 
       - name: Extract release notes
         run: |

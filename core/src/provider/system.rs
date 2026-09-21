@@ -2,7 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use crate::plugin::{Meta, Plugin};
-use crate::system::icon::resolve;
+use crate::system::icon::find_icon_path;
 use crate::wire::{Action, ResultItem};
 use anyhow::Result;
 
@@ -13,7 +13,7 @@ impl Plugin for SystemCommands {
         &Meta {
             id: "system-commands",
             name: "System Commands",
-            icon: "system-shutdown",
+            icon: "builtin:power",
             ready: "Search system commands",
         }
     }
@@ -34,24 +34,19 @@ fn do_search(input: &str) -> Vec<ResultItem> {
     }
 
     let commands = [
-        (
-            "Lock",
-            "lock",
-            "system-lock-screen",
-            "loginctl lock-session",
-        ),
-        ("Suspend", "suspend", "system-suspend", "systemctl suspend"),
-        ("Reboot", "reboot", "system-reboot", "systemctl reboot"),
+        ("Lock", "lock", "builtin:lock", "loginctl lock-session"),
+        ("Suspend", "suspend", "builtin:suspend", "systemctl suspend"),
+        ("Reboot", "reboot", "builtin:reboot", "systemctl reboot"),
         (
             "Shutdown",
             "shutdown",
-            "system-shutdown",
+            "builtin:power",
             "systemctl poweroff",
         ),
         (
             "Logout",
             "logout",
-            "system-log-out",
+            "builtin:logout",
             "loginctl terminate-session $XDG_SESSION_ID",
         ),
     ];
@@ -69,7 +64,7 @@ fn do_search(input: &str) -> Vec<ResultItem> {
             on_click: Some(Action::Run {
                 cmd: (*cmd).to_string(),
             }),
-            icon: resolve(icon),
+            icon: find_icon_path(icon),
             ephemeral: true,
             actions: Vec::new(),
             badge: None,

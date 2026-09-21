@@ -13,7 +13,7 @@ impl Plugin for Calculator {
         &Meta {
             id: "calculator",
             name: "Calculator",
-            icon: "calc",
+            icon: "builtin:calculator",
             ready: "Enter a math expression",
         }
     }
@@ -103,7 +103,7 @@ fn do_search(expr: &str) -> Vec<ResultItem> {
                 title: formatted,
                 summary: Some(expr.to_string()),
                 on_click: None,
-                icon: resolve("calc"),
+                icon: resolve("builtin:calculator"),
                 ephemeral: true,
                 actions: Vec::new(),
                 badge: None,

@@ -57,7 +57,7 @@ pub fn copy_url_action(item: &ResultItem) -> Vec<ActionItem> {
         action: PanelAction::Execute {
             command: Action::Copy { text: uri.clone() },
         },
-        icon: Some("edit-copy".to_string()),
+        icon: Some("builtin:copy".to_string()),
         id: Some("copy_url".to_string()),
         plugin: None,
         default: false,

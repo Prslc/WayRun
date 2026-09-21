@@ -24,3 +24,15 @@ The shell reads `family` at startup, so a change takes effect on the next launch
 for anything the family lacks, so a family covering only the scripts you read
 keeps the fonts you never draw out of memory. The interface size is `theme.toml`'s
 `[font].size` and applies live.
+
+## `[icon]`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `theme` | *(desktop setting)* | Icon theme for per-row icons. Omitted, the core follows `gtk-icon-theme-name` from the GTK settings and that theme's `Inherits`. |
+
+The icon theme is optional: the panel, badge and built-in plugin glyphs are
+built into the binary, and a row icon that no theme resolves falls back to a
+bundled placeholder. When set, `theme` also beats the desktop setting. Resolved
+icons are cached for the core's life, so a change takes effect on the next core
+start.

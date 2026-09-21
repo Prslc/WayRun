@@ -22,7 +22,7 @@ fn mime_icon(path: &Path) -> Option<String> {
 }
 
 macro_rules! search_plugin {
-    ($name:ident, $id:literal, $display:literal, $by_name:literal, $dirs:literal, $ready:literal) => {
+    ($name:ident, $id:literal, $display:literal, $icon:literal, $by_name:literal, $dirs:literal, $ready:literal) => {
         pub struct $name;
 
         impl Plugin for $name {
@@ -30,7 +30,7 @@ macro_rules! search_plugin {
                 &Meta {
                     id: $id,
                     name: $display,
-                    icon: "folder",
+                    icon: $icon,
                     ready: $ready,
                 }
             }
@@ -78,7 +78,7 @@ fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
             action: PanelAction::Execute {
                 command: Action::Reveal { uri: uri.clone() },
             },
-            icon: Some("papirus:symbolic/apps/system-file-manager-symbolic".to_string()),
+            icon: Some("builtin:reveal".to_string()),
             id: Some("reveal".to_string()),
             plugin: None,
             default: false,
@@ -90,7 +90,7 @@ fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
                     text: path.into_owned(),
                 },
             },
-            icon: Some("edit-copy".to_string()),
+            icon: Some("builtin:copy".to_string()),
             id: Some("copy_path".to_string()),
             plugin: None,
             default: false,
@@ -100,7 +100,7 @@ fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
             action: PanelAction::Execute {
                 command: Action::Terminal { uri: uri.clone() },
             },
-            icon: Some("papirus:symbolic/apps/utilities-terminal-symbolic".to_string()),
+            icon: Some("builtin:terminal".to_string()),
             id: Some("terminal".to_string()),
             plugin: None,
             default: false,
@@ -112,6 +112,7 @@ search_plugin!(
     FileSearch,
     "file-search",
     "Files",
+    "builtin:file",
     true,
     false,
     "Search files by name or path"
@@ -120,6 +121,7 @@ search_plugin!(
     PathSearch,
     "path-search",
     "Directories",
+    "builtin:folder",
     false,
     true,
     "Search directories by path"
@@ -184,7 +186,7 @@ fn entry_item(path: &Path, is_dir: bool) -> ResultItem {
         title: if is_dir { format!("{name}/") } else { name },
         summary: Some(path.to_string_lossy().into_owned()),
         icon: if is_dir {
-            resolve("folder")
+            resolve("builtin:folder")
         } else {
             mime_icon(path)
         },
