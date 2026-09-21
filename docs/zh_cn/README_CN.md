@@ -53,6 +53,10 @@
   `cargo build --release` 会构建整个工作区。前端本身不引入 GUI 工具包，
   只用 tiny-skia、cosmic-text 等纯 Rust crate。
 - 覆盖中日文输入的字体（如 Source Han Sans）。
+- 一套**图标主题**，用于结果行与动作图标（
+  [Papirus](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme)
+  是内置 symbolic 图形所面向的主题）。没有安装时，图标回退到内置占位图，core 会向
+  stderr 打一行警告。
 
 ## 功能依赖
 

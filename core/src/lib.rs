@@ -33,6 +33,7 @@ async fn serve_or_list() -> Result<()> {
 pub fn run() -> Result<()> {
     // Before the runtime exists: the env write must be single-threaded.
     system::fs::ensure_flatpak_data_dirs();
+    system::icon::warn_if_no_icon_theme();
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()

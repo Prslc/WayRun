@@ -79,7 +79,9 @@ the file's `(mtime, size)`, so a later start does not fork an unchanged host.
 
 Both the identity `icon` and each result `icon` accept an absolute path, a
 `papirus:` spec, or a theme icon name; the core resolves every spec to an
-absolute path before a row reaches the shell.
+absolute path before a row reaches the shell. A result whose own icon is missing
+or does not resolve takes the plugin's identity icon, and the bundled
+placeholder answers only when that identity icon resolves to nothing either.
 
 Hosts can be written by hand. The
 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace ships a

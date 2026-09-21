@@ -65,7 +65,7 @@ fn cached_copy(source: &Path) -> Result<PathBuf> {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
 
-    let dir = cache_dir()?;
+    let dir = crate::system::fs::cache_dir().context("creating the cache directory")?;
     let stem = format!("places-{:016x}", hash_path(source));
     let target = dir.join(format!("{stem}-{nanos}-{size}.sqlite"));
     if target.is_file() {
@@ -82,17 +82,6 @@ fn cached_copy(source: &Path) -> Result<PathBuf> {
     // Prune under the lock, so no concurrent copy owns a `.tmp` we remove.
     prune(&dir, &target);
     Ok(target)
-}
-
-/// The cache directory, created on demand; `$XDG_CACHE_HOME` or `~/.cache`.
-fn cache_dir() -> Result<PathBuf> {
-    let base = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
-        .unwrap_or_else(std::env::temp_dir);
-    let dir = base.join("wayrun");
-    fs::create_dir_all(&dir)?;
-    Ok(dir)
 }
 
 /// Drop a superseded copy (an older snapshot or another profile) and a crashed

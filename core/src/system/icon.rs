@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 use crate::system::xdg;
@@ -31,6 +32,9 @@ const ICON_SIZES: &[&str] = &[
     "scalable", "48x48", "32x32", "256x256", "128x128", "64x64", "24x24", "16x16",
 ];
 const ICON_EXTS: &[&str] = &["svg", "png"];
+
+const DEFAULT_ICON_NAME: &str = "application_default.png";
+const DEFAULT_ICON_PNG: &[u8] = include_bytes!("../../../images/application_default.png");
 
 /// `papirus:name` -> `(None, "name")`; `papirus:category/name` ->
 /// `(Some("category"), "name")`.
@@ -108,8 +112,43 @@ pub fn resolve(name: &str) -> Option<String> {
     result
 }
 
+static DEFAULT_ICON: OnceLock<Option<String>> = OnceLock::new();
+
 pub fn find_icon_path(name: &str) -> Option<String> {
-    resolve(name).or_else(|| xdg::resource_path("images/application_default.png"))
+    resolve(name).or_else(default_icon_path)
+}
+
+/// The shell renders paths, not bytes, so a miss caches the embedded PNG.
+fn default_icon_path() -> Option<String> {
+    DEFAULT_ICON
+        .get_or_init(|| {
+            xdg::resource_path(&format!("images/{DEFAULT_ICON_NAME}"))
+                .or_else(|| materialize_default(&crate::system::fs::cache_dir()?))
+        })
+        .clone()
+}
+
+fn materialize_default(dir: &Path) -> Option<String> {
+    let target = dir.join(DEFAULT_ICON_NAME);
+    if !target.exists() {
+        std::fs::write(&target, DEFAULT_ICON_PNG).ok()?;
+    }
+    Some(target.to_string_lossy().into_owned())
+}
+
+fn any_theme_under(bases: &[PathBuf]) -> bool {
+    bases
+        .iter()
+        .any(|base| THEMES.iter().any(|theme| base.join(theme).is_dir()))
+}
+
+pub fn warn_if_no_icon_theme() {
+    if !any_theme_under(&xdg::icon_theme_dirs()) {
+        eprintln!(
+            "wayrun: no icon theme (Papirus, breeze, Adwaita, hicolor) found; \
+             row and action icons use the built-in placeholder"
+        );
+    }
 }
 
 /// The first name in `names` that resolves to a real icon file, without the
@@ -267,5 +306,36 @@ mod tests {
         assert!(path.ends_with("text-x-generic.svg"), "{path}");
         // The bundled default is a `find_icon_path` concern, not a chain entry.
         assert!(find_first_icon_path(["definitely-not-an-icon-xyz"]).is_none());
+    }
+
+    #[test]
+    fn materialize_writes_the_embedded_placeholder() {
+        let dir = std::env::temp_dir().join(format!("wayrun-default-icon-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let path = materialize_default(&dir).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), DEFAULT_ICON_PNG);
+        assert!(path.ends_with(DEFAULT_ICON_NAME), "{path}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_embedded_placeholder_is_a_png() {
+        assert!(DEFAULT_ICON_PNG.starts_with(&[0x89, b'P', b'N', b'G']));
+    }
+
+    #[test]
+    fn any_theme_under_reports_an_installed_theme() {
+        let dir = std::env::temp_dir().join(format!("wayrun-theme-none-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(!any_theme_under(std::slice::from_ref(&dir)));
+
+        std::fs::create_dir_all(dir.join("Papirus")).unwrap();
+        assert!(any_theme_under(std::slice::from_ref(&dir)));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

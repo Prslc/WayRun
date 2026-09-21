@@ -7,6 +7,17 @@ pub fn get_home() -> Result<PathBuf> {
     dirs::home_dir().context("finding the user HOME directory")
 }
 
+/// `$XDG_CACHE_HOME/wayrun` (or `~/.cache/wayrun`), created on demand.
+pub fn cache_dir() -> Option<PathBuf> {
+    let base = env::var_os("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
+        .unwrap_or_else(env::temp_dir);
+    let dir = base.join("wayrun");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir)
+}
+
 /// Create `path` only when it is absent; `O_EXCL` keeps the test atomic, so an
 /// editor's atomic save is never truncated.
 pub fn write_if_absent(path: &Path, contents: &str) -> std::io::Result<()> {
