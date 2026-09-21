@@ -61,6 +61,24 @@ pub fn pixmap_dirs() -> Vec<PathBuf> {
     vec![PathBuf::from("/usr/share/pixmaps")]
 }
 
+/// The icon theme the desktop settings name (`gtk-icon-theme-name`), which GTK
+/// and matugen write; the newest settings file that names one wins.
+pub fn settings_icon_theme() -> Option<String> {
+    let config = dirs::config_dir()?;
+    ["gtk-4.0/settings.ini", "gtk-3.0/settings.ini"]
+        .iter()
+        .find_map(|sub| icon_theme_name(&std::fs::read_to_string(config.join(sub)).ok()?))
+}
+
+fn icon_theme_name(text: &str) -> Option<String> {
+    text.lines().find_map(|line| {
+        let (key, value) = line.split_once('=')?;
+        (key.trim() == "gtk-icon-theme-name")
+            .then(|| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    })
+}
+
 fn find_up_from_bin(sub_path: &str) -> Option<String> {
     let mut dir = env::current_exe().ok()?.parent()?.to_path_buf();
     loop {

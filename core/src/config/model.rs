@@ -6,6 +6,7 @@ use super::path;
 pub struct Config {
     pub web_search: WebSearch,
     pub font: Font,
+    pub icon: Icon,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -19,6 +20,12 @@ pub struct Font {
     /// The family the UI shapes with; missing glyphs fall back to the system, so
     /// a family covering only the scripts you read keeps the rest out of memory.
     pub family: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Icon {
+    /// Icon theme name; empty follows the desktop's own setting.
+    pub theme: String,
 }
 
 impl Default for WebSearch {
@@ -43,6 +50,8 @@ struct ConfigFile {
     web_search: WebSearchFile,
     #[serde(default)]
     font: FontFile,
+    #[serde(default)]
+    icon: IconFile,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -53,6 +62,11 @@ struct WebSearchFile {
 #[derive(serde::Deserialize, Default)]
 struct FontFile {
     family: Option<String>,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct IconFile {
+    theme: Option<String>,
 }
 
 impl Config {
@@ -77,6 +91,9 @@ impl Config {
         }
         if let Some(family) = file.font.family.filter(|f| !f.trim().is_empty()) {
             self.font.family = family;
+        }
+        if let Some(theme) = file.icon.theme.filter(|t| !t.trim().is_empty()) {
+            self.icon.theme = theme;
         }
     }
 }
@@ -105,15 +122,24 @@ mod tests {
 
             [font]
             family = "Noto Sans"
+
+            [icon]
+            theme = "Papirus"
             "#,
         );
         assert_eq!(config.web_search.engine, "duckduckgo");
         assert_eq!(config.font.family, "Noto Sans");
+        assert_eq!(config.icon.theme, "Papirus");
         // an absent section keeps its default
         assert_eq!(
             parse("[web_search]\nengine = \"google\"").font,
             Font::default()
         );
+    }
+
+    #[test]
+    fn a_blank_theme_keeps_the_default() {
+        assert_eq!(parse("[icon]\ntheme = \"  \"").icon, Icon::default());
     }
 
     #[test]

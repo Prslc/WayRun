@@ -5,3 +5,6 @@
 
 [font]
 # family = "Source Han Sans CN" # primary shaping family; a change needs a restart
+
+[icon]
+# theme = "Adwaita"             # icon theme; omitted follows the desktop setting
