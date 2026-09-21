@@ -20,7 +20,6 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 | `unpin` | `{"scope","on_click": Command}` | `{"unpinned": bool}` |
 | `default` | `{"scope","action_id"}` | `null`（记录某插件的默认 Enter 动作；`action_id` 为 null 则清除） |
 | `forget` | `{"on_click": Command}` | `{"forgotten": bool}` |
-| `resolve_icon` | `{"name"}` | 图标规范对应的绝对路径 |
 | `list_plugins` | — | 插件元数据；见 [schema](#插件元数据list_plugins) |
 | `theme` | — | 主题颜色 |
 | `ping` | — | `"pong"` |
@@ -77,11 +76,6 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 相等时，才会把这些置顶项按最近置顶优先排在最前，与新鲜结果去重，并补上各自的 `actions`；
 只输入关键词不会命中。结果项 JSON 整体存储，因为置顶行会在其插件运行之前被重新发出。
 
-`resolve_icon` 把任意图标规范——绝对路径、主题图标名，或下文介绍的 `papirus:`
-规范——解析为前端渲染所用的绝对路径。它面向需要动态构造图标的外部
-插件主机（如 `list_plugins` 身份图标），无需硬编码主题路径。`name` 缺失或非
-字符串返回 `-32602`。
-
 ## 插件元数据（`list_plugins`）
 
 `list_plugins` 返回插件对象数组，存在两种形态：
@@ -94,7 +88,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 |-----|------|------|
 | `id` | string | 插件 id，与 `plugins.toml` 条目对应 |
 | `name` | string | 显示名 |
-| `icon` | string | 图标路径或主题名（外部主机的 `papirus:` 规范已解析为绝对路径） |
+| `icon` | string | 图标绝对路径（外部主机须自带图标文件并返回其绝对路径） |
 | `keyword` | string | 触发前缀（空 = 默认） |
 | `enabled` | bool | 插件是否启用 |
 
@@ -109,12 +103,12 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 |-----|------|------|
 | `id` | string（必填） | 插件 id——必须与 `plugins.toml` 条目的 id 一致，否则身份被忽略 |
 | `name` | string | 显示名（空 → 回落为配置的 id） |
-| `icon` | string | 绝对路径或 `papirus:` 规范（见 [图标规范](#图标规范)） |
+| `icon` | string | 主机自带图标的绝对路径（见 [图标规范](#图标规范)） |
 | `description` | string | ready 提示，显示在 `?` 列表与关键词+空格提示中 |
 
 未实现 `list_plugins`（或返回中没有匹配的 `id`）的主机仍可用——搜索照常转发、
 结果照常解析——但身份退化为配置的 id 且无图标，因此 `?` 列表与关键词+空格提示
-显示默认占位符。声明身份（带 `papirus:` 图标）正是让这两处渲染真实图标的关键。
+显示默认占位符。声明身份（带自备图标的绝对路径）正是让这两处渲染真实图标的关键。
 
 ## 关键词插件的默认视图
 
@@ -180,17 +174,10 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 ### 图标规范
 
 前端以 `file://` + 路径渲染图标，因此后端输出的每个 `icon` 都是绝对路径。
-**外部插件主机**（`plugins.toml` 中带 `command` 的条目）可以返回主题图标名、
-`papirus:` 规范或绝对路径——用在任何结果项 `icon` 字段（`search` 结果与 `top`
-默认视图皆然）及 `list_plugins` 身份 `icon` 上——后端会在结果到达前端前解析：
+**外部插件主机**（`plugins.toml` 中带 `command` 的条目）必须返回它**自己准备**的
+图标文件的绝对路径：结果项 `icon` 字段（`search` 结果与 `top` 默认视图皆然）、
+动作的 `icon`、行的 `badge`，以及 `list_plugins` 身份 `icon` 都如此。后端不为
+主机做任何解析——主题图标名、`papirus:` 规范、`builtin:` 字形一律视为无图标。
 
-| 规范 | 解析方式 |
-|------|----------|
-| 绝对路径 | 原样保留 |
-| 主题图标名 | 依次在 `$XDG_DATA_HOME/icons`、各 `$XDG_DATA_DIRS/icons`、`~/.icons`、`/usr/share/pixmaps` 中查找，用户目录优先 |
-| `papirus:<name>` | 在 Papirus 的类别与尺寸中查找 `<name>` 的首个匹配 |
-| `papirus:<category>/<name>` | 同上，但优先搜索 `<category>` |
-
-示例：`papirus:folder-open` →
-`/usr/share/icons/Papirus/48x48/places/folder-open.svg`；
-`papirus:apps/firefox` → `/usr/share/icons/Papirus/48x48/apps/firefox.svg`。
+结果行图标缺失或为符号规范时，回退到插件的身份图标；身份图标也没有时，后端绘制
+内置占位图标。

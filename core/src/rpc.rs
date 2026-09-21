@@ -228,33 +228,6 @@ pub async fn handle(
                 }
             }));
         }
-        "resolve_icon" => {
-            // Resolve any icon spec (absolute path, theme name, or the
-            // `papirus:<name>` scheme) to the absolute path the UI renders.
-            let Some(Value::Object(map)) = params else {
-                if has_id {
-                    respond(tx, id, Err(INVALID_PARAMS)).await;
-                }
-                return;
-            };
-            let name = match map.get("name") {
-                Some(Value::String(s)) if !s.is_empty() => s.clone(),
-                _ => {
-                    if has_id {
-                        respond(tx, id, Err(INVALID_PARAMS)).await;
-                    }
-                    return;
-                }
-            };
-            if has_id {
-                respond(
-                    tx,
-                    id,
-                    Ok(json!(crate::system::icon::find_icon_path(&name))),
-                )
-                .await;
-            }
-        }
         "list_plugins" => {
             let plugins: Vec<Value> = crate::plugin::list_plugins()
                 .await
@@ -401,46 +374,6 @@ mod tests {
         .await;
         let v: Value = serde_json::from_str(&msgs[0]).unwrap();
         assert_eq!(v["error"]["code"], -32602);
-    }
-
-    #[tokio::test]
-    async fn resolve_icon_returns_absolute_path() {
-        let (_, msgs) = run(
-            r#"{"jsonrpc":"2.0","method":"resolve_icon","params":{"name":"papirus:folder-open"},"id":4}"#,
-        )
-        .await;
-        let v: Value = serde_json::from_str(&msgs[0]).unwrap();
-        let path = v["result"].as_str().expect("result must be a string");
-        assert!(path.starts_with('/'));
-        if std::path::Path::new("/usr/share/icons/Papirus").exists() {
-            assert!(path.contains("/Papirus/"));
-        }
-    }
-
-    #[tokio::test]
-    async fn resolve_icon_passes_absolute_path_through() {
-        let (_, msgs) = run(
-            r#"{"jsonrpc":"2.0","method":"resolve_icon","params":{"name":"/usr/share/icons/Papirus/48x48/apps/github.svg"},"id":8}"#,
-        )
-        .await;
-        let v: Value = serde_json::from_str(&msgs[0]).unwrap();
-        assert_eq!(
-            v["result"],
-            "/usr/share/icons/Papirus/48x48/apps/github.svg"
-        );
-    }
-
-    #[tokio::test]
-    async fn resolve_icon_requires_name() {
-        for line in [
-            r#"{"jsonrpc":"2.0","method":"resolve_icon","id":5}"#,
-            r#"{"jsonrpc":"2.0","method":"resolve_icon","params":{"name":""},"id":6}"#,
-            r#"{"jsonrpc":"2.0","method":"resolve_icon","params":{"name":42},"id":7}"#,
-        ] {
-            let (_, msgs) = run(line).await;
-            let v: Value = serde_json::from_str(&msgs[0]).unwrap();
-            assert_eq!(v["error"]["code"], -32602);
-        }
     }
 
     #[tokio::test]

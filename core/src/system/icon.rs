@@ -150,6 +150,12 @@ pub fn find_icon_path(name: &str) -> Option<String> {
     resolve(name).or_else(|| resolve(APP_ICON))
 }
 
+/// An external host's icon: only an absolute path to a file the host ships is
+/// accepted; the core offers hosts no icon namespace.
+pub fn host_icon_path(spec: &str) -> Option<String> {
+    spec.starts_with('/').then(|| spec.to_string())
+}
+
 /// Write `bytes` as `name` under `dir`, replacing a stale copy; returns the path
 /// the shell reads. A glyph's bytes change with the binary, so the cache cannot
 /// be trusted to match it.
@@ -540,6 +546,19 @@ mod tests {
         assert_eq!(path, "/tmp/icon.svg");
         // The app glyph is a `find_icon_path` concern, not a chain entry.
         assert!(find_first_icon_path(["definitely-not-an-icon-xyz"]).is_none());
+    }
+
+    #[test]
+    fn host_icon_path_accepts_only_absolute_paths() {
+        assert_eq!(
+            host_icon_path("/usr/share/icons/x.svg").as_deref(),
+            Some("/usr/share/icons/x.svg")
+        );
+        // the core's own namespace is not offered to external hosts
+        assert!(host_icon_path("builtin:power").is_none());
+        assert!(host_icon_path("papirus:folder-open").is_none());
+        assert!(host_icon_path("firefox").is_none());
+        assert!(host_icon_path("").is_none());
     }
 
     #[test]

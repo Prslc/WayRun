@@ -180,8 +180,8 @@ fn attach_actions(
     actions.append(&mut plugin_actions);
     actions.append(&mut item.actions);
 
-    // Resolve every icon spec (built-in or host-supplied) to the absolute path
-    // the shell renders; an unresolved action keeps no icon.
+    // Core and plugin actions carry `builtin:` specs; a host action's icon is
+    // already absolute, so anything unresolved keeps no icon.
     for action in &mut actions {
         action.icon = action
             .icon

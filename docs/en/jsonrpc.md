@@ -21,7 +21,6 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 | `unpin` | `{"scope","on_click": Command}` | `{"unpinned": bool}` |
 | `default` | `{"scope","action_id"}` | `null` (remembers the default Enter action for a plugin; a null `action_id` clears it) |
 | `forget` | `{"on_click": Command}` | `{"forgotten": bool}` |
-| `resolve_icon` | `{"name"}` | absolute path for an icon spec |
 | `list_plugins` | — | plugin metadata; see [schema](#plugin-metadata-list_plugins) |
 | `theme` | — | theme colors |
 | `ping` | — | `"pong"` |
@@ -88,12 +87,6 @@ most recently pinned first, deduplicated against the fresh results, and decorate
 them with their `actions`; a bare keyword does not match. The item JSON is
 stored whole, because a pinned row is re-emitted before its plugin runs.
 
-`resolve_icon` resolves any icon spec — an absolute path, a theme icon name, or
-the `papirus:` scheme below — to the absolute path the shell renders. It
-is meant for external plugin hosts that build icons dynamically (e.g. a
-`list_plugins` identity) without hard-coding theme paths. An absent or
-non-string `name` returns `-32602`.
-
 ## Plugin metadata (`list_plugins`)
 
 `list_plugins` returns an array of plugin objects. There are two shapes:
@@ -106,7 +99,7 @@ Called on the core's stdin, it answers with the current registry:
 |-----|------|---------|
 | `id` | string | plugin id, matches the `plugins.toml` entry |
 | `name` | string | display name |
-| `icon` | string | icon path or theme name (external hosts' `papirus:` specs are already resolved to absolute paths) |
+| `icon` | string | icon absolute path |
 | `keyword` | string | trigger prefix (empty = default) |
 | `enabled` | bool | whether the plugin is active |
 
@@ -122,7 +115,7 @@ response `result` is an array of objects:
 |-----|------|---------|
 | `id` | string (required) | plugin id — must match the `plugins.toml` entry id, or the identity is ignored |
 | `name` | string | display name (empty → falls back to the configured id) |
-| `icon` | string | absolute path or `papirus:` spec (see [Icon specs](#icon-specs)) |
+| `icon` | string | absolute path to an icon the host ships (see [Icon specs](#icon-specs)) |
 | `description` | string | ready hint shown in the `?` list and the keyword+space hint |
 
 ## Default views for keyword plugins
@@ -200,20 +193,13 @@ and external host alike.
 
 ### Icon specs
 
-The shell renders icons as `file://` + path, so every `icon` the core
-emits is an absolute path. **External plugin hosts** (a `plugins.toml` entry
-with `command`) may return a theme icon name, a `papirus:` spec or an absolute
-path — in any result-item `icon` field (`search` results and `top` default views
-alike) and in the `list_plugins` identity `icon` — and the core resolves it
-before the item reaches the shell:
+The shell renders icons as `file://` + path, so every `icon` the core emits is
+an absolute path. **External plugin hosts** (a `plugins.toml` entry with
+`command`) must return an absolute path to an icon file the host ships itself:
+in any result-item `icon` field (`search` results and `top` default views alike),
+in an action's `icon` and in the row's `badge`, and in the `list_plugins`
+identity `icon`. The core resolves nothing on a host's behalf — a theme icon
+name, a `papirus:` spec or a `builtin:` glyph is treated as no icon.
 
-| Spec | Resolution |
-|------|------------|
-| absolute path | passed through |
-| theme name | searched under `$XDG_DATA_HOME/icons`, each `$XDG_DATA_DIRS/icons`, `~/.icons` and `/usr/share/pixmaps`, user dirs first |
-| `papirus:<name>` | first match for `<name>` across Papirus categories and sizes |
-| `papirus:<category>/<name>` | same, but searches `<category>` first |
-
-Examples: `papirus:folder-open` →
-`/usr/share/icons/Papirus/48x48/places/folder-open.svg`;
-`papirus:apps/firefox` → `/usr/share/icons/Papirus/48x48/apps/firefox.svg`.
+A row icon that is missing or symbolic falls back to the plugin's identity icon;
+when that is missing too, the core draws its built-in placeholder.

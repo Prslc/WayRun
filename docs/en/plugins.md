@@ -77,11 +77,12 @@ closes), bounded by a 5s timeout, so a stalled host costs the deadline and never
 the session. The identity the host reports through `list_plugins` is cached by
 the file's `(mtime, size)`, so a later start does not fork an unchanged host.
 
-Both the identity `icon` and each result `icon` accept an absolute path, a
-`papirus:` spec, or a theme icon name; the core resolves every spec to an
-absolute path before a row reaches the shell. A result whose own icon is missing
-or does not resolve takes the plugin's identity icon, and the bundled
-placeholder answers only when that identity icon resolves to nothing either.
+Both the identity `icon` and each result `icon` must be an absolute path to an
+icon file the host ships itself; the same holds for an action's `icon` and a
+row's `badge`. The core resolves nothing for a host: a theme icon name, a
+`papirus:` spec or a `builtin:` glyph counts as no icon. A result whose own icon
+is missing falls back to the plugin's identity icon, and the built-in
+placeholder answers when that is missing too.
 
 Hosts can be written by hand. The
 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace ships a

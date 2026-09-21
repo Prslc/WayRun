@@ -6,7 +6,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 use crate::plugin::{Meta, Plugin};
-use crate::system::icon::{find_icon_path, resolve};
+use crate::system::icon::host_icon_path;
 use crate::wire::{Action, ResultItem};
 
 /// Identity of one plugin as described by an external host's `list_plugins`.
@@ -58,13 +58,8 @@ impl External {
                 format!("External plugin via {command}"),
             ),
         };
-        // The UI renders only absolute paths, so a `papirus:` spec or theme name
-        // is resolved here rather than leaking into `Meta`.
-        let icon = if icon.is_empty() {
-            icon
-        } else {
-            find_icon_path(&icon).unwrap_or_default()
-        };
+        // A symbolic identity icon is a miss: a host ships its own absolute paths.
+        let icon = host_icon_path(&icon).unwrap_or_default();
         Self {
             meta: Meta {
                 id: leak(id.to_string()),
@@ -221,10 +216,14 @@ fn parse_result_items(response: &serde_json::Value, icon: &str) -> Option<Vec<Re
         .iter()
         .filter_map(|it| serde_json::from_value(it.clone()).ok())
         .collect();
-    let icon_path = find_icon_path(icon);
+    let identity = host_icon_path(icon);
     for item in &mut parsed {
         let spec = item.icon.as_deref().unwrap_or("");
-        item.icon = resolve_item_icon(spec, icon_path.clone());
+        item.icon = resolve_item_icon(spec, identity.clone());
+        item.badge = item.badge.as_deref().and_then(host_icon_path);
+        for action in &mut item.actions {
+            action.icon = action.icon.as_deref().and_then(host_icon_path);
+        }
     }
     Some(parsed)
 }
@@ -314,18 +313,13 @@ async fn forget_external(command: &str, row: &Action) -> Result<bool> {
     let response = rpc_call(command, &request).await;
     Ok(response.is_some_and(|reply| reply.get("error").is_none()))
 }
-/// Resolve one result icon to an absolute path; an empty or unresolvable spec
-/// falls back to the plugin's identity icon.
+/// An absolute path is kept; anything else falls back to the identity icon.
 fn resolve_item_icon(icon: &str, fallback: Option<String>) -> Option<String> {
-    if icon.is_empty() {
-        return fallback;
-    }
-    resolve(icon).or(fallback)
+    host_icon_path(icon).or(fallback)
 }
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     #[test]
     fn empty_icon_falls_back_to_plugin_icon() {
@@ -353,24 +347,33 @@ mod tests {
     }
 
     #[test]
-    fn papirus_spec_is_resolved_to_absolute_path() {
-        if !Path::new("/usr/share/icons/Papirus").exists() {
-            return; // theme not installed on this machine
-        }
-        let resolved = resolve_item_icon("papirus:folder-open", None).unwrap();
-        assert!(resolved.contains("/Papirus/"));
-        assert!(resolved.ends_with(".svg"));
+    fn a_symbolic_spec_is_no_icon_for_a_host() {
+        // the core resolves these for its own rows, but not for an external host
+        assert_eq!(resolve_item_icon("papirus:folder-open", None), None);
+        assert_eq!(resolve_item_icon("builtin:power", None), None);
+        assert_eq!(resolve_item_icon("firefox", None), None);
     }
 
     #[test]
-    fn a_theme_name_is_resolved_to_an_absolute_path() {
-        if !Path::new("/usr/share/icons/Papirus").exists() {
-            return; // theme not installed on this machine
-        }
-        // Hosts may name a theme icon rather than a file; the shell only renders
-        // absolute paths, so the core resolves it before the row leaves.
-        let resolved = resolve_item_icon("firefox", None).unwrap();
-        assert!(resolved.starts_with('/'), "{resolved}");
+    fn a_hosts_action_and_badge_icons_must_be_absolute() {
+        let response = serde_json::json!({
+            "result": [{
+                "title": "r",
+                "on_click": {"type":"run","cmd":"x"},
+                "badge": "builtin:pin",
+                "actions": [
+                    {"title":"a", "action":{"type":"execute","command":{"type":"run","cmd":"y"}}, "icon": "builtin:open"},
+                    {"title":"b", "action":{"type":"execute","command":{"type":"run","cmd":"z"}}, "icon": "/tmp/a.svg"},
+                ],
+            }]
+        });
+        let items = parse_result_items(&response, "").unwrap();
+        assert!(items[0].badge.is_none(), "a symbolic badge is dropped");
+        assert!(
+            items[0].actions[0].icon.is_none(),
+            "a symbolic action icon is dropped"
+        );
+        assert_eq!(items[0].actions[1].icon.as_deref(), Some("/tmp/a.svg"));
     }
 
     #[test]
