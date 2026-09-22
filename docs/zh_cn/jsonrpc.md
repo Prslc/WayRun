@@ -1,9 +1,8 @@
 # JSON-RPC 2.0
 
-后端（`wayrun --core`，或 `wayrun-core` 符号链接）与前端之间只讲
-[JSON-RPC 2.0](https://www.jsonrpc.org/specification)，共用同一条 stdin/stdout：
-每一行都必须是一条 JSON-RPC 消息，不是合法 JSON 的行会收到标准的 `-32700` 解析错误。
-响应与通知都是 stdout 上以换行分隔的 JSON。
+后端（`wayrun --core`，或 `wayrun-core` 符号链接）通过 stdin/stdout 只讲
+[JSON-RPC 2.0](https://www.jsonrpc.org/specification)：每一行都必须是一条 JSON-RPC 消息，
+不是合法 JSON 的行会收到标准的 `-32700` 解析错误。响应与通知都是 stdout 上以换行分隔的 JSON。
 
 ```sh
 printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"id":1}' | wayrun --core
@@ -41,8 +40,8 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 
 ## 命令
 
-`Command` 描述一行要执行什么，是内部带标签的对象（`{"type": …}`）。它既作 `command`
-方法的参数，也是结果项 `on_click` 的类型、面板 `execute` 动作所携带的内容：
+`Command` 是用 `type` 字段标记的单个对象（`{"type": …}`），描述一行要执行什么。它既作
+`command` 方法的参数，也是结果项 `on_click` 的类型、面板 `execute` 动作所携带的内容：
 
 | `type` | 字段 | 效果 |
 |--------|------|------|
@@ -64,17 +63,15 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 不承担默认视图。
 
 `forget` 把一行从使用历史中移除。如果 `on_click` 是 `run` 命令，且命令的第一个词恰好
-是某个已注册外部主机的 `command`（绝对路径，或配置里用裸名时按 PATH 解出的路径），
-后端还会向该主机转发一条 `forget`，让它清理自己的数据——比如 todo 插件据此删掉对应待办。
-返回值表示是否真的删掉了东西：删掉一条历史行、**或**拥有该行的主机正常应答，都是 `true`，
-否则为 `false`。内置提供者没有可删的数据；未实现 `forget` 的主机会回 `-32601`，这算
-「不是我的行」——前端会把这类行留在列表里，不会谎称删除成功。遍历主机在独立任务里进行，
-慢的或卡死的主机不会占住 stdin 循环，它的回复只是晚一点到，仍带着原来的 `id`。
+是某个已注册外部主机的 `command`，后端还会向该主机转发一条 `forget`，让它清理自己的数据——
+比如 todo 插件据此删掉对应待办。返回值表示是否真的删掉了东西：删掉一条历史行、**或**拥有该行的
+主机正常应答，都是 `true`，否则为 `false`。未实现 `forget` 的主机会回 `-32601`，这算
+“不是我的行”——启动器会把这类行留在列表里，不会谎称删除成功。
 
 `pin` 以**精确查询字符串**为范围（`scope` 是整段去掉首尾空白的输入；`""` 表示空查询历史），
 按命令为键保存结果项，`unpin` 删除。之后某次 `search` 的 `text` 去掉首尾空白后与该字符串
 相等时，才会把这些置顶项按最近置顶优先排在最前，与新鲜结果去重，并补上各自的 `actions`；
-只输入关键词不会命中。结果项 JSON 整体存储，因为置顶行会在其插件运行之前被重新发出。
+只输入关键词不会命中。
 
 ## 插件元数据（`list_plugins`）
 
@@ -88,7 +85,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 |-----|------|------|
 | `id` | string | 插件 id，与 `plugins.toml` 条目对应 |
 | `name` | string | 显示名 |
-| `icon` | string | 图标绝对路径（外部主机须自带图标文件并返回其绝对路径） |
+| `icon` | string | 图标绝对路径 |
 | `keyword` | string | 触发前缀（空 = 默认） |
 | `enabled` | bool | 插件是否启用 |
 
@@ -108,7 +105,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 
 未实现 `list_plugins`（或返回中没有匹配的 `id`）的主机仍可用——搜索照常转发、
 结果照常解析——但身份退化为配置的 id 且无图标，因此 `?` 列表与关键词+空格提示
-显示默认占位符。声明身份（带自备图标的绝对路径）正是让这两处渲染真实图标的关键。
+显示默认占位符。
 
 ## 关键词插件的默认视图
 
@@ -125,11 +122,9 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 `@plugin.method("top")` 注册）；响应 `result` 为结果项数组，与 `search`
 同一套 [schema](#结果项)，图标同样会被解析。
 
-主机返回非空默认视图时，它取代关键词+空格的身份提示；否则维持原行为：
-
-- 主机未实现 `top`（未知方法 `-32601`）或处理失败（`-32603`）→ 显示
-  `list_plugins` 的身份卡片（`name` + `description`）
-- 返回空结果列表 → 同一身份卡片，作为插件的空状态
+主机返回非空默认视图时，它取代关键词+空格的身份提示；否则——主机未实现 `top`
+（未知方法 `-32601`）、处理失败（`-32603`），或返回空结果列表——提示来自
+`list_plugins`（`name` + `description`），这也是插件的空状态。
 
 后端自己的文案（动作名、启动器的说明行）会按界面语言翻译；主机发来的字符串原样透传，
 所以主机的身份与结果行用什么语言，由主机自己决定。
@@ -146,14 +141,14 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 | `on_click` | [`Command`](#命令) \| null | Enter 绑定的动作 |
 | `icon` | string \| null | 图标图像的绝对路径；见 [图标规范](#图标规范) |
 | `ephemeral` | bool | 为 true 时，选中该项不记入使用历史 |
-| `actions` | array | 可选，前端的 `Shift+Enter` 二级菜单的次级命令 |
+| `actions` | array | 可选，`Shift+Enter` 二级菜单的次级命令 |
 | `badge` | string \| null | 可选，行右缘的状态图标（置顶行为图钉） |
 
 `actions` 元素为 `{"title": string, "action": PanelAction, "icon"?: string}`，
 `icon` 与结果行的 `icon` 采用同样的规范解析。动作还可能带 `id`（稳定 kind）、
 `plugin`（归属插件，用于限定默认动作的作用域）与 `default`（为 true 表示 Enter 执行它）：
 `plugin` 与 `default` 由后端赋值，主机传来的这两个字段会被忽略；外部主机给自己的动作填 `id`
-即可使其可被设为默认（后端会把主机登记为这些动作的归属）。
+即可使其可被设为默认。
 `PanelAction` 是以下之一：
 
 | `type` | 字段 | 含义 |
@@ -166,22 +161,19 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 后端会为每个可操作的行补上启动器级别的置顶/取消置顶；对源自空查询历史、且本可记入
 历史（非 `ephemeral`、非 `copy`）的行，再补一条移除历史。产出该行的内置提供者会补上
 类型专属动作（文件定位、复制路径、在终端打开、`[Desktop Action …]`、复制链接），
-外部主机自带的动作排在其后；主机也可以直接在结果项上给出 `actions`。
+外部主机自带的动作排在其后。
 
 无 `on_click` 的结果项不可交互（仅展示）。
 
 选中一项会把它记入使用历史（空查询时的 `top` 列表）。有两类行不记：主机标记
 `ephemeral: true` 的行（如一次性的搜索结果），以及 `on_click` 为 `copy` 命令的行
-（它代表被复制的文本，而不是可再次打开的目标）。语义由字段或命令类型决定，内置
-提供者和外部主机都一样。
+（它代表被复制的文本，而不是可再次打开的目标）。
 
 ### 图标规范
 
-前端以 `file://` + 路径渲染图标，因此后端输出的每个 `icon` 都是绝对路径。
-**外部插件主机**（`plugins.toml` 中带 `command` 的条目）必须返回它**自己准备**的
-图标文件的绝对路径：结果项 `icon` 字段（`search` 结果与 `top` 默认视图皆然）、
-动作的 `icon`、行的 `badge`，以及 `list_plugins` 身份 `icon` 都如此。后端不为
-主机做任何解析——主题图标名、`papirus:` 规范、`builtin:` 字形一律视为无图标。
+每个 `icon` 都是绝对路径。**外部插件主机**（`plugins.toml` 中带 `command` 的条目）必须
+返回它**自己准备**的图标文件的绝对路径：结果项 `icon` 字段（`search` 结果与 `top`
+默认视图皆然）、动作的 `icon`、行的 `badge`，以及 `list_plugins` 身份 `icon` 都如此。
+主题图标名、`papirus:` 规范、`builtin:` 字形一律视为无图标。
 
-结果行图标缺失或为符号规范时，回退到插件的身份图标；身份图标也没有时，后端绘制
-内置占位图标。
+结果行图标缺失或为符号规范时，回退到插件的身份图标；身份图标也没有时，绘制内置占位图标。

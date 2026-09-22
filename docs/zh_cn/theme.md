@@ -2,46 +2,32 @@
 
 WayRun 的配色方式，以及 `~/.config/wayrun/theme.toml` 控制的内容。
 
-分两层：
-
-1. **系统调色板** —— 后端读取 DMS 的 `dms-colors.json`，把角色色值和当前 `mode` 经 IPC 发给前端。
-2. **`theme.toml`** —— 前端读取，并在系统角色上叠加本地覆盖。
-
-两个文件分别由后端和前端监听，改动都实时生效，无需重启。
+分两层：系统调色板（来自 DankMaterialShell）与 `theme.toml` 里的覆盖。两者都被监听，
+改动实时生效。
 
 ## 系统调色板
 
-在 DankMaterialShell 桌面上，后端读取 DMS 用 matugen 生成的 Material You 调色板：
+在 DankMaterialShell 桌面上，Material You 调色板来自 DMS 用 matugen 生成的文件：
 
 ```
 ~/.cache/DankMaterialShell/dms-colors.json
 ```
 
-该文件同时保存亮/暗两套调色板与当前 `mode`，因此切换亮暗或更换壁纸只是一次文件写入，会被实时捕获。
-
-角色映射：
+该文件同时保存亮/暗两套调色板与当前 `mode`，因此切换亮暗或更换壁纸都会被实时捕获。
 
 | WayRun | DMS，取自 `colors[mode]` |
 | --- | --- |
 | `primary` | `primary` |
-| `on_primary` | `on_primary` |
-| `bg` | `background` |
 | `fg` | `on_surface` |
 | `container` | `surface_container_high` |
 
-前端目前实际使用 `primary`、`fg`、`container`；`bg` 与 `on_primary` 一并携带但未用。
-后端还发送当前 `mode`，前端据此选取 `theme.toml` 的按模式颜色表。
-
-没有 DMS 时使用内置深色调色板（`mode = "dark"`）。面向 GNOME / KDE 的 freedesktop appearance portal
-（`org.freedesktop.appearance` 的 `color-scheme` 与 `accent-color`，即 GTK/libadwaita 的方案）支持已在计划中。
+没有 DMS 时使用内置深色调色板（`mode = "dark"`）。
 
 ## `~/.config/wayrun/theme.toml`
 
 所有 section 与键均为可选。缺省键保留默认值，无法解析的文件被忽略，越界值会被 clamp。
-文件被监听，修改后无需重启即可生效。
-
-前端首次运行时会写入一份带注释的 `~/.config/wayrun/theme.toml` 模板。模板里所有键都被注释掉，
-因此它把可选项列在字段旁，却不会把当前默认值钉死在文件里；只取消注释你想改的键即可。
+首次运行时会写入一份带注释的模板，因此它把可选项列在字段旁，却不会把当前默认值钉死在文件里；
+只取消注释你想改的键即可。
 
 ### `[colors]`
 
@@ -57,7 +43,7 @@ WayRun 的配色方式，以及 `~/.config/wayrun/theme.toml` 控制的内容。
 
 `[colors]` 是共享层；`[colors.dark]` 与 `[colors.light]` 按模式在其上覆盖（见下）。
 
-表面的默认值是"对应角色 + 既定 alpha"；只有确实想改某个表面时才写该键，alpha 一并写在颜色里。
+表面的默认值是“对应角色 + 既定 alpha”；只有确实想改某个表面时才写该键，alpha 一并写在颜色里。
 
 | 键 | 派生自 | 默认值（alpha） |
 | --- | --- | --- |
@@ -92,14 +78,13 @@ fg = "#c0caf5"
 fg = "#1f2430"
 ```
 
-生效模式由后端解析（DMS 的 `mode`；系统调色板不可用时为 `dark`），因此切换亮暗会实时跟随，无需重启。
+生效模式跟随系统调色板（没有系统调色板时为 `dark`），因此切换亮暗会实时跟随，无需重启。
 当前模式的表里没写的键，仍取 `[colors]` 的值。
 
 ### `[blur]`
 
-前端本身不模糊任何像素。它只绘制一张半透明卡片；当合成器支持
-`ext-background-effect-v1` 时，前端把卡片的圆角矩形作为区域交给合成器，由合成器模糊其背后的内容，
-这就是磨砂观感的来源。合成器若没有该协议，会忽略该区域，此设置也就没有可见效果。
+卡片是半透明的；合成器支持 `ext-background-effect-v1` 时，卡片背后的区域由合成器模糊，
+磨砂观感即来源于此。合成器若没有该协议，会忽略该区域，此设置也就没有可见效果。
 
 在 niri 上还需要额外一条规则。对于客户端通过 `ext-background-effect` 发起的请求，niri 会**默认自动开启 xray**，
 即只模糊壁纸、忽略下方窗口。若要让卡片模糊其真正背后的内容，需要加一条关闭 xray 的 layer rule：
@@ -134,7 +119,7 @@ layerrule = blur, WayRun
 
 | 键 | 类型 | 默认值 | 范围 | 含义 |
 | --- | --- | --- | --- | --- |
-| `radius` | float | `16.0` | ≥ 0 | 卡片圆角。`0` 即直角；内层圆角会随之收缩，避免越界。 |
+| `radius` | float | `16.0` | ≥ 0 | 卡片圆角；`0` 即直角，内层圆角随之收缩。 |
 | `field_radius` | float | 派生（9.0） | ≥ 0 | 搜索框圆角；默认由 `radius` 派生，仍受卡片圆角限制。 |
 | `row_radius` | float | 派生（8.0） | ≥ 0 | 结果行底色圆角。 |
 | `chip_radius` | float | 派生（6.0） | ≥ 0 | 关键词 chip 圆角。 |
@@ -154,9 +139,8 @@ layerrule = blur, WayRun
 
 ### `[font]`
 
-界面尺寸，逻辑像素。每个角色按既定比例从它缩放（查询 1.286×、标题 1×、摘要 0.857×、
-提示 0.786×、图标 2.143×、徽标 1.071×）。字体族**不在这里**：它属于文本 shaping，
-位于 `config.toml` 的 `[font].family`。
+界面尺寸，逻辑像素。一个尺寸驱动全部角色，其余角色随之缩放。字体族不在这里——它位于
+`config.toml` 的 `[font].family`。
 
 | 键 | 类型 | 默认值 | 范围 | 含义 |
 | --- | --- | --- | --- | --- |
@@ -168,47 +152,4 @@ layerrule = blur, WayRun
 | --- | --- | --- | --- |
 | `entrance_ms` | int | `240` | 显示时的透明度淡入时长。 |
 | `reflow_ms` | int | `150` | 卡片高度动画时长。 |
-| `reduced` | bool | `false` | 等价于 `WAYRUN_REDUCED_MOTION=1`；任一生效都会让两段动画直接停在终态且不请求帧。 |
-
-## 示例
-
-```toml
-# ~/.config/wayrun/theme.toml —— 所有键均为可选
-[colors]
-primary = "#7aa2f7"
-fg = "#c0caf5"
-container = "#24283b"
-follow_system = false
-
-# 表面默认派生自基础角色；写在这里的会连 alpha 一起覆盖
-card = "#24283bcc"
-muted = "#c0caf5a0"
-
-[blur]
-enabled = true
-
-[layout]
-radius = 16.0
-field_radius = 9.0
-row_radius = 8.0
-chip_radius = 6.0
-hairline_width = 1.0
-accent_width = 3.0
-accent_height = 28.0
-width_ratio = 0.38
-width_min = 560.0
-width_max = 760.0
-top_ratio = 0.28
-align = "center"
-offset_x = 0.0
-offset_y = 0.0
-max_rows = 5
-
-[font]
-size = 14.0
-
-[motion]
-entrance_ms = 240
-reflow_ms = 150
-reduced = false
-```
+| `reduced` | bool | `false` | 等价于 `WAYRUN_REDUCED_MOTION=1`：两段动画都直接停在终态。 |

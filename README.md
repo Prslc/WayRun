@@ -20,12 +20,9 @@ math, all from a single floating overlay.
 
 ## Overview
 
-It ships as one Rust binary, `wayrun`, which runs as the overlay shell or, with
-`--core`, as the backend service. The shell owns a `wlr-layer-shell` surface and
-rasterises its own card, list and animations with
-[tiny-skia](https://github.com/RazrFalcon/tiny-skia) into a `wl_shm` buffer, so
-the frontend needs no GPU stack and no GUI toolkit; the core owns the plugin
-registry, the JSON-RPC protocol and the usage database.
+It ships as one Rust binary, `wayrun`: the launcher, plus the backend it talks to
+(`--core`). The overlay is drawn in software into a shared-memory buffer, so it
+needs no GPU stack and no GUI toolkit.
 
 ## Demo
 
@@ -35,9 +32,8 @@ registry, the JSON-RPC protocol and the usage database.
 
 ## Features
 
-- **Launcher** — fuzzy `.desktop` search across XDG data dirs, launched through
-  the GLib `GAppInfo` registry (Exec quoting, field codes, `DBusActivatable`),
-  with Flatpak and themed icons resolved per row.
+- **Launcher** — fuzzy search of installed applications, launched the way the
+  desktop itself would, with Flatpak apps and themed icons per row.
 - **Quick search** — files and paths, Firefox bookmarks and history, clipboard
   history, web suggestions, `$PATH` commands, open windows, system commands,
   and inline math.
@@ -56,8 +52,7 @@ registry, the JSON-RPC protocol and the usage database.
   Wayfire, labwc, ...), KDE Plasma on Wayland, and Mir-based compositors.
   GNOME/Mutter does not implement it, so the overlay cannot be shown there.
 - A Rust toolchain and the usual system libraries (GLib, SQLite, xkbcommon,
-  fontconfig, ...); `cargo build --release` builds the whole workspace. The
-  shell itself pulls in no GUI toolkit, only tiny-skia and cosmic-text.
+  fontconfig, ...); `cargo build --release` builds everything.
 - A font with CJK coverage for Chinese/Japanese queries (e.g. Source Han Sans).
 
 ## Feature dependencies
@@ -119,7 +114,7 @@ cargo build --release -p wayrun-shell --no-default-features      # no window sea
 ## Documentation
 
 - [Usage](docs/en/usage.md) — prefixes, keybindings, and the clipboard.
-- [Resident mode](docs/en/resident.md) — the systemd unit and the IPC commands.
+- [Resident mode](docs/en/resident.md) — the systemd unit and the control commands.
 - [Theme](docs/en/theme.md) — the system palette and `theme.toml` (colors, blur,
   layout, typography, motion).
 - [Config](docs/en/config.md) — `config.toml` (search engine, font family).

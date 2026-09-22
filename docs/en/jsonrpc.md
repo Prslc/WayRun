@@ -44,9 +44,9 @@ pending search, then answers with a `results` notification. Sent **with** an
 
 ## Commands
 
-A `Command` is an internally tagged object (`{"type": …}`) describing what a row
-runs. It is the params of the `command` method and the type of a result's
-`on_click` and of a panel `execute` action:
+A `Command` is one object tagged by its `type` field (`{"type": …}`), describing
+what a row runs. It is the params of the `command` method and the type of a
+result's `on_click` and of a panel `execute` action:
 
 | `type` | Fields | Effect |
 |--------|--------|--------|
@@ -69,23 +69,19 @@ returns `-32602`. Use `top` for the most-used items — `search` does not serve 
 default view.
 
 `forget` drops a row from usage history. When the `on_click` is a `run` command
-whose first token is a registered external host's `command` (absolute
-path, or PATH-resolved when the config uses a bare name), the core also relays
+whose first token is a registered external host's `command`, the core also relays
 a `forget` request to that host so it can delete its own data — e.g. the todo
 plugin removes the todo. The answer says whether anything was really dropped:
 `true` when a history row was deleted **or** a host that owns the row answered
-without an error, `false` otherwise. A built-in provider has nothing to forget,
-and a host without a `forget` method answers `-32601`, which counts as "not
-mine" — the shell keeps such a row in the list rather than claiming a deletion
-nobody made. The host walk runs in a task of its own, so a slow or wedged host
-cannot hold the stdin loop; its reply simply lands later, carrying its `id`.
+without an error, `false` otherwise. A host without a `forget` method answers
+`-32601`, which counts as "not mine" — the launcher keeps such a row in the list
+rather than claiming a deletion nobody made.
 
 `pin` stores an item under an exact query string (`scope` is the whole trimmed
 input; `""` is the empty-query history), keyed by its command; `unpin` removes
 it. A later `search` whose `text` trims to that same string prepends the pins,
 most recently pinned first, deduplicated against the fresh results, and decorates
-them with their `actions`; a bare keyword does not match. The item JSON is
-stored whole, because a pinned row is re-emitted before its plugin runs.
+them with their `actions`; a bare keyword does not match.
 
 ## Plugin metadata (`list_plugins`)
 
@@ -118,6 +114,11 @@ response `result` is an array of objects:
 | `icon` | string | absolute path to an icon the host ships (see [Icon specs](#icon-specs)) |
 | `description` | string | ready hint shown in the `?` list and the keyword+space hint |
 
+A host with no `list_plugins`, or with no id matching its entry, still works —
+searches are forwarded and results parsed — but its identity falls back to the
+configured id with no icon, so `?` and the keyword+space hint show the default
+placeholder.
+
 ## Default views for keyword plugins
 
 A `plugins.toml` entry with a non-empty `keyword` is opened by a query that is
@@ -138,15 +139,14 @@ result items with the same [schema](#result-items) as `search`, icons
 included.
 
 When the host returns a non-empty default view it is shown instead of the
-keyword+space identity hint. The hint stays otherwise:
-
-- host without `top` (unknown method `-32601`) or a failing handler
-  (`-32603`) → identity card from `list_plugins` (`name` + `description`)
+keyword+space identity hint. Otherwise — a host without `top` (unknown method
+`-32601`), a failing handler (`-32603`), or an empty result list — the hint comes
+from `list_plugins` (`name` + `description`), which is also the plugin's empty
+state.
 
 The core translates its own strings (action titles, the launcher's help line);
 whatever a host sends is relayed as it is, so a host owns the language of its
 identity and its rows.
-- empty result list → same identity card, as the plugin's empty state
 
 ## Result items
 
@@ -161,7 +161,7 @@ and `actions`/`badge` only when set:
 | `on_click` | [`Command`](#commands) \| null | action bound to Enter |
 | `icon` | string \| null | absolute path to an icon image; see [Icon specs](#icon-specs) |
 | `ephemeral` | bool | when true, selecting this row is not recorded in usage history |
-| `actions` | array | optional secondary commands for the shell's `Shift+Enter` panel |
+| `actions` | array | optional secondary commands for the `Shift+Enter` action panel |
 | `badge` | string \| null | optional status glyph at the row's right edge (a pin for a pinned row) |
 
 An `actions` entry is `{"title": string, "action": PanelAction, "icon"?: string}`,
@@ -169,7 +169,7 @@ with the same icon-spec resolution as a row's `icon`. An entry may also carry `i
 (its stable kind), `plugin` (the owner, which scopes a remembered default) and
 `default` (true when Enter runs it). The core assigns `plugin` and `default` — a
 host's values for those are ignored — and a host sets `id` on its own actions to
-make them defaultable, which is why the core stamps the host as their owner.
+make them defaultable.
 
 A `PanelAction` is one of:
 
@@ -185,26 +185,23 @@ history removal to a row it sourced from the empty-query history that could have
 been recorded (not `ephemeral`, not `copy`); the owning built-in provider adds
 its type-specific ones (a file reveal, copy path or open in terminal, a
 `[Desktop Action …]` group, a copy-link), and a host's own entries are kept
-after them. External hosts may emit `actions` directly on a result.
+after them.
 
 An item without `on_click` is non-interactive (display only).
 
 Selecting an item records it in usage history — the list behind an empty query
 (`top`). Two kinds of row are exempt: one the host marked `ephemeral: true` (a
 one-shot search hit, say), and one whose `on_click` is a `copy` command (its
-value is the copied text, not a target to re-open). The field or command type
-declares the semantics, so the rule holds for every source — built-in provider
-and external host alike.
+value is the copied text, not a target to re-open).
 
 ### Icon specs
 
-The shell renders icons as `file://` + path, so every `icon` the core emits is
-an absolute path. **External plugin hosts** (a `plugins.toml` entry with
-`command`) must return an absolute path to an icon file the host ships itself:
-in any result-item `icon` field (`search` results and `top` default views alike),
-in an action's `icon` and in the row's `badge`, and in the `list_plugins`
-identity `icon`. The core resolves nothing on a host's behalf — a theme icon
-name, a `papirus:` spec or a `builtin:` glyph is treated as no icon.
+Every `icon` is an absolute path. **External plugin hosts** (a `plugins.toml`
+entry with `command`) must return an absolute path to an icon file the host
+ships itself: in any result-item `icon` field (`search` results and `top`
+default views alike), in an action's `icon`, in the row's `badge`, and in the
+`list_plugins` identity `icon`. A theme icon name, a `papirus:` spec or a
+`builtin:` glyph counts as no icon.
 
 A row icon that is missing or symbolic falls back to the plugin's identity icon;
-when that is missing too, the core draws its built-in placeholder.
+when that is missing too, the bundled placeholder is drawn.

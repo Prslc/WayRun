@@ -1,7 +1,7 @@
 # 插件
 
-`~/.config/wayrun/plugins.toml` 是插件注册表。首次运行时自动生成（即 `core/default-plugins.toml` 的副本），
-并且会被监听，修改后无需重启后端即可生效。
+`~/.config/wayrun/plugins.toml` 是插件注册表。首次运行时自动生成一份带注释的模板，并且会被
+监听，修改后无需重启即可生效。
 
 ## 条目字段
 
@@ -14,13 +14,12 @@ enabled = true
 
 | 字段 | 必填 | 含义 |
 | --- | --- | --- |
-| `id` | 是 | 该条目配置的插件。可以是内置 id，也可以是外部主机上报的 id。 |
+| `id` | 是 | 该条目配置的插件：内置 id，或外部主机上报的 id。 |
 | `keyword` | 是 | 路由到该插件的前缀。`""` 表示它是**默认**提供者。 |
 | `enabled` | 否 | 默认 `true`。设为 `false` 可禁用而不删除条目。 |
 | `command` | 否 | 外部 JSON-RPC 2.0 主机，见下文。 |
 
-调整条目顺序即可改变优先级。未识别或已删除的 id 会被忽略。内置 id 且未写 `command` 时使用编译进的插件；
-未知 id 且未写 `command` 时跳过。
+调整条目顺序即可改变优先级。既不是内置 id、也不是外部主机的 id 会被忽略。
 
 ## 路由
 
@@ -49,27 +48,25 @@ enabled = true
 
 ## 结果动作
 
-结果行可以携带次级命令，显示在前端的 `Shift+Enter` 二级菜单中。菜单由拥有该行的插件定义，
-而非前端，因此不同类型的菜单各不相同：`file-search`/`path-search` 提供“在终端中打开”、“在文件管理器中显示”
-与“复制路径”，`app-search` 列出该条目的 `[Desktop Action …]`，`web-search` 与 Firefox 插件提供“复制链接”，
-没有自带动作的插件至少也有启动器级别的置顶/取消置顶；空查询历史会为它来源的行补上
-“从历史中移除”。外部主机可以在
-结果项上输出自己的 `actions` 数组，后端会把它们排在插件自身动作之后；菜单最前是行自身的
-命令，最后是启动器级的置顶/取消置顶。给动作填上 `id`，
-用户就能用 `Alt+Enter` 把它设为默认 Enter 动作；菜单里的 **打开**（行原本的命令，位于首位）在这个手势下
-表示取消默认。外部主机自带的动作带主机自身的作用域，与插件自带动作一样可以设为默认。见
-[jsonrpc.md](jsonrpc.md#结果项) 的 `actions` 字段。
+结果行可以携带次级命令，显示在 `Shift+Enter` 二级菜单中。不同类型的菜单各不相同：
+`file-search`/`path-search` 提供“在终端中打开”“在文件管理器中显示”与“复制路径”，
+`app-search` 列出该条目的 `[Desktop Action …]`，`web-search` 与 Firefox 插件提供“复制链接”，
+每个可操作的行都会补上启动器级别的置顶/取消置顶，空查询历史来源的行还会多一条“从历史中移除”。
+菜单最前是行自身的命令，外部主机自带的动作排在插件自身动作之后，启动器级条目在最后。
+
+给动作填上 `id`，用户就能用 `Alt+Enter` 把它设为默认 Enter 动作；菜单里的 **打开**（行原本的
+命令）在这个手势下表示取消默认。见 [jsonrpc.md](jsonrpc.md#结果项) 的 `actions` 字段。
 
 ## 外部主机
 
-`command` 指向一个 JSON-RPC 2.0 主机。该值必须是单个可执行文件 token，按 `PATH` 解析或写绝对路径，
-不含参数、无 shell 语法（脚本需 shebang + 执行位）。
+`command` 指向一个 JSON-RPC 2.0 主机：单个可执行文件 token，按 `PATH` 解析或写绝对路径，
+不含参数、无 shell 语法（脚本需 shebang + 执行位）。每次调用都会重新启动主机，并受一个较短的
+超时约束，因此主机卡死不会拖住启动器。
 
-后端每次查询都会重新启动主机（一次请求后关闭其 stdin），并受 5s 超时约束，因此主机卡死只会消耗本次截止时间，
-不会拖垮会话。主机经 `list_plugins` 上报的身份会按文件的 `(mtime, size)` 缓存，因此后续启动不会为未变的主机再次 fork。
+身份 `icon` 与每条结果的 `icon` 都必须是主机**自己准备**的图标文件的绝对路径，动作的 `icon`
+与行的 `badge` 同理。主题图标名、`papirus:` 规范、`builtin:` 字形一律视为无图标。结果行自身
+没有图标时，改用所属插件的身份图标；身份图标也没有时，回退到编入二进制的占位图。
 
-身份 `icon` 与每条结果的 `icon` 都必须是主机**自己准备**的图标文件的绝对路径，动作的 `icon` 与行的 `badge` 同理。后端不为主机做任何解析：主题图标名、`papirus:` 规范、`builtin:` 字形一律视为无图标。结果行自身没有图标时，改用所属插件的身份图标；身份图标也没有时，回退到编入二进制的占位图。
-
-主机可以手写。[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区提供了一套 Python 框架、
-示例插件与 `template/` 模板，可复制起步。主机协议是 [jsonrpc.md](jsonrpc.md) 中记录的 JSON-RPC 子集：
-`search`、`top`、`select`、`forget`、`list_plugins`。
+主机可以手写。[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区提供了一套
+Python 框架、示例插件与 `template/` 模板，可复制起步。主机协议是 [jsonrpc.md](jsonrpc.md)
+中记录的 JSON-RPC 子集：`search`、`top`、`select`、`forget`、`list_plugins`。

@@ -1,8 +1,8 @@
 # Plugins
 
 `~/.config/wayrun/plugins.toml` is the plugin registry. It is generated on the
-first run as a copy of `core/default-plugins.toml` and is watched, so an edit is
-picked up without restarting the core.
+first run as a commented template and is watched, so an edit is picked up without
+restarting.
 
 ## Entry fields
 
@@ -15,14 +15,13 @@ enabled = true
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `id` | yes | Which plugin this entry configures. A built-in id, or the id an external host reports. |
+| `id` | yes | Which plugin this entry configures: a built-in id, or the id an external host reports. |
 | `keyword` | yes | The prefix that routes input to this plugin. `""` makes it a **default** provider. |
 | `enabled` | no | Defaults to `true`. `false` disables the plugin without removing the entry. |
 | `command` | no | An external JSON-RPC 2.0 host. See below. |
 
-Reorder entries to change priority. Unknown or removed ids are ignored. A
-built-in id with no `command` uses the compiled-in plugin; an unknown id with no
-`command` is skipped.
+Reorder entries to change priority. An `id` that is neither a built-in nor a host
+is ignored.
 
 ## Routing
 
@@ -54,40 +53,32 @@ A keyword whose dependency is absent returns no rows instead of failing.
 
 ## Result actions
 
-A result row can carry secondary commands shown in the shell's `Shift+Enter`
-action panel. The menu is defined by the plugin that owns the row, not by the
-shell, so it differs by result type: `file-search`/`path-search` offer "Open in
-terminal", "Reveal in file manager" and "Copy path", `app-search` lists the
-entry's `[Desktop Action …]` groups,
-`web-search` and the Firefox plugins offer "Copy URL", and a plugin with none
-simply gets the launcher-level pin/unpin. The empty-query history adds "Remove
-from history" to the rows it sourced. An external host may put its own `actions`
-array on a result item; the core puts them after the plugin's own actions. The
-panel leads with the row's own command and trails the launcher-level pin/unpin.
-Give an
-action an `id` to let the user make it the default Enter action (`Alt+Enter`);
-the panel's **Open** entry — the row's own command, leading the panel — takes the
-gesture as clearing it. An entry a host attached carries the host's scope, so it
-can be made default like a plugin's own.
-See the `actions` field in [jsonrpc.md](jsonrpc.md#result-items).
+A result row can carry secondary commands, shown in the `Shift+Enter` panel. They
+differ by result type: `file-search`/`path-search` offer "Open in terminal",
+"Reveal in file manager" and "Copy path", `app-search` lists the entry's
+`[Desktop Action …]` groups, `web-search` and the Firefox plugins offer "Copy
+URL", and every actionable row gets the launcher-level pin/unpin — plus "Remove
+from history" on a row the empty-query history sourced. The row's own command
+leads the panel, an external host's own `actions` follow the plugin's, and the
+launcher-level entries come last.
+
+Give an action an `id` to let the user make it the default `Enter` action with
+`Alt+Enter`; the panel's **Open** entry — the row's own command — takes the
+gesture as clearing it. See the `actions` field in
+[jsonrpc.md](jsonrpc.md#result-items).
 
 ## External hosts
 
-`command` names a JSON-RPC 2.0 host. The value is a single executable token,
-resolved on `PATH` or given as an absolute path. It takes no arguments and no
-shell syntax, so a script needs a shebang and the exec bit.
-
-The core spawns the host fresh for each call (one request, then its stdin
-closes), bounded by a 5s timeout, so a stalled host costs the deadline and never
-the session. The identity the host reports through `list_plugins` is cached by
-the file's `(mtime, size)`, so a later start does not fork an unchanged host.
+`command` names a JSON-RPC 2.0 host: a single executable token, resolved on
+`PATH` or given as an absolute path. It takes no arguments and no shell syntax,
+so a script needs a shebang and the exec bit. Each call starts the host fresh and
+is bounded by a short timeout, so a stalled host cannot hang the launcher.
 
 Both the identity `icon` and each result `icon` must be an absolute path to an
 icon file the host ships itself; the same holds for an action's `icon` and a
-row's `badge`. The core resolves nothing for a host: a theme icon name, a
-`papirus:` spec or a `builtin:` glyph counts as no icon. A result whose own icon
-is missing falls back to the plugin's identity icon, and the built-in
-placeholder answers when that is missing too.
+row's `badge`. A theme icon name, a `papirus:` spec or a `builtin:` glyph counts
+as no icon. A result whose own icon is missing falls back to the plugin's
+identity icon, and the built-in placeholder answers when that is missing too.
 
 Hosts can be written by hand. The
 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace ships a

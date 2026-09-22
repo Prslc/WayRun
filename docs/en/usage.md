@@ -1,9 +1,8 @@
 # Usage
 
-The overlay is one text field. Typing searches; the first word routes to a
-plugin's keyword when one owns it, otherwise the whole input is an app/command
-query (see [plugins.md](plugins.md)). Results are rows, and Enter acts on the
-highlighted one.
+Type to search: the first word selects a plugin's keyword when one owns it,
+otherwise the whole input is an app/command query (see
+[plugins.md](plugins.md)). `Enter` acts on the highlighted row.
 
 ## Prefixes
 
@@ -28,10 +27,10 @@ Firefox, `c` cliphist, and copy/paste `wl-clipboard`. Without it, the keyword
 returns no rows. The full list is in the
 [README](../../README.md#feature-dependencies).
 
-A query containing `/` or starting with `~` is a **path query**: it is stat'd
-directly and opened when it exists, even past the depth-3 walk. `~` and a
-relative path resolve under `$HOME`; the walk itself never leaves `$HOME`, but
-an absolute path (`/etc/hosts`) is opened wherever it points.
+A query containing `/` or starting with `~` is a **path query**: the path is
+opened directly when it exists, without a name search. `~` and a relative path
+resolve under `$HOME`; an absolute path (`/etc/hosts`) is opened wherever it
+points.
 
 ## Keys
 
@@ -52,16 +51,16 @@ an absolute path (`/etc/hosts`) is opened wherever it points.
 
 ## Action panel
 
-`Shift+Enter` opens a Wox-style second level for the highlighted row: a list of
-the commands that type of result offers. It leads with the row's own command
-(**Open**), then the actions the plugin adds for that type — a file row offers
+`Shift+Enter` opens a Wox-style second level for the highlighted row: the
+commands that type of result offers. It leads with the row's own command
+(**Open**), then the actions its plugin adds for that type — a file row offers
 "Open in terminal", "Reveal in file manager" and "Copy path", an application row
 lists its `[Desktop Action …]` groups, a bookmark or search hit offers "Copy
 URL" — then anything an external host attached, and last the launcher-level
 entries: **Pin to top** / **Unpin**, plus **Remove from history** on a row the
-empty-query history sourced and really recorded. The dot marks the entry `Enter`
-runs, so **Open** carries it until a default is remembered. A row with no command
-to offer has no panel at all, so the footer hides its actions hint.
+empty-query history sourced. The dot marks the entry `Enter` runs, so **Open**
+carries it until a default is remembered. A row with no command to offer has no
+panel at all, so the footer hides its actions hint.
 
 While the panel is open, `↑`/`↓` (and the wheel) move through it, `Enter` runs
 the highlighted command, and `Esc` or `Shift+Enter` closes it. Typing closes the
@@ -74,9 +73,8 @@ becomes `Unpin` in place and the default dot moves where you put it.
 available in the panel as **Open**. The remembered action carries a dot and the
 footer shows the `Alt+Enter` hint; `Alt+Enter` on **Open** — or on the action
 that is already the default — clears it, so `Enter` opens normally again.
-Launcher-level actions (pin/unpin, **Remove from history**) belong to no plugin
-scope and cannot be made default; a host's own actions carry the host's scope, so
-they can.
+Launcher-level actions (pin/unpin, **Remove from history**) cannot be made
+default; a plugin's own actions, and a host's, can.
 
 While a default is in effect the row-level footer names the action `Enter` will
 run (`⏎ Open in terminal`) instead of `⏎ Launch`, and the row carries the same
@@ -87,17 +85,13 @@ as `· Enter: <action id>`.
 ## Language
 
 The interface follows the session's locale, read once at startup: `$LC_ALL`,
-then `$LC_MESSAGES`, then `$LANG`, then `$LANGUAGE`'s first entry, normalised to
-a `locales/<locale>.yml` stem (`zh_CN.UTF-8` → `zh_cn`). English and Simplified
-Chinese ship; a locale with no table of its own falls back to English, and any
-Chinese variant uses the `zh_cn` table. The shell and its core child read the
-same tables, so a row's action names and the footer cannot disagree.
+then `$LC_MESSAGES`, `$LANG`, then `$LANGUAGE`'s first entry. English and
+Simplified Chinese ship; any other locale falls back to English.
 
 `config.toml`'s `[ui] locale` pins the language regardless of the session, which
 is what a resident service wants: its unit inherits the session's locale, or none
 at all. Setting `Environment=LC_ALL=zh_CN.UTF-8` in the unit works too. Either
-way the locale is read at startup, so restart the service after a change. Another
-language is one more `locales/<locale>.yml` file with the same keys.
+way the locale is read at startup, so restart the service after a change.
 
 ## Pinned results
 
@@ -107,4 +101,4 @@ same string is searched. Pinning Firefox on `firefox` leads the results for
 `firefox`, but not for `fire` or a bare keyword; pinning on `b firefox` leads
 only `b firefox`. The empty query is its own scope, so a pin made there leads the
 history. The original copy in the fresh results is dropped, so a pinned row
-appears once. **Unpin** takes it back out; the pins live in `usage.db`.
+appears once. **Unpin** takes it back out.

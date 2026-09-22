@@ -1,56 +1,36 @@
 # Theme
 
-How WayRun is coloured and what `~/.config/wayrun/theme.toml` controls.
+How WayRun is coloured, and what `~/.config/wayrun/theme.toml` controls.
 
-Two layers:
-
-1. **System palette** — the core reads DMS's `dms-colors.json` and sends the role
-   colours and the active `mode` to the shell over the IPC stream.
-2. **`theme.toml`** — the shell reads it and applies its overrides to those roles.
-
-The two files are watched by the core and the shell respectively; either edit
-applies live, nothing restarts.
+There are two layers: the system palette, which comes from DankMaterialShell, and
+the overrides in `theme.toml`. Both are watched, so an edit applies live.
 
 ## System palette
 
-On a DankMaterialShell desktop the core reads the Material You palette DMS
-generated with matugen:
+On a DankMaterialShell desktop the Material You palette is the one DMS generated
+with matugen:
 
 ```
 ~/.cache/DankMaterialShell/dms-colors.json
 ```
 
-The file holds both palettes at once plus the active `mode`, so switching
-light/dark or changing the wallpaper is a plain file edit and is picked up live.
-
-Roles are mapped like this:
+It holds the light and dark palettes and the active `mode`, so switching
+light/dark or changing the wallpaper is picked up live.
 
 | WayRun | DMS, from `colors[mode]` |
 | --- | --- |
 | `primary` | `primary` |
-| `on_primary` | `on_primary` |
-| `bg` | `background` |
 | `fg` | `on_surface` |
 | `container` | `surface_container_high` |
 
-The shell currently draws with `primary`, `fg` and `container`; `bg` and
-`on_primary` are carried but unused. The core also sends the active `mode`, which
-the shell uses to pick `theme.toml`'s per-mode colour table.
-
-Without DMS the built-in dark palette is used, with `mode = "dark"`. Support for
-the freedesktop appearance portal (`org.freedesktop.appearance`: `color-scheme`
-and `accent-color`), which is what GTK/libadwaita reads on GNOME and KDE, is
-planned.
+Without DMS the built-in dark palette is used, with `mode = "dark"`.
 
 ## `~/.config/wayrun/theme.toml`
 
 Every section and every key is optional. An absent key keeps the default, an
 unparseable file is ignored, and out-of-range values are clamped. The file is
-watched, so an edit applies without restarting.
-
-The first shell run writes `~/.config/wayrun/theme.toml` as a commented template.
-Every key in it is commented out, so it lists the options inline without pinning
-their current defaults; uncomment only what you want to change.
+written on first run as a commented template, so the options are listed without
+pinning their current defaults; uncomment only what you want to change.
 
 ### `[colors]`
 
@@ -68,7 +48,7 @@ pair being its alpha. An unparseable value is skipped and the default stays.
 `[colors]` is the shared set; `[colors.dark]` and `[colors.light]` override it
 per mode (see below).
 
-A surface's default is its role at the shipped alpha; set the key only to change
+A surface defaults to its role at the shipped alpha; set the key only to change
 that surface on purpose, alpha included.
 
 | Key | Derives from | Default (alpha) |
@@ -84,9 +64,9 @@ that surface on purpose, alpha included.
 | `accent` | `primary` | `#7aa2f7` (1.0) selected row accent bar |
 | `dim` | — | `#0000004d` (0.30) backdrop dim |
 
-The overlay is per field: a role you set stops following the system palette,
-while an unset role keeps tracking it, so a matugen/DMS change still recolours
-the rest live. Omitting the section is the same as a pure dynamic theme.
+A role you set stops following the system palette, while an unset role keeps
+tracking it, so a matugen/DMS change still recolours the rest live. Omitting the
+section is the same as a pure dynamic theme.
 
 #### Per-mode overrides
 
@@ -106,19 +86,18 @@ fg = "#c0caf5"
 fg = "#1f2430"
 ```
 
-The active mode is the one the core resolved (the DMS `mode`, and `dark` when the
-system palette is unavailable), so the tables follow a live light/dark switch with
-no restart. A key the active table does not set keeps the `[colors]` value.
+The active mode follows the system palette (`dark` when there is none), so the
+tables follow a live light/dark switch with no restart. A key the active table
+does not set keeps the `[colors]` value.
 
 ### `[blur]`
 
-The shell never blurs pixels itself. It draws a translucent card, and when a
-compositor offers `ext-background-effect-v1` it hands that compositor the
-card's rounded rectangle as a region to blur behind. The compositor does the
-work; that is the frosted look. A compositor without the protocol ignores the
-region, so this setting then has no visible effect.
+The card is translucent; on a compositor that offers
+`ext-background-effect-v1`, the region behind it is blurred by the compositor,
+which is where the frosted look comes from. A compositor without the protocol
+ignores the region, so this setting then has no visible effect.
 
-On niri the effect needs one more thing. niri auto-enables **xray** for a
+On niri the effect needs one more thing: niri auto-enables **xray** for a
 client's `ext-background-effect` request, which blurs the wallpaper and ignores
 the windows below. For the card to blur the content actually behind it, add a
 layer rule that turns xray off:
@@ -132,8 +111,8 @@ layer-rule {
 }
 ```
 
-The namespace is `WayRun`. niri recomputes non-xray blur whenever the content
-underneath changes, so it is costlier than the default.
+The namespace is `WayRun`. Non-xray blur is recomputed whenever the content
+underneath changes, so it costs more than the default.
 
 Hyprland does not implement `ext-background-effect-v1`, so it ignores the
 region; turn on its own blur and blur the layer by namespace instead:
@@ -155,7 +134,7 @@ layerrule = blur, WayRun
 
 | Key | Type | Default | Range | Meaning |
 | --- | --- | --- | --- | --- |
-| `radius` | float | `16.0` | ≥ 0 | Card corner radius. `0` is square corners; the inner radii follow it down so nothing pokes outside. |
+| `radius` | float | `16.0` | ≥ 0 | Card corner radius; `0` gives square corners, and the inner radii shrink with it. |
 | `field_radius` | float | derived (9.0) | ≥ 0 | Field corner radius; defaults to the `radius`-derived 9 and is still capped by the card. |
 | `row_radius` | float | derived (8.0) | ≥ 0 | Row tint radius. |
 | `chip_radius` | float | derived (6.0) | ≥ 0 | Keyword chip radius. |
@@ -176,10 +155,9 @@ If `width_min` ends up greater than `width_max`, it is pulled down to
 
 ### `[font]`
 
-The interface size, in logical pixels. Every role keeps its shipped ratio to it
-(query 1.286×, title 1×, summary 0.857×, suggestion 0.786×, icon 2.143×, badge
-1.071×). The shaping family is **not** here; it lives in `config.toml`'s
-`[font].family` because the core owns text shaping.
+The interface size, in logical pixels. One size drives every role; the rest
+scale with it. The font family is not here — it lives in `config.toml`'s
+`[font].family`.
 
 | Key | Type | Default | Range | Meaning |
 | --- | --- | --- | --- | --- |
@@ -191,47 +169,4 @@ The interface size, in logical pixels. Every role keeps its shipped ratio to it
 | --- | --- | --- | --- |
 | `entrance_ms` | int | `240` | Opacity fade when the launcher is shown. |
 | `reflow_ms` | int | `150` | Card height animation. |
-| `reduced` | bool | `false` | Same as `WAYRUN_REDUCED_MOTION=1`; either one starts both animations at their end state and asks for no frames. |
-
-## Example
-
-```toml
-# ~/.config/wayrun/theme.toml — every key is optional
-[colors]
-primary = "#7aa2f7"
-fg = "#c0caf5"
-container = "#24283b"
-follow_system = false
-
-# a surface is the base role at the shipped alpha unless set here
-card = "#24283bcc"
-muted = "#c0caf5a0"
-
-[blur]
-enabled = true
-
-[layout]
-radius = 16.0
-field_radius = 9.0
-row_radius = 8.0
-chip_radius = 6.0
-hairline_width = 1.0
-accent_width = 3.0
-accent_height = 28.0
-width_ratio = 0.38
-width_min = 560.0
-width_max = 760.0
-top_ratio = 0.28
-align = "center"
-offset_x = 0.0
-offset_y = 0.0
-max_rows = 5
-
-[font]
-size = 14.0
-
-[motion]
-entrance_ms = 240
-reflow_ms = 150
-reduced = false
-```
+| `reduced` | bool | `false` | Same as `WAYRUN_REDUCED_MOTION=1`: both animations start at their end state. |

@@ -19,11 +19,8 @@
 
 ## 概述
 
-整个项目只产出一个 Rust 可执行文件 `wayrun`：默认作为覆盖层前端（shell）运行，带 `--core`
-时作为后端服务运行。前端自己持有 `wlr-layer-shell` 表面，用
-[tiny-skia](https://github.com/RazrFalcon/tiny-skia) 把卡片、列表与动画直接光栅化进 `wl_shm`
-缓冲，因此不需要 GPU 栈，也不依赖任何 GUI 工具包；后端负责插件注册表、JSON-RPC 协议与
-使用历史库。
+整个项目只产出一个 Rust 可执行文件 `wayrun`：启动器本体，以及它通过 `--core` 使用的
+后端。覆盖层完全用软件光栅化进共享内存缓冲，因此不涉及 GPU 栈，也不依赖任何 GUI 工具包。
 
 ## 演示
 
@@ -33,8 +30,8 @@
 
 ## 功能特性
 
-- **应用启动** — 跨 XDG 数据目录的 `.desktop` 模糊搜索，经 GLib `GAppInfo`
-  启动（正确处理 Exec 引号、字段码与 `DBusActivatable`），并逐行解析 Flatpak 与主题图标。
+- **应用启动** — 模糊搜索已安装应用，按桌面自身的方式启动，并逐行显示 Flatpak 应用与
+  主题图标。
 - **快速搜索** — 文件与路径、Firefox 书签与历史、剪贴板历史、网页建议、`$PATH`
   命令、打开的窗口、系统命令，以及即时计算。
 - **使用历史** — 留空时展示高频项。
@@ -50,8 +47,7 @@
   wlroots 系（niri、Hyprland、Sway、river、Wayfire、labwc 等）、KDE Plasma 的
   Wayland 会话，以及基于 Mir 的合成器；GNOME/Mutter 未实现该协议，无法显示覆盖层。
 - Rust 工具链与常见系统库（GLib、SQLite、xkbcommon、fontconfig 等）；
-  `cargo build --release` 会构建整个工作区。前端本身不引入 GUI 工具包，
-  只用 tiny-skia、cosmic-text 等纯 Rust crate。
+  `cargo build --release` 会构建全部内容。
 - 覆盖中日文输入的字体（如 Source Han Sans）。
 
 ## 功能依赖
@@ -106,7 +102,7 @@ cargo build --release -p wayrun-shell --no-default-features      # 不做窗口�
 ## 文档
 
 - [使用说明](usage.md) —— 前缀、按键与剪贴板。
-- [常驻模式](resident.md) —— systemd 单元与 IPC 命令。
+- [常驻模式](resident.md) —— systemd 单元与控制命令。
 - [主题](theme.md) —— 系统调色板与 `theme.toml`（配色、模糊、布局、字体、动效）。
 - [配置](config.md) —— `config.toml`（搜索引擎、字体族）。
 - [插件](plugins.md) —— `plugins.toml`、内置插件与外部 JSON-RPC 主机。

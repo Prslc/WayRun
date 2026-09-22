@@ -1,20 +1,17 @@
 # Config
 
-`~/.config/wayrun/config.toml` holds core behaviour. It is generated on the
-first run as a copy of `core/default-config.toml` and is watched, so an edit is
-picked up without restarting the core. Every key is optional: a missing file or
-key keeps the built-in default shown here. The generated file comments every key
-out, so it lists the options without pinning their current defaults; uncomment
-only what you want to change.
+`~/.config/wayrun/config.toml` holds WayRun's settings. It is generated on the
+first run as a commented template and is watched, so an edit is picked up without
+restarting. Every key is optional: a missing file or key keeps the built-in
+default shown here.
 
 ## `[ui]`
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `locale` | *(session locale)* | Interface language: a `locales/<locale>.yml` stem such as `zh_cn`, or `en`. Omitted, the launcher follows `$LC_ALL`/`$LC_MESSAGES`/`$LANG`. |
+| `locale` | *(session locale)* | Interface language: `en` or `zh_cn`. Omitted, the launcher follows `$LC_ALL`/`$LC_MESSAGES`/`$LANG`. |
 
-The shell reads `locale` at startup, since it caches its translated chrome, so a
-change takes effect on the next launch
+Read at startup, so a change takes effect on the next launch
 (`systemctl --user restart wayrun-launcher`). A value with no table of its own
 falls back to English, and a blank value is the same as leaving the key out.
 
@@ -30,20 +27,18 @@ falls back to English, and a blank value is the same as leaving the key out.
 | --- | --- | --- |
 | `family` | `Source Han Sans CN` | Primary shaping family, or a generic name (`serif`, `sans-serif`, `monospace`). |
 
-The shell reads `family` at startup, so a change takes effect on the next launch
-(`systemctl --user restart wayrun-launcher`). cosmic-text falls back per glyph
-for anything the family lacks, so a family covering only the scripts you read
-keeps the fonts you never draw out of memory. The interface size is `theme.toml`'s
-`[font].size` and applies live.
+Read at startup, so a change takes effect on the next launch
+(`systemctl --user restart wayrun-launcher`). Glyphs the family lacks fall back
+to the system fonts. The interface size is `theme.toml`'s `[font].size` and
+applies live.
 
 ## `[icon]`
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `theme` | *(desktop setting)* | Icon theme for per-row icons. Omitted, the core follows `gtk-icon-theme-name` from the GTK settings and that theme's `Inherits`. |
+| `theme` | *(desktop setting)* | Icon theme for per-row icons. Omitted, the desktop's own icon theme is used. |
 
 The icon theme is optional: the panel, badge and built-in plugin glyphs are
-built into the binary, and a row icon that no theme resolves falls back to a
-bundled placeholder. When set, `theme` also beats the desktop setting. Resolved
-icons are cached for the core's life, so a change takes effect on the next core
-start.
+built into the binary, and a row icon no theme resolves falls back to a bundled
+placeholder. `theme` beats the desktop setting. A change takes effect on the next
+launch.
