@@ -56,8 +56,8 @@ A keyword whose dependency is absent returns no rows instead of failing.
 
 A result row can carry secondary commands shown in the shell's `Shift+Enter`
 action panel. The menu is defined by the plugin that owns the row, not by the
-shell, so it differs by result type: `file-search`/`path-search` offer "Reveal
-in file manager", "Copy path" and "Open in terminal", `app-search` lists the
+shell, so it differs by result type: `file-search`/`path-search` offer "Open in
+terminal", "Reveal in file manager" and "Copy path", `app-search` lists the
 entry's `[Desktop Action …]` groups,
 `web-search` and the Firefox plugins offer "Copy URL", and a plugin with none
 simply gets the launcher-level pin/unpin. The empty-query history adds "Remove

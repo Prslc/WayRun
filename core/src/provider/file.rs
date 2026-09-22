@@ -59,8 +59,9 @@ macro_rules! search_plugin {
     };
 }
 
-/// The commands a file or directory row carries: show it in the file manager,
-/// copy its decoded path, or open a terminal in it (its parent when a file).
+/// The commands a file or directory row carries, in panel order: opening a
+/// terminal leads so the two ways to open the entry sit together, then revealing
+/// it in the file manager, then copying its path.
 fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
     let Some(Action::Open { uri }) = item.on_click.as_ref() else {
         return Vec::new();
@@ -73,6 +74,16 @@ fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
     };
     let path = path.to_string_lossy();
     vec![
+        ActionItem {
+            title: "Open in terminal".to_string(),
+            action: PanelAction::Execute {
+                command: Action::Terminal { uri: uri.clone() },
+            },
+            icon: Some("builtin:terminal".to_string()),
+            id: Some("terminal".to_string()),
+            plugin: None,
+            default: false,
+        },
         ActionItem {
             title: "Reveal in file manager".to_string(),
             action: PanelAction::Execute {
@@ -92,16 +103,6 @@ fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
             },
             icon: Some("builtin:copy".to_string()),
             id: Some("copy_path".to_string()),
-            plugin: None,
-            default: false,
-        },
-        ActionItem {
-            title: "Open in terminal".to_string(),
-            action: PanelAction::Execute {
-                command: Action::Terminal { uri: uri.clone() },
-            },
-            icon: Some("builtin:terminal".to_string()),
-            id: Some("terminal".to_string()),
             plugin: None,
             default: false,
         },
@@ -317,17 +318,18 @@ mod tests {
     }
 
     #[test]
-    fn a_file_row_offers_reveal_copy_and_terminal() {
+    fn a_file_row_offers_terminal_reveal_and_copy() {
         let actions: Vec<ActionItem> = file_actions(&row("a.txt", file("file:///tmp/a.txt")));
         let titles: Vec<&str> = actions.iter().map(|a| a.title.as_str()).collect();
         assert_eq!(
             titles,
-            ["Reveal in file manager", "Copy path", "Open in terminal"]
+            ["Open in terminal", "Reveal in file manager", "Copy path"],
+            "opening leads, so it sits next to the row's own command"
         );
         assert_eq!(
             actions[0].action,
             PanelAction::Execute {
-                command: Action::Reveal {
+                command: Action::Terminal {
                     uri: "file:///tmp/a.txt".to_string()
                 }
             }
@@ -335,16 +337,16 @@ mod tests {
         assert_eq!(
             actions[1].action,
             PanelAction::Execute {
-                command: Action::Copy {
-                    text: "/tmp/a.txt".to_string()
+                command: Action::Reveal {
+                    uri: "file:///tmp/a.txt".to_string()
                 }
             }
         );
         assert_eq!(
             actions[2].action,
             PanelAction::Execute {
-                command: Action::Terminal {
-                    uri: "file:///tmp/a.txt".to_string()
+                command: Action::Copy {
+                    text: "/tmp/a.txt".to_string()
                 }
             }
         );
@@ -364,8 +366,12 @@ mod tests {
     #[test]
     fn the_copied_path_is_percent_decoded() {
         let actions = file_actions(&row("a b", file("file:///tmp/a%20b")));
+        let copy = actions
+            .iter()
+            .find(|action| action.id.as_deref() == Some("copy_path"))
+            .expect("the row offers a copy");
         assert_eq!(
-            actions[1].action,
+            copy.action,
             PanelAction::Execute {
                 command: Action::Copy {
                     text: "/tmp/a b".to_string()

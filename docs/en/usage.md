@@ -55,7 +55,7 @@ an absolute path (`/etc/hosts`) is opened wherever it points.
 `Shift+Enter` opens a Wox-style second level for the highlighted row: a list of
 the commands that type of result offers. It leads with the row's own command
 (**Open**), then the actions the plugin adds for that type — a file row offers
-"Reveal in file manager", "Copy path" and "Open in terminal", an application row
+"Open in terminal", "Reveal in file manager" and "Copy path", an application row
 lists its `[Desktop Action …]` groups, a bookmark or search hit offers "Copy
 URL" — then anything an external host attached, and last the launcher-level
 entries: **Pin to top** / **Unpin**, plus **Remove from history** on a row the

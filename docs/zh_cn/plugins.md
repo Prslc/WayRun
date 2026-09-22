@@ -50,8 +50,8 @@ enabled = true
 ## 结果动作
 
 结果行可以携带次级命令，显示在前端的 `Shift+Enter` 二级菜单中。菜单由拥有该行的插件定义，
-而非前端，因此不同类型的菜单各不相同：`file-search`/`path-search` 提供“在文件管理器中显示”、“复制路径”
-与“在终端中打开”，`app-search` 列出该条目的 `[Desktop Action …]`，`web-search` 与 Firefox 插件提供“复制链接”，
+而非前端，因此不同类型的菜单各不相同：`file-search`/`path-search` 提供“在终端中打开”、“在文件管理器中显示”
+与“复制路径”，`app-search` 列出该条目的 `[Desktop Action …]`，`web-search` 与 Firefox 插件提供“复制链接”，
 没有自带动作的插件至少也有启动器级别的置顶/取消置顶；空查询历史会为它来源的行补上
 “从历史中移除”。外部主机可以在
 结果项上输出自己的 `actions` 数组，后端会把它们排在插件自身动作之后；菜单最前是行自身的
