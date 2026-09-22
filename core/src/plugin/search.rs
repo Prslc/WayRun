@@ -28,6 +28,7 @@ async fn search(input: &str) -> Vec<ResultItem> {
     let reg = REGISTRY.read().await;
 
     if input.trim() == "?" {
+        let defaults = crate::system::defaults::all().unwrap_or_default();
         return reg
             .iter()
             .map(|entry| {
@@ -37,7 +38,8 @@ async fn search(input: &str) -> Vec<ResultItem> {
                 } else {
                     format!("{} <query>", entry.keyword)
                 };
-                identity_card(meta, format!("{usage} - {}", meta.ready))
+                let default = defaults.get(meta.id).map(String::as_str);
+                identity_card(meta, help_summary(usage, meta.ready, default))
             })
             .collect();
     }
@@ -100,6 +102,15 @@ fn fill_icons(meta_icon: &str, mut items: Vec<ResultItem>) -> Vec<ResultItem> {
     items
 }
 
+/// A plugin's `?` help line: how to reach it, what it does, and the action its
+/// `Enter` runs when the user has remembered one.
+fn help_summary(usage: String, ready: &str, default: Option<&str>) -> String {
+    match default {
+        Some(action_id) => format!("{usage} - {ready} · Enter: {action_id}"),
+        None => format!("{usage} - {ready}"),
+    }
+}
+
 /// A plugin's identity card, also its `?` help row and empty default view.
 fn identity_card(meta: &Meta, summary: String) -> ResultItem {
     ResultItem {
@@ -123,6 +134,19 @@ mod tests {
         Action::Run {
             cmd: cmd.to_string(),
         }
+    }
+
+    #[test]
+    fn the_help_line_names_a_remembered_default_action() {
+        let usage = || "f <query>".to_string();
+        assert_eq!(
+            help_summary(usage(), "Search files by name or path", None),
+            "f <query> - Search files by name or path"
+        );
+        assert_eq!(
+            help_summary(usage(), "Search files by name or path", Some("terminal")),
+            "f <query> - Search files by name or path · Enter: terminal"
+        );
     }
 
     #[test]

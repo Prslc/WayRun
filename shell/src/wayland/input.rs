@@ -71,7 +71,7 @@ impl Shell {
                 // Alt+Enter remembers the highlighted action as its plugin's
                 // default (or clears it). A non-defaultable action is ignored.
                 Keysym::Return | Keysym::KP_Enter if self.modifiers.alt => {
-                    self.toggle_default(now);
+                    self.toggle_default();
                     return;
                 }
                 Keysym::Return | Keysym::KP_Enter => {
@@ -174,8 +174,15 @@ impl Shell {
     }
 
     /// Every query change is one search line (the core debounces); every editing
-    /// path — typing, paste, IME, ✕ — goes through here.
-    pub(super) fn query_changed(&self) {
+    /// path — typing, paste, IME, ✕ — goes through here. An edit also cancels a
+    /// panel action's pending re-emit, whose reply must not re-open the panel.
+    pub(super) fn query_changed(&mut self) {
+        self.app.cancel_panel_resume();
+        self.resend_query();
+    }
+
+    /// Re-send the current query, leaving a pending panel resume in place.
+    fn resend_query(&self) {
         if self.app.query.is_empty() {
             // an empty query means the usage-ranked history
             backend::top();
@@ -253,6 +260,9 @@ impl Shell {
     }
 
     fn close_panel(&mut self, now: Instant) {
+        // The user closed it: a panel action's pending reply must not bring it
+        // back.
+        self.app.cancel_panel_resume();
         if self.app.menu.take().is_some() {
             self.app.retarget_height(now);
             self.needs_full = true;
@@ -268,26 +278,23 @@ impl Shell {
     }
 
     /// Alt+Enter in the panel: remember the highlighted action as its plugin's
-    /// default, or clear it when it already is. A non-defaultable action (no id
-    /// or plugin) is ignored and the panel stays open.
-    fn toggle_default(&mut self, now: Instant) {
+    /// default, or clear it when it already is or when it is the row's own
+    /// command (which is the implicit default). A launcher-level action has no
+    /// plugin and is ignored, so the panel stays open.
+    fn toggle_default(&mut self) {
         let Some(action) = self.app.selected_action() else {
             return;
         };
-        let (Some(id), Some(plugin)) = (action.id.clone(), action.plugin.clone()) else {
+        let Some((plugin, action_id)) = self.app.selected_default() else {
             return;
         };
-        if action.default {
-            backend::default(&plugin, None);
-        } else {
-            backend::default(&plugin, Some(&id));
-        }
-        self.close_panel(now);
-        self.query_changed();
+        backend::default(plugin, action_id);
+        self.keep_panel(&action);
     }
 
-    /// One action-panel command. Pin/unpin re-search so the launcher stays open;
-    /// the rest launch and dismiss, except `forget`, which drops the row in place.
+    /// One action-panel command. Pin/unpin and the default gesture re-search, so
+    /// the panel stays open on the entry that changed; the rest launch and
+    /// dismiss, except `forget`, which drops the row in place.
     fn execute_action(&mut self, action: &ActionItem, now: Instant) {
         match &action.action {
             PanelAction::Execute { command } => {
@@ -297,19 +304,24 @@ impl Shell {
             }
             PanelAction::Pin { scope, item } => {
                 backend::pin(scope, item);
-                self.close_panel(now);
-                self.query_changed();
+                self.keep_panel(action);
             }
             PanelAction::Unpin { scope, on_click } => {
                 backend::unpin(scope, on_click);
-                self.close_panel(now);
-                self.query_changed();
+                self.keep_panel(action);
             }
             PanelAction::Forget { on_click } => {
                 backend::forget_row(on_click);
                 self.close_panel(now);
             }
         }
+    }
+
+    /// Re-send the query with the panel held open on `action`, so the reply
+    /// shows the change where the user made it.
+    fn keep_panel(&mut self, action: &ActionItem) {
+        self.app.keep_panel(action);
+        self.resend_query();
     }
 
     /// Ctrl+C/X: hand the selected text to the core's `copy` command, which

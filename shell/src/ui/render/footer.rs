@@ -3,7 +3,7 @@ use std::time::Instant;
 use cosmic_text::Weight;
 use tiny_skia::Pixmap;
 
-use crate::app::State;
+use crate::app::{State, effective_action};
 use crate::ui::geom;
 use crate::ui::text::TextEngine;
 
@@ -14,74 +14,49 @@ use super::canvas::{Canvas, Rect};
 pub(super) struct Hint {
     key: &'static str,
     label: &'static str,
+    /// The label is the row's Enter action when a remembered default makes Enter
+    /// run something other than the row's own command.
+    effective: bool,
 }
 
-const PANEL_HINTS: &[Hint] = &[
+const fn hint(key: &'static str, label: &'static str) -> Hint {
+    Hint {
+        key,
+        label,
+        effective: false,
+    }
+}
+
+/// An `Enter` hint, whose label yields to the row's effective action.
+const fn enter(label: &'static str) -> Hint {
     Hint {
         key: "⏎",
-        label: "Run",
-    },
-    Hint {
-        key: "Esc",
-        label: "Back",
-    },
-];
+        label,
+        effective: true,
+    }
+}
+
+const PANEL_HINTS: &[Hint] = &[hint("⏎", "Run"), hint("Esc", "Back")];
 
 const PANEL_DEFAULT_HINTS: &[Hint] = &[
-    Hint {
-        key: "⏎",
-        label: "Run",
-    },
-    Hint {
-        key: "Alt⏎",
-        label: "Default",
-    },
-    Hint {
-        key: "Esc",
-        label: "Back",
-    },
+    hint("⏎", "Run"),
+    hint("Alt⏎", "Default"),
+    hint("Esc", "Back"),
 ];
 
 const PANEL_CLEAR_DEFAULT_HINTS: &[Hint] = &[
-    Hint {
-        key: "⏎",
-        label: "Run",
-    },
-    Hint {
-        key: "Alt⏎",
-        label: "Clear default",
-    },
-    Hint {
-        key: "Esc",
-        label: "Back",
-    },
+    hint("⏎", "Run"),
+    hint("Alt⏎", "Clear default"),
+    hint("Esc", "Back"),
 ];
 
-const ROW_HINTS: &[Hint] = &[
-    Hint {
-        key: "⏎",
-        label: "Launch",
-    },
-    Hint {
-        key: "⇧⏎",
-        label: "Actions",
-    },
-];
+const ROW_HINTS: &[Hint] = &[enter("Launch"), hint("⇧⏎", "Actions")];
 
-const LAUNCH_HINT: &[Hint] = &[Hint {
-    key: "⏎",
-    label: "Launch",
-}];
+const LAUNCH_HINT: &[Hint] = &[enter("Launch")];
 
-const HELP_HINT: &[Hint] = &[Hint {
-    key: "",
-    label: "Type ? for help",
-}];
+const HELP_HINT: &[Hint] = &[hint("", "Type ? for help")];
 
-const NO_MATCH_HINT: &[Hint] = &[Hint {
-    key: "",
-    label: "No results",
-}];
+const NO_MATCH_HINT: &[Hint] = &[hint("", "No results")];
 
 /// The footer's left hints: the panel's keys when open, the launch keys once
 /// rows exist, a help note for an untouched field, else "No results".
@@ -124,6 +99,20 @@ fn count_label(n: usize, singular: &str, plural: &str) -> String {
     }
 }
 
+/// The action the selected row's `Enter` runs instead of the row's own command,
+/// which only a remembered default changes. `None` while the panel is open, where
+/// `Enter` runs the highlighted action instead.
+fn effective_label(state: &State) -> Option<&str> {
+    if state.menu.is_some() {
+        return None;
+    }
+    Some(
+        effective_action(state.rows.get(state.selected)?)?
+            .title
+            .as_str(),
+    )
+}
+
 pub(super) fn draw_footer(
     canvas: &Canvas,
     pixmap: &mut Pixmap,
@@ -139,23 +128,19 @@ pub(super) fn draw_footer(
         .rows
         .get(state.selected)
         .is_some_and(|row| !row.actions.is_empty());
-    // A highlighted panel action with a plugin id can be made the default.
-    let (can_default, is_default) = state
+    // A highlighted panel action owned by a plugin can be made the default; the
+    // row's own command can too, and picking it clears the remembered one.
+    let is_default = state
         .menu
         .as_ref()
         .and_then(|menu| menu.selected_action())
-        .map_or((false, false), |action| {
-            (
-                action.id.is_some() && action.plugin.is_some(),
-                action.default,
-            )
-        });
+        .is_some_and(|action| action.default);
     let hints = footer_hints(
         state.rows.len(),
         state.query.is_empty(),
         panel,
         has_actions,
-        can_default,
+        state.selected_default().is_some(),
         is_default,
     );
 
@@ -195,6 +180,7 @@ pub(super) fn draw_footer(
         };
 
     let mut x = left;
+    let effective = effective_label(state);
     for hint in hints {
         if hint.key.is_empty() {
             let color = if no_match {
@@ -216,10 +202,22 @@ pub(super) fn draw_footer(
         }
 
         let key = text.shape(hint.key, key_size, Weight::NORMAL);
-        let label = text.shape(hint.label, label_size, Weight::NORMAL);
         let key_w = key.width / canvas.scale;
-        let label_w = label.width / canvas.scale;
         let cap_w = key_w + 2.0 * KEYCAP_PAD_X;
+        // An action name is arbitrary, so it is elided to the room left instead
+        // of dropping the whole hint the way a fixed label does.
+        let label = if hint.effective {
+            let room = limit - x - cap_w - KEY_LABEL_GAP;
+            text.fit(
+                effective.unwrap_or(hint.label),
+                label_size,
+                Weight::NORMAL,
+                room,
+            )
+        } else {
+            text.shape(hint.label, label_size, Weight::NORMAL)
+        };
+        let label_w = label.width / canvas.scale;
         let cap_h = (key.height / canvas.scale + 6.0).min(geom::FOOTER_H);
         if x + cap_w + KEY_LABEL_GAP + label_w > limit {
             break;
@@ -287,6 +285,7 @@ pub(super) fn draw_footer(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wayrun_core::wire::{Action, ActionItem, PanelAction, ResultItem};
 
     #[test]
     fn the_footer_separates_no_results_from_an_untouched_field() {
@@ -334,6 +333,50 @@ mod tests {
             footer_hints(3, false, true, true, false, false),
             PANEL_HINTS
         );
+    }
+
+    #[test]
+    fn the_enter_hint_names_a_default_action_and_keeps_launch_without_one() {
+        let now = Instant::now();
+        let uri = "file:///tmp/a.txt";
+        let mut state = State::new();
+        state.surface = (1920, 1080);
+        let mut row = ResultItem {
+            title: "a.txt".into(),
+            summary: None,
+            on_click: Some(Action::Open { uri: uri.into() }),
+            icon: None,
+            ephemeral: false,
+            actions: vec![ActionItem {
+                title: "Open in terminal".into(),
+                action: PanelAction::Execute {
+                    command: Action::Terminal { uri: uri.into() },
+                },
+                icon: None,
+                id: Some("terminal".into()),
+                plugin: Some("file-search".into()),
+                default: true,
+            }],
+            badge: None,
+        };
+        state.apply_results(vec![row.clone()], now);
+        assert_eq!(effective_label(&state), Some("Open in terminal"));
+
+        // the panel's own Enter runs the highlighted action, so the row hint goes
+        assert!(state.open_actions());
+        assert_eq!(effective_label(&state), None);
+        state.close_actions();
+
+        // a default that runs the row's own command is not a different outcome
+        row.actions[0].action = PanelAction::Execute {
+            command: Action::Open { uri: uri.into() },
+        };
+        state.apply_results(vec![row.clone()], now);
+        assert_eq!(effective_label(&state), None);
+
+        row.actions.clear();
+        state.apply_results(vec![row], now);
+        assert_eq!(effective_label(&state), None);
     }
 
     #[test]

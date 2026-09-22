@@ -3,7 +3,7 @@ use std::time::Instant;
 use cosmic_text::Weight;
 use tiny_skia::Pixmap;
 
-use crate::app::{Hover, State};
+use crate::app::{Hover, State, effective_action};
 use crate::ui::geom;
 use crate::ui::icons::IconCache;
 use crate::ui::text::TextEngine;
@@ -60,14 +60,18 @@ pub(super) fn draw_list(
         }
 
         let labels_x = icon_x + font.icon() + 12.0;
-        // The selected row's ↵ hint and the pinned badge are part of the layout:
-        // the labels must leave room for both.
+        // The selected row's ↵ hint, the pinned badge and the default marker are
+        // part of the layout: the labels must leave room for all of them.
         let enter = selected.then(|| text.shape(ENTER_GLYPH, 13.0 * canvas.scale, Weight::NORMAL));
         let enter_w = enter
             .as_ref()
             .map_or(0.0, |shaped| shaped.width / canvas.scale + 12.0);
         let badge_w = row.badge.as_deref().map_or(0.0, |_| font.badge() + 8.0);
-        let labels_max = (rect.right() - 10.0 - labels_x - enter_w - badge_w).max(0.0);
+        // The same dot the panel puts on the action, so a row whose Enter runs
+        // something else is marked without opening the panel.
+        let marker = effective_action(row).is_some();
+        let marker_w = if marker { 12.0 } else { 0.0 };
+        let labels_max = (rect.right() - 10.0 - labels_x - enter_w - badge_w - marker_w).max(0.0);
 
         let title = text.fit(
             &row.title,
@@ -130,6 +134,21 @@ pub(super) fn draw_list(
                 canvas.px(rect.right() - 10.0) - check.width,
                 canvas.px(rect.center_y()) - check.height / 2.0,
                 None,
+            );
+        }
+
+        if marker {
+            let cx = rect.right() - 10.0 - enter_w - badge_w - 6.0;
+            canvas.fill_round(
+                pixmap,
+                Rect {
+                    x: cx - 3.0,
+                    y: rect.center_y() - 3.0,
+                    w: 6.0,
+                    h: 6.0,
+                },
+                3.0,
+                state.fade(theme.primary, 1.0, now),
             );
         }
 

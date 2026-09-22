@@ -18,7 +18,7 @@ highlighted one.
 | `w <query>` | switch focus to a matching open window |
 | `c <query>` | search clipboard history (cliphist) |
 | `s <query>` | web search suggestions (engine set in `config.toml`) |
-| `?` | show keyword modes, default functions, and hints |
+| `?` | show keyword modes, default functions, hints and each plugin's remembered default action |
 | `lock` / `reboot` / `shutdown` | system commands |
 | `2 + 3` | inline calculator |
 | _(empty)_ | show most-used items |
@@ -53,24 +53,36 @@ an absolute path (`/etc/hosts`) is opened wherever it points.
 ## Action panel
 
 `Shift+Enter` opens a Wox-style second level for the highlighted row: a list of
-the commands that type of result offers. Its entries come from the plugin that
-produced the row, so a file row offers "Reveal in file manager", an application
-row lists its `[Desktop Action …]` groups, a bookmark or search hit offers "Copy
-URL", and an external host may attach its own. Every actionable row also gets
-the launcher-level **Pin to top** / **Unpin**; a row in the empty-query history
-— and only one that was really recorded there — additionally offers **Remove
-from history**. A row with no command to offer has no panel at all, so the
-footer hides its actions hint.
+the commands that type of result offers. It leads with the row's own command
+(**Open**), then the actions the plugin adds for that type — a file row offers
+"Reveal in file manager", "Copy path" and "Open in terminal", an application row
+lists its `[Desktop Action …]` groups, a bookmark or search hit offers "Copy
+URL" — then anything an external host attached, and last the launcher-level
+entries: **Pin to top** / **Unpin**, plus **Remove from history** on a row the
+empty-query history sourced and really recorded. The dot marks the entry `Enter`
+runs, so **Open** carries it until a default is remembered. A row with no command
+to offer has no panel at all, so the footer hides its actions hint.
 
 While the panel is open, `↑`/`↓` (and the wheel) move through it, `Enter` runs
 the highlighted command, and `Esc` or `Shift+Enter` closes it. Typing closes the
-panel and returns to the field.
+panel and returns to the field. `Pin to top`/`Unpin` and the `Alt+Enter` gesture
+re-send the query with the panel held open on the entry that changed — the pin
+becomes `Unpin` in place and the default dot moves where you put it.
 
 `Alt+Enter` remembers the highlighted command as the default for its plugin, so
 `Enter` on later rows of that plugin runs it; the row's own command stays
 available in the panel as **Open**. The remembered action carries a dot and the
-footer shows the `Alt+Enter` hint; repeat the gesture to clear it. Launcher-level
-and host actions have no stable id and cannot be made default.
+footer shows the `Alt+Enter` hint; `Alt+Enter` on **Open** — or on the action
+that is already the default — clears it, so `Enter` opens normally again.
+Launcher-level actions (pin/unpin, **Remove from history**) belong to no plugin
+scope and cannot be made default; a host's own actions carry the host's scope, so
+they can.
+
+While a default is in effect the row-level footer names the action `Enter` will
+run (`⏎ Open in terminal`) instead of `⏎ Launch`, and the row carries the same
+dot the panel puts on that action, so a list of rows marked that way reads at a
+glance; a long action name is elided. `?` lists each plugin's remembered action
+as `· Enter: <action id>`.
 
 ## Pinned results
 

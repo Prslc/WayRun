@@ -73,16 +73,8 @@ async fn plugin_actions(item: &ResultItem) -> (Option<String>, Vec<ActionItem>) 
     (None, Vec::new())
 }
 
-/// The command an `execute` action runs, if it is one.
-fn action_command(action: &PanelAction) -> Option<&Action> {
-    match action {
-        PanelAction::Execute { command } => Some(command),
-        _ => None,
-    }
-}
-
-/// The launcher-level commands an actionable row gets (pin/unpin always, history
-/// removal only on a recordable history row), before its type and host actions.
+/// The launcher-level entries an actionable row gets (pin/unpin always, history
+/// removal only on a recordable history row), after its type and host actions.
 fn attach_actions(
     item: &mut ResultItem,
     scope: &str,
@@ -100,42 +92,35 @@ fn attach_actions(
         item.badge = find_icon_path("builtin:pin");
     }
 
+    // The pin stores the row as it arrived: its host actions, and none of the
+    // launcher's own entries, so a pinned row never embeds the action storing it.
+    let pin_snapshot = (!is_pinned && !item.ephemeral).then(|| Box::new(item.clone()));
+
+    let mut actions: Vec<ActionItem> = Vec::new();
+    actions.append(&mut plugin_actions);
+    actions.append(&mut item.actions);
+
     // Every plugin action carries its owner, so the shell can scope a default.
     if let Some(owner) = &owner {
-        for action in &mut plugin_actions {
+        for action in &mut actions {
             if action.plugin.is_none() {
                 action.plugin = Some(owner.clone());
             }
         }
     }
 
-    // A remembered default elevates its action to Enter. The row's own command
-    // stays reachable as an "Open" action when the default is a different one.
-    if let Some(default_id) = owner.as_deref().and_then(|owner| defaults.get(owner))
-        && let Some(index) = plugin_actions
-            .iter()
-            .position(|action| action.id.as_deref() == Some(default_id.as_str()))
-    {
-        let is_primary = action_command(&plugin_actions[index].action) == Some(&on_click);
-        plugin_actions[index].default = true;
-        if !is_primary {
-            plugin_actions.insert(
-                0,
-                ActionItem {
-                    title: "Open".to_string(),
-                    action: PanelAction::Execute {
-                        command: on_click.clone(),
-                    },
-                    icon: Some("builtin:open".to_string()),
-                    id: None,
-                    plugin: None,
-                    default: false,
-                },
-            );
-        }
+    // A remembered default elevates its action to Enter, whichever plugin the
+    // scope belongs to: a host's action is remembered under the host's id.
+    for action in &mut actions {
+        action.default = action
+            .plugin
+            .as_deref()
+            .and_then(|plugin| defaults.get(plugin))
+            .is_some_and(|id| action.id.as_deref() == Some(id.as_str()));
     }
 
-    let mut actions: Vec<ActionItem> = Vec::new();
+    // Launcher-level entries come last: they are launcher state rather than what
+    // the row offers, and the first slot belongs to the row's own command.
     if is_pinned {
         actions.push(ActionItem {
             title: "Unpin".to_string(),
@@ -148,14 +133,12 @@ fn attach_actions(
             plugin: None,
             default: false,
         });
-    } else if !item.ephemeral {
-        // Snapshot the row before the launcher actions are appended, so the pin
-        // never embeds the action that stores it. A host's own actions stay.
+    } else if let Some(pinned_row) = pin_snapshot {
         actions.push(ActionItem {
             title: "Pin to top".to_string(),
             action: PanelAction::Pin {
                 scope: scope.to_string(),
-                item: Box::new(item.clone()),
+                item: pinned_row,
             },
             icon: Some("builtin:pin".to_string()),
             id: None,
@@ -177,8 +160,24 @@ fn attach_actions(
         });
     }
 
-    actions.append(&mut plugin_actions);
-    actions.append(&mut item.actions);
+    // The row's own command leads the panel: it is what Enter runs while no
+    // default is remembered, and it is how the user takes the default back. A row
+    // with nothing else to offer keeps no panel at all.
+    if !actions.is_empty() {
+        actions.insert(
+            0,
+            ActionItem {
+                title: "Open".to_string(),
+                action: PanelAction::Execute {
+                    command: on_click.clone(),
+                },
+                icon: Some("builtin:open".to_string()),
+                id: None,
+                plugin: owner.clone(),
+                default: false,
+            },
+        );
+    }
 
     // Core and plugin actions carry `builtin:` specs; a host action's icon is
     // already absolute, so anything unresolved keeps no icon.
@@ -230,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    fn launcher_actions_lead_the_row_and_carry_its_scope() {
+    fn launcher_entries_carry_the_rows_scope() {
         let mut row = item(
             "Firefox",
             Action::Launch {
@@ -251,8 +250,8 @@ mod tests {
             .iter()
             .map(|action| action.title.as_str())
             .collect();
-        assert_eq!(titles, ["Pin to top"]);
-        match &row.actions[0].action {
+        assert_eq!(titles, ["Open", "Pin to top"]);
+        match &row.actions[1].action {
             PanelAction::Pin { scope, item } => {
                 assert_eq!(scope, "b");
                 assert_eq!(item.title, "Firefox");
@@ -263,7 +262,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pinned_row_offers_unpin_before_its_type_actions() {
+    fn the_row_command_leads_and_launcher_entries_trail() {
         let mut row = item(
             "a.txt",
             Action::Open {
@@ -300,7 +299,12 @@ mod tests {
             .collect();
         assert_eq!(
             titles,
-            ["Unpin", "Remove from history", "Reveal in file manager"]
+            [
+                "Open",
+                "Reveal in file manager",
+                "Unpin",
+                "Remove from history"
+            ]
         );
         assert!(row.badge.is_some(), "a pinned row carries the pin badge");
     }
@@ -334,15 +338,20 @@ mod tests {
 
         // The snapshot is the host's row, not the decorated one: the pin action
         // must not embed itself, and the host action must survive the round trip.
-        let PanelAction::Pin { item, .. } = &row.actions[0].action else {
-            panic!("expected a pin");
-        };
-        assert_eq!(item.actions.len(), 1);
-        assert_eq!(item.actions[0].title, "Host");
+        let pinned = row
+            .actions
+            .iter()
+            .find_map(|action| match &action.action {
+                PanelAction::Pin { item, .. } => Some(item),
+                _ => None,
+            })
+            .expect("the row offers a pin");
+        assert_eq!(pinned.actions.len(), 1);
+        assert_eq!(pinned.actions[0].title, "Host");
     }
 
     #[test]
-    fn launcher_entries_follow_the_row() {
+    fn launcher_entries_trail_the_row() {
         fn titles(row: &ResultItem) -> Vec<&str> {
             row.actions.iter().map(|a| a.title.as_str()).collect()
         }
@@ -361,7 +370,10 @@ mod tests {
             &HashMap::new(),
             (None, Vec::new()),
         );
-        assert_eq!(titles(&history), ["Pin to top", "Remove from history"]);
+        assert_eq!(
+            titles(&history),
+            ["Open", "Pin to top", "Remove from history"]
+        );
 
         // a fresh search result is not sourced from the history view
         let mut search = item(
@@ -378,7 +390,7 @@ mod tests {
             &HashMap::new(),
             (None, Vec::new()),
         );
-        assert_eq!(titles(&search), ["Pin to top"]);
+        assert_eq!(titles(&search), ["Open", "Pin to top"]);
 
         // an ephemeral row is neither a durable pin target nor recorded
         let mut one_shot = item("window", run("wctl activate 1"));
@@ -391,7 +403,10 @@ mod tests {
             &HashMap::new(),
             (None, Vec::new()),
         );
-        assert!(titles(&one_shot).is_empty());
+        assert!(
+            titles(&one_shot).is_empty(),
+            "a row with nothing else to offer has no panel"
+        );
 
         // an existing pin must stay removable even on an ephemeral row
         let mut pinned = item("clip", run("cliphist decode 1"));
@@ -404,7 +419,7 @@ mod tests {
             &HashMap::new(),
             (None, Vec::new()),
         );
-        assert_eq!(titles(&pinned), ["Unpin"]);
+        assert_eq!(titles(&pinned), ["Open", "Unpin"]);
 
         // a copy row is not recorded, but it is a stable pin target
         let mut copy = item(
@@ -421,7 +436,93 @@ mod tests {
             &HashMap::new(),
             (None, Vec::new()),
         );
-        assert_eq!(titles(&copy), ["Pin to top"]);
+        assert_eq!(titles(&copy), ["Open", "Pin to top"]);
+    }
+
+    #[test]
+    fn a_host_action_is_remembered_under_the_hosts_scope() {
+        let mut row = item(
+            "repo",
+            Action::Run {
+                cmd: "true".to_string(),
+            },
+        );
+        row.actions = vec![ActionItem {
+            title: "Mark done".to_string(),
+            action: PanelAction::Execute {
+                command: run("done"),
+            },
+            icon: None,
+            id: Some("done".to_string()),
+            plugin: Some("todo".to_string()),
+            default: false,
+        }];
+        let mut defaults = HashMap::new();
+        defaults.insert("todo".to_string(), "done".to_string());
+        attach_actions(
+            &mut row,
+            "todo x",
+            &[],
+            false,
+            &defaults,
+            (None, Vec::new()),
+        );
+
+        let titles: Vec<&str> = row.actions.iter().map(|a| a.title.as_str()).collect();
+        assert_eq!(titles, ["Open", "Mark done", "Pin to top"]);
+        let marked = row.actions.iter().find(|a| a.default).unwrap();
+        assert_eq!(marked.id.as_deref(), Some("done"));
+        assert_eq!(marked.plugin.as_deref(), Some("todo"));
+    }
+
+    #[test]
+    fn a_host_action_survives_a_built_in_claiming_the_row() {
+        // The row's command is a file, so file-search decorates it too; the
+        // host's own action still answers to the host's remembered default.
+        let uri = "file:///tmp/a.txt";
+        let mut row = item(
+            "a.txt",
+            Action::Open {
+                uri: uri.to_string(),
+            },
+        );
+        row.actions = vec![ActionItem {
+            title: "Mark done".to_string(),
+            action: PanelAction::Execute {
+                command: run("done"),
+            },
+            icon: None,
+            id: Some("done".to_string()),
+            plugin: Some("todo".to_string()),
+            default: false,
+        }];
+        let mut defaults = HashMap::new();
+        defaults.insert("todo".to_string(), "done".to_string());
+        attach_actions(
+            &mut row,
+            "todo x",
+            &[],
+            false,
+            &defaults,
+            (
+                Some("file-search".to_string()),
+                vec![file_action(
+                    "Reveal in file manager",
+                    "reveal",
+                    Action::Reveal {
+                        uri: uri.to_string(),
+                    },
+                )],
+            ),
+        );
+
+        let marked: Vec<&str> = row
+            .actions
+            .iter()
+            .filter(|a| a.default)
+            .map(|a| a.title.as_str())
+            .collect();
+        assert_eq!(marked, ["Mark done"], "exactly one entry is the default");
     }
 
     fn file_action(title: &str, id: &str, command: Action) -> ActionItem {
@@ -471,13 +572,16 @@ mod tests {
             (Some("file-search".to_string()), actions),
         );
 
-        // the row's own command survives as an "Open" action
-        assert!(
-            row.actions
-                .iter()
-                .any(|a| a.title == "Open" && a.id.is_none()),
-            "the primary stays reachable"
-        );
+        // the row's own command leads the panel, owned by the plugin so the
+        // panel can make it the default again
+        let open = &row.actions[0];
+        assert_eq!(open.title, "Open");
+        assert!(open.id.is_none());
+        assert_eq!(open.plugin.as_deref(), Some("file-search"));
+        assert!(matches!(
+            &open.action,
+            PanelAction::Execute { command } if command == &Action::Open { uri: uri.to_string() }
+        ));
         let default = row.actions.iter().find(|a| a.default).unwrap();
         assert_eq!(default.id.as_deref(), Some("terminal"));
         assert_eq!(default.plugin.as_deref(), Some("file-search"));
@@ -488,7 +592,7 @@ mod tests {
     }
 
     #[test]
-    fn no_remembered_default_leaves_the_panel_alone() {
+    fn no_remembered_default_marks_nothing() {
         let uri = "file:///tmp/a.txt";
         let mut row = item(
             "a.txt",
@@ -514,6 +618,6 @@ mod tests {
             ),
         );
         assert!(row.actions.iter().all(|a| !a.default));
-        assert!(row.actions.iter().all(|a| a.title != "Open"));
+        assert_eq!(row.actions[0].title, "Open", "the row command always leads");
     }
 }

@@ -35,6 +35,77 @@ impl Menu {
     }
 }
 
+/// A panel entry, named so a re-emit can find it again: an action id survives
+/// verbatim, the row's own command is the id-less entry the core owns, and the
+/// pin entry changes its label (`Pin to top` becomes `Unpin`) as it lands.
+enum PanelKey {
+    Id(String),
+    Primary,
+    Pin,
+}
+
+impl PanelKey {
+    fn of(action: &ActionItem) -> Option<Self> {
+        match &action.action {
+            PanelAction::Pin { .. } | PanelAction::Unpin { .. } => Some(PanelKey::Pin),
+            PanelAction::Execute { .. } => Some(match action.id.clone() {
+                Some(id) => PanelKey::Id(id),
+                None => PanelKey::Primary,
+            }),
+            // Removal takes the row the panel is about, so there is nothing to
+            // come back to.
+            PanelAction::Forget { .. } => None,
+        }
+    }
+
+    fn matches(&self, action: &ActionItem) -> bool {
+        match self {
+            PanelKey::Id(id) => action.id.as_deref() == Some(id.as_str()),
+            // The row's own command is the panel's leading entry, owned by a
+            // plugin or not: a host's row has no plugin to hang it on.
+            PanelKey::Primary => {
+                action.id.is_none() && matches!(action.action, PanelAction::Execute { .. })
+            }
+            PanelKey::Pin => matches!(
+                action.action,
+                PanelAction::Pin { .. } | PanelAction::Unpin { .. }
+            ),
+        }
+    }
+}
+
+/// Whether a panel entry runs the row's own command: the core's leading "Open"
+/// entry and nothing else.
+pub fn is_row_command(row: &ResultItem, action: &ActionItem) -> bool {
+    matches!(
+        &action.action,
+        PanelAction::Execute { command } if row.on_click.as_ref() == Some(command)
+    )
+}
+
+/// The entry the panel dots: the remembered default, else the row's own command,
+/// so exactly one entry shows what the row's `Enter` runs.
+pub fn marked_entry(row: &ResultItem) -> Option<usize> {
+    row.actions
+        .iter()
+        .position(|action| action.default)
+        .or_else(|| {
+            row.actions
+                .iter()
+                .position(|action| is_row_command(row, action))
+        })
+}
+
+/// The action a row's `Enter` runs instead of the row's own command, which only
+/// a remembered default changes.
+pub fn effective_action(row: &ResultItem) -> Option<&ActionItem> {
+    let action = row.actions.iter().find(|action| action.default)?;
+    let PanelAction::Execute { command } = &action.action else {
+        return None;
+    };
+    (row.on_click.as_ref() != Some(command)).then_some(action)
+}
+
 /// A blank icon spec means "no icon", so a re-send compares equal.
 fn normalize_icons(items: Vec<ResultItem>) -> Vec<ResultItem> {
     items
@@ -76,6 +147,9 @@ pub struct State {
     pub first: usize,
     /// The open action panel, if any. It takes over the list and the keyboard.
     pub menu: Option<Menu>,
+    /// The panel's row and entry, held across the re-emit a panel action sends,
+    /// so the panel comes back where the user left it instead of dropping.
+    panel_resume: Option<(Action, PanelKey)>,
     /// The core's system theme (the DMS palette, or the fallback).
     pub system_theme: Theme,
     /// Which system palette is active, so `[colors.dark]`/`[colors.light]`
@@ -142,6 +216,7 @@ impl State {
             selected: 0,
             first: 0,
             menu: None,
+            panel_resume: None,
             system_theme: theme,
             mode,
             appearance,
@@ -323,6 +398,8 @@ impl State {
     pub fn hidden(&mut self) {
         self.dismiss_at = None;
         self.menu = None;
+        // A reply that arrives while hidden must not resurrect the panel.
+        self.panel_resume = None;
         // The surface is gone, so nothing is composing on it any more.
         self.preedit = None;
         self.preedit_active = false;
@@ -358,9 +435,89 @@ impl State {
         self.menu = None;
     }
 
+    /// Remember the panel's row and highlighted entry, so the re-emit the action
+    /// is about to trigger brings the panel back instead of dropping it.
+    pub fn keep_panel(&mut self, action: &ActionItem) {
+        let Some(key) = PanelKey::of(action) else {
+            return;
+        };
+        let Some(parent) = self.menu.as_ref().map(|menu| menu.parent) else {
+            return;
+        };
+        let Some(on_click) = self.rows.get(parent).and_then(|row| row.on_click.clone()) else {
+            return;
+        };
+        self.panel_resume = Some((on_click, key));
+    }
+
+    /// Drop a pending resume: an edit or a dismissal means the panel must not
+    /// come back when the reply it asked for finally lands.
+    pub fn cancel_panel_resume(&mut self) {
+        self.panel_resume = None;
+    }
+
+    /// Put the panel back on the row `row_key` names with `key` highlighted. A
+    /// row or entry that did not survive the re-emit leaves the panel closed.
+    fn resume_panel(&mut self, row_key: &Action, key: &PanelKey) {
+        let Some(index) = self
+            .rows
+            .iter()
+            .position(|row| row.on_click.as_ref() == Some(row_key))
+        else {
+            return;
+        };
+        self.selected = index;
+        let Some(row) = self.rows.get(index) else {
+            return;
+        };
+        if row.actions.is_empty() {
+            return;
+        }
+        let actions = row.actions.clone();
+        let selected = actions
+            .iter()
+            .position(|action| key.matches(action))
+            .unwrap_or(0);
+        self.menu = Some(Menu {
+            parent: index,
+            actions,
+            selected,
+            first: 0,
+        });
+        self.menu_contain();
+    }
+
     /// The action Enter would run in the open panel.
     pub fn selected_action(&self) -> Option<ActionItem> {
         self.menu.as_ref().and_then(Menu::selected_action).cloned()
+    }
+
+    /// What `Alt+Enter` on the panel's selection would remember: the owning
+    /// plugin and the action id, `None` id clearing the scope. The row's own
+    /// command is the implicit default, so picking it drops a remembered one.
+    /// `None` when the selection cannot be a default.
+    pub fn selected_default(&self) -> Option<(&str, Option<&str>)> {
+        let menu = self.menu.as_ref()?;
+        let action = menu.selected_action()?;
+        let plugin = action.plugin.as_deref();
+        if action.default {
+            return Some((plugin?, None));
+        }
+        if let Some(id) = action.id.as_deref() {
+            return Some((plugin?, Some(id)));
+        }
+        let row = self.rows.get(menu.parent)?;
+        if !is_row_command(row, action) {
+            return None;
+        }
+        // The row's own command is the implicit default, so picking it drops what
+        // the row remembered — whichever plugin's scope remembered it.
+        row.actions
+            .iter()
+            .find(|action| action.default)
+            .and_then(|action| action.plugin.as_deref())
+            .or(plugin)
+            .map(|scope| (scope, None))
     }
 
     /// The title of the row the panel belongs to, for its header.
@@ -709,6 +866,8 @@ impl State {
 
     pub fn apply_results(&mut self, items: Vec<ResultItem>, now: Instant) {
         let items = normalize_icons(items);
+        // A panel action holds its place across the reply it asked for.
+        let resume = self.panel_resume.take();
         // An identical re-send is dropped so it cannot reset the selection.
         if self.rows == items && !self.rows.is_empty() {
             return;
@@ -720,6 +879,9 @@ impl State {
         // local removal and an identical re-send keep the cursor.
         self.selected = 0;
         self.menu = None;
+        if let Some((row_key, key)) = resume {
+            self.resume_panel(&row_key, &key);
+        }
         self.contain();
         self.retarget_height(now);
     }
@@ -1235,6 +1397,95 @@ mod tests {
     }
 
     #[test]
+    fn the_rows_own_command_clears_a_remembered_default() {
+        let mut state = state();
+        let uri = "file:///tmp/a.txt";
+        let execute =
+            |title: &str, command: Action, id: Option<&str>, plugin: Option<&str>| ActionItem {
+                title: title.to_string(),
+                action: PanelAction::Execute { command },
+                icon: None,
+                id: id.map(str::to_string),
+                plugin: plugin.map(str::to_string),
+                default: false,
+            };
+        let mut row = item(
+            "a.txt",
+            None,
+            Some(Action::Open {
+                uri: uri.to_string(),
+            }),
+            None,
+        );
+        let mut terminal = execute(
+            "Open in terminal",
+            Action::Terminal {
+                uri: uri.to_string(),
+            },
+            Some("terminal"),
+            Some("file-search"),
+        );
+        terminal.default = true;
+        row.actions = vec![
+            execute(
+                "Open",
+                Action::Open {
+                    uri: uri.to_string(),
+                },
+                None,
+                Some("file-search"),
+            ),
+            execute(
+                "Copy path",
+                Action::Run {
+                    cmd: "true".to_string(),
+                },
+                Some("copy_path"),
+                Some("file-search"),
+            ),
+            terminal,
+            ActionItem {
+                title: "Pin to top".to_string(),
+                action: PanelAction::Pin {
+                    scope: String::new(),
+                    item: Box::new(item("a.txt", None, None, None)),
+                },
+                icon: None,
+                id: None,
+                plugin: None,
+                default: false,
+            },
+        ];
+        state.apply_results(vec![row], std::time::Instant::now());
+        assert!(state.open_actions());
+
+        fn remember(state: &mut State, selected: usize) -> Option<(String, Option<String>)> {
+            state.menu.as_mut().unwrap().selected = selected;
+            state
+                .selected_default()
+                .map(|(plugin, id)| (plugin.to_string(), id.map(str::to_string)))
+        }
+        // the row's own command is the implicit default: picking it clears the
+        // scope, so a row can always go back to opening normally
+        assert_eq!(
+            remember(&mut state, 0),
+            Some(("file-search".to_string(), None))
+        );
+        // a plugin action is remembered by id, and re-picking the remembered one
+        // clears it
+        assert_eq!(
+            remember(&mut state, 1),
+            Some(("file-search".to_string(), Some("copy_path".to_string())))
+        );
+        assert_eq!(
+            remember(&mut state, 2),
+            Some(("file-search".to_string(), None))
+        );
+        // a launcher-level action belongs to no plugin
+        assert_eq!(remember(&mut state, 3), None);
+    }
+
+    #[test]
     fn enter_uses_the_default_action_but_records_the_row_command() {
         let mut state = state();
         let uri = "file:///tmp/a.txt";
@@ -1424,6 +1675,263 @@ mod tests {
 
         state.apply_results(vec![item("b", None, Some(run("b")), None)], now);
         assert!(state.menu.is_none(), "a new list invalidates the panel");
+    }
+
+    /// A file row: the row's own command, with the panel entries a plugin and
+    /// the launcher put on it.
+    fn file_row(uri: &str, actions: Vec<ActionItem>) -> ResultItem {
+        let mut row = item(
+            "a.txt",
+            None,
+            Some(Action::Open {
+                uri: uri.to_string(),
+            }),
+            None,
+        );
+        row.actions = actions;
+        row
+    }
+
+    fn plugin_action(title: &str, command: Action, id: &str, default: bool) -> ActionItem {
+        ActionItem {
+            title: title.to_string(),
+            action: PanelAction::Execute { command },
+            icon: None,
+            id: Some(id.to_string()),
+            plugin: Some("file-search".to_string()),
+            default,
+        }
+    }
+
+    fn pin_entry(uri: &str, unpin: bool) -> ActionItem {
+        let on_click = Action::Open {
+            uri: uri.to_string(),
+        };
+        let action = if unpin {
+            PanelAction::Unpin {
+                scope: "f a".to_string(),
+                on_click,
+            }
+        } else {
+            PanelAction::Pin {
+                scope: "f a".to_string(),
+                item: Box::new(file_row(uri, Vec::new())),
+            }
+        };
+        ActionItem {
+            title: if unpin { "Unpin" } else { "Pin to top" }.to_string(),
+            action,
+            icon: None,
+            id: None,
+            plugin: None,
+            default: false,
+        }
+    }
+
+    #[test]
+    fn the_panel_dots_the_entry_enter_runs() {
+        let uri = "file:///tmp/a.txt";
+        let open = ActionItem {
+            title: "Open".to_string(),
+            action: PanelAction::Execute {
+                command: Action::Open {
+                    uri: uri.to_string(),
+                },
+            },
+            icon: None,
+            id: None,
+            plugin: Some("file-search".to_string()),
+            default: false,
+        };
+        let reveal = plugin_action(
+            "Reveal in file manager",
+            Action::Reveal {
+                uri: uri.to_string(),
+            },
+            "reveal",
+            false,
+        );
+        let terminal = |default| {
+            plugin_action(
+                "Open in terminal",
+                Action::Terminal {
+                    uri: uri.to_string(),
+                },
+                "terminal",
+                default,
+            )
+        };
+
+        let mut row = file_row(uri, vec![open.clone(), reveal.clone(), terminal(false)]);
+        assert_eq!(
+            marked_entry(&row),
+            Some(0),
+            "no remembered default: the row's own command is what Enter runs"
+        );
+
+        row.actions = vec![open, reveal, terminal(true)];
+        assert_eq!(
+            marked_entry(&row),
+            Some(2),
+            "the remembered action carries it"
+        );
+    }
+
+    #[test]
+    fn picking_the_row_command_clears_the_scope_that_remembered_it() {
+        let mut state = state();
+        let uri = "file:///tmp/a.txt";
+        let mut row = item(
+            "a.txt",
+            None,
+            Some(Action::Open {
+                uri: uri.to_string(),
+            }),
+            None,
+        );
+        // A host row: its actions carry the host's scope, and the leading Open
+        // entry carries none of its own.
+        row.actions = vec![
+            ActionItem {
+                title: "Open".to_string(),
+                action: PanelAction::Execute {
+                    command: Action::Open {
+                        uri: uri.to_string(),
+                    },
+                },
+                icon: None,
+                id: None,
+                plugin: None,
+                default: false,
+            },
+            ActionItem {
+                title: "Mark done".to_string(),
+                action: PanelAction::Execute {
+                    command: Action::Run {
+                        cmd: "done".to_string(),
+                    },
+                },
+                icon: None,
+                id: Some("done".to_string()),
+                plugin: Some("todo".to_string()),
+                default: true,
+            },
+        ];
+        state.apply_results(vec![row], std::time::Instant::now());
+        assert!(state.open_actions());
+
+        assert_eq!(
+            state.selected_default(),
+            Some(("todo", None)),
+            "the scope that remembered the action is the one to clear"
+        );
+    }
+
+    #[test]
+    fn a_default_gesture_keeps_the_panel_on_the_entry_it_marked() {
+        let now = std::time::Instant::now();
+        let mut state = state();
+        let uri = "file:///tmp/a.txt";
+        let reveal = |default| {
+            plugin_action(
+                "Reveal in file manager",
+                Action::Reveal {
+                    uri: uri.to_string(),
+                },
+                "reveal",
+                default,
+            )
+        };
+        let terminal = |default| {
+            plugin_action(
+                "Open in terminal",
+                Action::Terminal {
+                    uri: uri.to_string(),
+                },
+                "terminal",
+                default,
+            )
+        };
+        state.apply_results(
+            vec![file_row(uri, vec![reveal(false), terminal(false)])],
+            now,
+        );
+        assert!(state.open_actions());
+        state.menu.as_mut().unwrap().selected = 1;
+
+        // Alt+Enter on "Open in terminal": the reply carries the dot and the
+        // panel must land back on that entry, not on the top of the list.
+        let chosen = state.selected_action().unwrap();
+        state.keep_panel(&chosen);
+        state.apply_results(
+            vec![file_row(uri, vec![reveal(false), terminal(true)])],
+            now,
+        );
+
+        let menu = state.menu.as_ref().expect("the panel comes back");
+        assert_eq!(menu.selected, 1);
+        assert!(
+            menu.actions[1].default,
+            "the highlighted entry is the marked one"
+        );
+        assert_eq!(state.selected, 0, "the panel's row is the selection");
+    }
+
+    #[test]
+    fn a_pin_gesture_keeps_the_panel_on_the_entry_it_flipped() {
+        let now = std::time::Instant::now();
+        let mut state = state();
+        let uri = "file:///tmp/a.txt";
+        state.apply_results(vec![file_row(uri, vec![pin_entry(uri, false)])], now);
+        assert!(state.open_actions());
+
+        let chosen = state.selected_action().unwrap();
+        state.keep_panel(&chosen);
+        state.apply_results(vec![file_row(uri, vec![pin_entry(uri, true)])], now);
+
+        let menu = state.menu.as_ref().expect("the panel comes back");
+        assert_eq!(menu.actions[menu.selected].title, "Unpin");
+    }
+
+    #[test]
+    fn a_panel_gesture_on_a_vanished_row_leaves_the_panel_closed() {
+        let now = std::time::Instant::now();
+        let mut state = state();
+        let uri = "file:///tmp/a.txt";
+        state.apply_results(vec![file_row(uri, vec![pin_entry(uri, false)])], now);
+        assert!(state.open_actions());
+
+        let chosen = state.selected_action().unwrap();
+        state.keep_panel(&chosen);
+        state.apply_results(vec![item("b", None, Some(run("b")), None)], now);
+        assert!(state.menu.is_none(), "the panel's row is gone");
+    }
+
+    #[test]
+    fn a_resume_dropped_before_the_reply_lands_leaves_the_panel_closed() {
+        let now = std::time::Instant::now();
+        let mut state = state();
+        let uri = "file:///tmp/a.txt";
+        let row = file_row(uri, vec![pin_entry(uri, false)]);
+        state.apply_results(vec![row.clone()], now);
+        assert!(state.open_actions());
+
+        // the row is still there and the payload changed, so only the dropped
+        // resume keeps the panel closed — a dismissal or an edit must not let a
+        // slow reply resurrect it
+        let chosen = state.selected_action().unwrap();
+        state.keep_panel(&chosen);
+        state.hidden();
+        state.apply_results(vec![file_row(uri, vec![pin_entry(uri, true)])], now);
+        assert!(state.menu.is_none());
+
+        state.apply_results(vec![row], now);
+        assert!(state.open_actions());
+        let chosen = state.selected_action().unwrap();
+        state.keep_panel(&chosen);
+        state.cancel_panel_resume();
+        state.apply_results(vec![file_row(uri, vec![pin_entry(uri, true)])], now);
+        assert!(state.menu.is_none(), "an edit cancels the pending resume");
     }
 
     #[test]

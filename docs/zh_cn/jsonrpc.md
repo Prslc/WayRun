@@ -147,9 +147,10 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 | `badge` | string \| null | 可选，行右缘的状态图标（置顶行为图钉） |
 
 `actions` 元素为 `{"title": string, "action": PanelAction, "icon"?: string}`，
-`icon` 与结果行的 `icon` 采用同样的规范解析。核心生成的动作还可能带 `id`（稳定 kind）、
-`plugin`（归属插件，用于限定默认动作的作用域）与 `default`（为 true 表示 Enter 执行它）；
-外部主机可以给自己的动作填 `id` 使其可被设为默认，其余字段可忽略。
+`icon` 与结果行的 `icon` 采用同样的规范解析。动作还可能带 `id`（稳定 kind）、
+`plugin`（归属插件，用于限定默认动作的作用域）与 `default`（为 true 表示 Enter 执行它）：
+`plugin` 与 `default` 由后端赋值，主机传来的这两个字段会被忽略；外部主机给自己的动作填 `id`
+即可使其可被设为默认（后端会把主机登记为这些动作的归属）。
 `PanelAction` 是以下之一：
 
 | `type` | 字段 | 含义 |

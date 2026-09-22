@@ -3,7 +3,7 @@ use std::time::Instant;
 use cosmic_text::Weight;
 use tiny_skia::Pixmap;
 
-use crate::app::{Hover, State};
+use crate::app::{Hover, State, marked_entry};
 use crate::ui::geom;
 use crate::ui::icons::IconCache;
 use crate::ui::text::TextEngine;
@@ -50,6 +50,9 @@ pub(super) fn draw_actions(
         );
     }
 
+    // The dot marks the entry the row's Enter runs: the remembered default, or
+    // the row's own command while none is remembered.
+    let marked = state.rows.get(menu.parent).and_then(marked_entry);
     let top = layout.actions_top(surface);
     for (index, action) in menu
         .actions
@@ -92,7 +95,8 @@ pub(super) fn draw_actions(
             .as_ref()
             .map_or(0.0, |shaped| shaped.width / canvas.scale + 12.0);
         // The default marker sits left of the Enter glyph; reserve its room.
-        let marker_w = if action.default { 12.0 } else { 0.0 };
+        let dotted = marked == Some(index);
+        let marker_w = if dotted { 12.0 } else { 0.0 };
         let labels_max = (rect.right() - 10.0 - labels_x - enter_w - marker_w).max(0.0);
         let title = text.fit(
             &action.title,
@@ -126,7 +130,7 @@ pub(super) fn draw_actions(
                 None,
             );
         }
-        if action.default {
+        if dotted {
             let cx = rect.right() - 10.0 - enter_w - 6.0;
             canvas.fill_round(
                 pixmap,

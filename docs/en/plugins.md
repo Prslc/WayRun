@@ -62,8 +62,13 @@ entry's `[Desktop Action …]` groups,
 `web-search` and the Firefox plugins offer "Copy URL", and a plugin with none
 simply gets the launcher-level pin/unpin. The empty-query history adds "Remove
 from history" to the rows it sourced. An external host may put its own `actions`
-array on a result item; the core appends them after the built-ins. Give an
-action an `id` to let the user make it the default Enter action (`Alt+Enter`).
+array on a result item; the core puts them after the plugin's own actions. The
+panel leads with the row's own command and trails the launcher-level pin/unpin.
+Give an
+action an `id` to let the user make it the default Enter action (`Alt+Enter`);
+the panel's **Open** entry — the row's own command, leading the panel — takes the
+gesture as clearing it. An entry a host attached carries the host's scope, so it
+can be made default like a plugin's own.
 See the `actions` field in [jsonrpc.md](jsonrpc.md#result-items).
 
 ## External hosts

@@ -161,10 +161,11 @@ and `actions`/`badge` only when set:
 | `badge` | string \| null | optional status glyph at the row's right edge (a pin for a pinned row) |
 
 An `actions` entry is `{"title": string, "action": PanelAction, "icon"?: string}`,
-with the same icon-spec resolution as a row's `icon`. A core-built entry may also
-carry `id` (its stable kind), `plugin` (the owner, which scopes a remembered
-default) and `default` (true when Enter runs it); a host may set `id` on its own
-actions to make them defaultable, and may ignore the rest.
+with the same icon-spec resolution as a row's `icon`. An entry may also carry `id`
+(its stable kind), `plugin` (the owner, which scopes a remembered default) and
+`default` (true when Enter runs it). The core assigns `plugin` and `default` — a
+host's values for those are ignored — and a host sets `id` on its own actions to
+make them defaultable, which is why the core stamps the host as their owner.
 
 A `PanelAction` is one of:
 

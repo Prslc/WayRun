@@ -209,20 +209,29 @@ pub async fn discover(command: &str) -> Vec<HostMeta> {
 }
 
 /// Normalize a host response's `result` array into rows, resolving each icon to
-/// what the UI can render. `None` when there is no usable `result` array.
-fn parse_result_items(response: &serde_json::Value, icon: &str) -> Option<Vec<ResultItem>> {
+/// what the UI can render and stamping `plugin` as the owner of the row's
+/// actions, so a host action scopes a remembered default like a built-in's.
+/// `None` when there is no usable `result` array.
+fn parse_result_items(
+    response: &serde_json::Value,
+    plugin: &str,
+    icon: &str,
+) -> Option<Vec<ResultItem>> {
     let items = response.get("result")?.as_array()?;
     let mut parsed: Vec<ResultItem> = items
         .iter()
         .filter_map(|it| serde_json::from_value(it.clone()).ok())
         .collect();
     let identity = host_icon_path(icon);
+    let owner = plugin.to_string();
     for item in &mut parsed {
         let spec = item.icon.as_deref().unwrap_or("");
         item.icon = resolve_item_icon(spec, identity.clone());
         item.badge = item.badge.as_deref().and_then(host_icon_path);
         for action in &mut item.actions {
             action.icon = action.icon.as_deref().and_then(host_icon_path);
+            // The core owns this field; whatever the host sent is ignored.
+            action.plugin = Some(owner.clone());
         }
     }
     Some(parsed)
@@ -247,7 +256,7 @@ async fn query_external(
     let Some(response) = rpc_call(command, &request).await else {
         return Ok(Vec::new());
     };
-    Ok(parse_result_items(&response, icon).unwrap_or_default())
+    Ok(parse_result_items(&response, plugin, icon).unwrap_or_default())
 }
 
 /// Ask the host for its default view (its `top` method). `Ok(None)` when it has
@@ -265,7 +274,7 @@ async fn query_default(command: &str, plugin: &str, icon: &str) -> Result<Option
     if response.get("error").is_some() {
         return Ok(None);
     }
-    Ok(parse_result_items(&response, icon))
+    Ok(parse_result_items(&response, plugin, icon))
 }
 
 /// First shell token of a `run` command (argv0), or `None` for any other
@@ -367,8 +376,13 @@ mod tests {
                 ],
             }]
         });
-        let items = parse_result_items(&response, "").unwrap();
+        let items = parse_result_items(&response, "system-search", "").unwrap();
         assert!(items[0].badge.is_none(), "a symbolic badge is dropped");
+        assert_eq!(
+            items[0].actions[0].plugin.as_deref(),
+            Some("system-search"),
+            "the host owns the actions it attaches"
+        );
         assert!(
             items[0].actions[0].icon.is_none(),
             "a symbolic action icon is dropped"
@@ -384,7 +398,7 @@ mod tests {
                 { "title": "Firefox", "on_click": {"type":"launch","desktop_id":"firefox.desktop"} },
             ]
         });
-        let items = parse_result_items(&response, "system-search").unwrap();
+        let items = parse_result_items(&response, "system-search", "").unwrap();
         assert!(items[0].ephemeral, "the host's flag is carried through");
         assert!(!items[1].ephemeral, "an absent flag means record it");
     }
