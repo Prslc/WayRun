@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-22
+
+### Added
+
+- The interface is translated: `locales/en.yml` and `locales/zh_cn.yml` hold
+  every string the launcher shows, and the locale is resolved once at startup
+  from `$LC_ALL`, `$LC_MESSAGES`, `$LANG` — `zh_CN.UTF-8` becomes `zh_cn`, any
+  `zh_*` variant reads the one Chinese table, anything else falls back to
+  English. Plugin names and ready hints, action titles, the `?` help line, the
+  system commands and the web-search rows are all covered. `wayrun status`,
+  `--list-plugins` and the RPC errors stay English, and whatever a host sends
+  is relayed as it is.
+- `config.toml`'s `[ui] locale` pins the interface language regardless of the
+  session, which is what a resident service needs: its unit inherits the
+  session's locale, or none at all. It is read at startup, so a change needs a
+  restart.
+- The action panel leads with the row's own command (**Open**), so its first
+  slot is what Enter runs: `Shift+Enter` then Enter opens the row instead of
+  pinning it, and `Alt+Enter` on **Open** clears a remembered default whichever
+  scope set it.
+- A remembered default is visible without opening the panel: the row carries the
+  same dot, its footer names the action Enter will run (`⏎ Open in terminal`)
+  instead of `⏎ Launch`, and `?` lists each plugin's remembered action.
+- An action an external host attaches can be made the default Enter action: the
+  core stamps the host as the owner of the actions it parses out of a response,
+  so the host's scope is what the gesture sets.
+- A new launcher mark, `images/logo.svg` (replacing
+  `images/application_default.png`), trails three fading echoes behind the W,
+  and the built-in `builtin:app` glyph is drawn from the same rest geometry.
+
+### Changed
+
+- A file or directory row lists "Open in terminal" next to **Open**, with
+  "Reveal in file manager" and "Copy path" after them, so the open-family
+  entries are grouped at the top of the panel instead of the terminal being
+  last.
+- Pin/unpin and the default gesture re-send the query with the panel held open
+  on the entry that changed, so the change lands where it was made. The resume
+  is dropped by a close, a hide and every query edit, so a slow host's reply
+  cannot resurrect a panel the user closed.
+- Both README editions no longer name Papirus as the icon theme: app and file
+  rows follow the desktop's own theme. A License section credits the bundled
+  Material Symbols (Apache-2.0) and links the notice.
+- The user-facing pages state what a feature is and how to use it: the
+  implementation narrative (process split, caches, internal paths) is gone, and
+  the two language editions keep the same sections.
+
 ## [0.3.0] - 2026-09-22
 
 ### Changed
@@ -208,7 +255,8 @@ and, with `--core`, the backend service.
 - Resident mode over `$XDG_RUNTIME_DIR/wayrun.sock` for zero cold-start
   (`wayrun toggle`).
 
-[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Prslc/WayRun/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Prslc/WayRun/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Prslc/WayRun/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/Prslc/WayRun/compare/v0.1.2...v0.1.3

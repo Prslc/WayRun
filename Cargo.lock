@@ -2128,7 +2128,7 @@ dependencies = [
 
 [[package]]
 name = "wayrun-core"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "dirs",
@@ -2151,7 +2151,7 @@ dependencies = [
 
 [[package]]
 name = "wayrun-shell"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "calloop",
  "calloop-wayland-source",
