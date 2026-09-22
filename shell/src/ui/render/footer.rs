@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use cosmic_text::Weight;
@@ -7,19 +8,21 @@ use crate::app::{State, effective_action};
 use crate::ui::geom;
 use crate::ui::text::TextEngine;
 
+use rust_i18n::t;
+
 use super::canvas::{Canvas, Rect};
 
 /// One key hint: a keycap and its label. An empty key is a plain note.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Hint {
     key: &'static str,
-    label: &'static str,
+    label: String,
     /// The label is the row's Enter action when a remembered default makes Enter
     /// run something other than the row's own command.
     effective: bool,
 }
 
-const fn hint(key: &'static str, label: &'static str) -> Hint {
+fn hint(key: &'static str, label: String) -> Hint {
     Hint {
         key,
         label,
@@ -28,7 +31,7 @@ const fn hint(key: &'static str, label: &'static str) -> Hint {
 }
 
 /// An `Enter` hint, whose label yields to the row's effective action.
-const fn enter(label: &'static str) -> Hint {
+fn enter(label: String) -> Hint {
     Hint {
         key: "⏎",
         label,
@@ -36,27 +39,34 @@ const fn enter(label: &'static str) -> Hint {
     }
 }
 
-const PANEL_HINTS: &[Hint] = &[hint("⏎", "Run"), hint("Esc", "Back")];
+/// The footer's hint sets, translated once: a locale is fixed for the process
+/// and the footer is redrawn on every frame.
+struct Hints {
+    panel: Vec<Hint>,
+    panel_default: Vec<Hint>,
+    panel_clear_default: Vec<Hint>,
+    row: Vec<Hint>,
+    launch: Vec<Hint>,
+    help: Vec<Hint>,
+    no_match: Vec<Hint>,
+}
 
-const PANEL_DEFAULT_HINTS: &[Hint] = &[
-    hint("⏎", "Run"),
-    hint("Alt⏎", "Default"),
-    hint("Esc", "Back"),
-];
-
-const PANEL_CLEAR_DEFAULT_HINTS: &[Hint] = &[
-    hint("⏎", "Run"),
-    hint("Alt⏎", "Clear default"),
-    hint("Esc", "Back"),
-];
-
-const ROW_HINTS: &[Hint] = &[enter("Launch"), hint("⇧⏎", "Actions")];
-
-const LAUNCH_HINT: &[Hint] = &[enter("Launch")];
-
-const HELP_HINT: &[Hint] = &[hint("", "Type ? for help")];
-
-const NO_MATCH_HINT: &[Hint] = &[hint("", "No results")];
+fn hints() -> &'static Hints {
+    static HINTS: OnceLock<Hints> = OnceLock::new();
+    HINTS.get_or_init(|| {
+        let run = || hint("⏎", t!("footer.run"));
+        let back = || hint("Esc", t!("footer.back"));
+        Hints {
+            panel: vec![run(), back()],
+            panel_default: vec![run(), hint("Alt⏎", t!("footer.default")), back()],
+            panel_clear_default: vec![run(), hint("Alt⏎", t!("footer.clear_default")), back()],
+            row: vec![enter(t!("footer.launch")), hint("⇧⏎", t!("footer.actions"))],
+            launch: vec![enter(t!("footer.launch"))],
+            help: vec![hint("", t!("footer.help"))],
+            no_match: vec![hint("", t!("footer.no_results"))],
+        }
+    })
+}
 
 /// The footer's left hints: the panel's keys when open, the launch keys once
 /// rows exist, a help note for an untouched field, else "No results".
@@ -68,20 +78,25 @@ pub(super) fn footer_hints(
     can_default: bool,
     is_default: bool,
 ) -> &'static [Hint] {
+    let hints = hints();
     if panel {
         if !can_default {
-            PANEL_HINTS
+            &hints.panel
         } else if is_default {
-            PANEL_CLEAR_DEFAULT_HINTS
+            &hints.panel_clear_default
         } else {
-            PANEL_DEFAULT_HINTS
+            &hints.panel_default
         }
     } else if rows > 0 {
-        if has_actions { ROW_HINTS } else { LAUNCH_HINT }
+        if has_actions {
+            &hints.row
+        } else {
+            &hints.launch
+        }
     } else if query_empty {
-        HELP_HINT
+        &hints.help
     } else {
-        NO_MATCH_HINT
+        &hints.no_match
     }
 }
 
@@ -91,12 +106,8 @@ const KEY_LABEL_GAP: f32 = 6.0;
 const ITEM_GAP: f32 = 16.0;
 const COUNT_GAP: f32 = 14.0;
 
-fn count_label(n: usize, singular: &str, plural: &str) -> String {
-    if n == 1 {
-        format!("1 {singular}")
-    } else {
-        format!("{n} {plural}")
-    }
+fn count_label(n: usize, one: &'static str, many: &'static str) -> String {
+    if n == 1 { t!(one) } else { t!(many, count = n) }
 }
 
 /// The action the selected row's `Enter` runs instead of the row's own command,
@@ -147,13 +158,17 @@ pub(super) fn draw_footer(
     let count = if panel {
         count_label(
             state.menu.as_ref().map_or(0, |menu| menu.actions.len()),
-            "action",
-            "actions",
+            "footer.count_action_one",
+            "footer.count_action_many",
         )
     } else if empty {
         String::new()
     } else {
-        count_label(state.rows.len(), "result", "results")
+        count_label(
+            state.rows.len(),
+            "footer.count_result_one",
+            "footer.count_result_many",
+        )
     };
 
     // The footer is the last band of the card, derived from the same height the
@@ -188,7 +203,7 @@ pub(super) fn draw_footer(
             } else {
                 state.fade_rgba(state.surfaces.footer, now)
             };
-            let shaped = text.shape(hint.label, label_size, Weight::NORMAL);
+            let shaped = text.shape(&hint.label, label_size, Weight::NORMAL);
             let height = shaped.height / canvas.scale;
             text.draw(
                 pixmap,
@@ -209,13 +224,13 @@ pub(super) fn draw_footer(
         let label = if hint.effective {
             let room = limit - x - cap_w - KEY_LABEL_GAP;
             text.fit(
-                effective.unwrap_or(hint.label),
+                effective.unwrap_or(&hint.label),
                 label_size,
                 Weight::NORMAL,
                 room,
             )
         } else {
-            text.shape(hint.label, label_size, Weight::NORMAL)
+            text.shape(&hint.label, label_size, Weight::NORMAL)
         };
         let label_w = label.width / canvas.scale;
         let cap_h = (key.height / canvas.scale + 6.0).min(geom::FOOTER_H);
@@ -290,16 +305,22 @@ mod tests {
     #[test]
     fn the_footer_separates_no_results_from_an_untouched_field() {
         // an empty field is the history view, not a failed search
-        assert_eq!(footer_hints(0, true, false, false, false, false), HELP_HINT);
+        assert_eq!(
+            footer_hints(0, true, false, false, false, false),
+            hints().help.as_slice()
+        );
         assert_eq!(
             footer_hints(0, false, false, false, false, false),
-            NO_MATCH_HINT
+            hints().no_match.as_slice()
         );
-        assert_eq!(footer_hints(3, false, false, true, false, false), ROW_HINTS);
+        assert_eq!(
+            footer_hints(3, false, false, true, false, false),
+            hints().row.as_slice()
+        );
         // the panel owns the footer while it is open
         assert_eq!(
             footer_hints(3, false, true, true, false, false),
-            PANEL_HINTS
+            hints().panel.as_slice()
         );
     }
 
@@ -307,12 +328,12 @@ mod tests {
     fn a_row_without_actions_drops_the_actions_hint() {
         assert_eq!(
             footer_hints(3, false, false, false, false, false),
-            LAUNCH_HINT
+            hints().launch.as_slice()
         );
         // the panel hint outlives the selected row's actions while it is open
         assert_eq!(
             footer_hints(3, false, true, false, false, false),
-            PANEL_HINTS
+            hints().panel.as_slice()
         );
     }
 
@@ -321,17 +342,17 @@ mod tests {
         // a plugin action that is not yet the default
         assert_eq!(
             footer_hints(3, false, true, true, true, false),
-            PANEL_DEFAULT_HINTS
+            hints().panel_default.as_slice()
         );
         // already the default: the hint offers to clear it
         assert_eq!(
             footer_hints(3, false, true, true, true, true),
-            PANEL_CLEAR_DEFAULT_HINTS
+            hints().panel_clear_default.as_slice()
         );
         // a launcher-level or host action has no id, so no hint
         assert_eq!(
             footer_hints(3, false, true, true, false, false),
-            PANEL_HINTS
+            hints().panel.as_slice()
         );
     }
 
@@ -381,8 +402,12 @@ mod tests {
 
     #[test]
     fn a_single_count_is_singular() {
-        assert_eq!(count_label(1, "result", "results"), "1 result");
-        assert_eq!(count_label(0, "result", "results"), "0 results");
-        assert_eq!(count_label(2, "action", "actions"), "2 actions");
+        let one = |n| count_label(n, "footer.count_result_one", "footer.count_result_many");
+        let many = |n| count_label(n, "footer.count_action_one", "footer.count_action_many");
+        assert!(one(1).starts_with('1') && many(1).starts_with('1'));
+        assert!(one(0).starts_with('0') && many(2).starts_with('2'));
+        // the singular form is a different string from the plural one
+        assert_ne!(one(1), one(2));
+        assert_ne!(many(1), many(2));
     }
 }

@@ -1,3 +1,6 @@
+// The same tables the core reads, so one locale covers both sides of the wire.
+rust_i18n::i18n!("../locales", fallback = "en");
+
 mod app;
 mod config;
 mod session;
@@ -17,6 +20,7 @@ use crate::ui::render;
 use crate::wayland::Shell;
 
 fn main() -> std::process::ExitCode {
+    wayrun_core::i18n::init();
     let mut args = std::env::args();
     let invoked_as = args.next().unwrap_or_default();
     let rest: Vec<String> = args.collect();

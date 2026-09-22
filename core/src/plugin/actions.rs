@@ -1,6 +1,7 @@
 use super::registry::{REGISTRY, ensure_loaded};
 use crate::system::icon::find_icon_path;
 use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
+use rust_i18n::t;
 
 /// Drop a row across the registry. `true` when an external host owned and dropped
 /// it, so `forget` answers truthfully instead of claiming a deletion.
@@ -123,7 +124,7 @@ fn attach_actions(
     // the row offers, and the first slot belongs to the row's own command.
     if is_pinned {
         actions.push(ActionItem {
-            title: "Unpin".to_string(),
+            title: t!("action.unpin"),
             action: PanelAction::Unpin {
                 scope: scope.to_string(),
                 on_click: on_click.clone(),
@@ -135,7 +136,7 @@ fn attach_actions(
         });
     } else if let Some(pinned_row) = pin_snapshot {
         actions.push(ActionItem {
-            title: "Pin to top".to_string(),
+            title: t!("action.pin"),
             action: PanelAction::Pin {
                 scope: scope.to_string(),
                 item: pinned_row,
@@ -149,7 +150,7 @@ fn attach_actions(
 
     if history && crate::system::usage::is_recordable(item.ephemeral, Some(&on_click)) {
         actions.push(ActionItem {
-            title: "Remove from history".to_string(),
+            title: t!("action.remove_history"),
             action: PanelAction::Forget {
                 on_click: on_click.clone(),
             },
@@ -167,7 +168,7 @@ fn attach_actions(
         actions.insert(
             0,
             ActionItem {
-                title: "Open".to_string(),
+                title: t!("action.open"),
                 action: PanelAction::Execute {
                     command: on_click.clone(),
                 },
@@ -250,7 +251,7 @@ mod tests {
             .iter()
             .map(|action| action.title.as_str())
             .collect();
-        assert_eq!(titles, ["Open", "Pin to top"]);
+        assert_eq!(titles, [t!("action.open"), t!("action.pin")]);
         match &row.actions[1].action {
             PanelAction::Pin { scope, item } => {
                 assert_eq!(scope, "b");
@@ -300,10 +301,10 @@ mod tests {
         assert_eq!(
             titles,
             [
-                "Open",
-                "Reveal in file manager",
-                "Unpin",
-                "Remove from history"
+                t!("action.open"),
+                "Reveal in file manager".to_string(),
+                t!("action.unpin"),
+                t!("action.remove_history")
             ]
         );
         assert!(row.badge.is_some(), "a pinned row carries the pin badge");
@@ -372,7 +373,11 @@ mod tests {
         );
         assert_eq!(
             titles(&history),
-            ["Open", "Pin to top", "Remove from history"]
+            [
+                t!("action.open"),
+                t!("action.pin"),
+                t!("action.remove_history")
+            ]
         );
 
         // a fresh search result is not sourced from the history view
@@ -390,7 +395,7 @@ mod tests {
             &HashMap::new(),
             (None, Vec::new()),
         );
-        assert_eq!(titles(&search), ["Open", "Pin to top"]);
+        assert_eq!(titles(&search), [t!("action.open"), t!("action.pin")]);
 
         // an ephemeral row is neither a durable pin target nor recorded
         let mut one_shot = item("window", run("wctl activate 1"));
@@ -419,7 +424,7 @@ mod tests {
             &HashMap::new(),
             (None, Vec::new()),
         );
-        assert_eq!(titles(&pinned), ["Open", "Unpin"]);
+        assert_eq!(titles(&pinned), [t!("action.open"), t!("action.unpin")]);
 
         // a copy row is not recorded, but it is a stable pin target
         let mut copy = item(
@@ -436,7 +441,7 @@ mod tests {
             &HashMap::new(),
             (None, Vec::new()),
         );
-        assert_eq!(titles(&copy), ["Open", "Pin to top"]);
+        assert_eq!(titles(&copy), [t!("action.open"), t!("action.pin")]);
     }
 
     #[test]
@@ -469,7 +474,10 @@ mod tests {
         );
 
         let titles: Vec<&str> = row.actions.iter().map(|a| a.title.as_str()).collect();
-        assert_eq!(titles, ["Open", "Mark done", "Pin to top"]);
+        assert_eq!(
+            titles,
+            [t!("action.open"), "Mark done".to_string(), t!("action.pin")]
+        );
         let marked = row.actions.iter().find(|a| a.default).unwrap();
         assert_eq!(marked.id.as_deref(), Some("done"));
         assert_eq!(marked.plugin.as_deref(), Some("todo"));
@@ -575,7 +583,7 @@ mod tests {
         // the row's own command leads the panel, owned by the plugin so the
         // panel can make it the default again
         let open = &row.actions[0];
-        assert_eq!(open.title, "Open");
+        assert_eq!(open.title, t!("action.open"));
         assert!(open.id.is_none());
         assert_eq!(open.plugin.as_deref(), Some("file-search"));
         assert!(matches!(
@@ -618,6 +626,10 @@ mod tests {
             ),
         );
         assert!(row.actions.iter().all(|a| !a.default));
-        assert_eq!(row.actions[0].title, "Open", "the row command always leads");
+        assert_eq!(
+            row.actions[0].title,
+            t!("action.open"),
+            "the row command always leads"
+        );
     }
 }

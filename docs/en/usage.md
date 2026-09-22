@@ -84,6 +84,19 @@ dot the panel puts on that action, so a list of rows marked that way reads at a
 glance; a long action name is elided. `?` lists each plugin's remembered action
 as `· Enter: <action id>`.
 
+## Language
+
+The interface follows the session's locale, read once at startup: `$LC_ALL`,
+then `$LC_MESSAGES`, then `$LANG`, then `$LANGUAGE`'s first entry, normalised to
+a `locales/<locale>.yml` stem (`zh_CN.UTF-8` → `zh_cn`). English and Simplified
+Chinese ship; a locale with no table of its own falls back to English, and any
+Chinese variant uses the `zh_cn` table. The shell and its core child read the
+same tables, so a row's action names and the footer cannot disagree.
+
+To pin it regardless of the session, set it in the resident unit's environment
+(`Environment=LC_ALL=zh_CN.UTF-8`) and restart the service. Another language is
+one more `locales/<locale>.yml` file with the same keys.
+
 ## Pinned results
 
 **Pin to top** stores the row under the exact query it was pinned on — the whole

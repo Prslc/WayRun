@@ -142,6 +142,10 @@ keyword+space identity hint. The hint stays otherwise:
 
 - host without `top` (unknown method `-32601`) or a failing handler
   (`-32603`) → identity card from `list_plugins` (`name` + `description`)
+
+The core translates its own strings (action titles, the launcher's help line);
+whatever a host sends is relayed as it is, so a host owns the language of its
+identity and its rows.
 - empty result list → same identity card, as the plugin's empty state
 
 ## Result items

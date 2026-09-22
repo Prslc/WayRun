@@ -272,7 +272,7 @@ pub async fn list_plugins() -> Vec<(String, String, String, String, bool)> {
                 let m = entry.plugin.meta();
                 (
                     p.id.clone(),
-                    m.name.to_string(),
+                    m.name.clone(),
                     m.icon.to_string(),
                     keyword,
                     p.enabled,
@@ -281,7 +281,7 @@ pub async fn list_plugins() -> Vec<(String, String, String, String, bool)> {
                 let m = crate::provider::web::meta_for(&crate::config::web_search_engine());
                 (
                     p.id.clone(),
-                    m.name.to_string(),
+                    m.name.clone(),
                     m.icon.to_string(),
                     keyword,
                     p.enabled,
@@ -290,7 +290,7 @@ pub async fn list_plugins() -> Vec<(String, String, String, String, bool)> {
                 // disabled built-in: still listed from the compiled map
                 (
                     p.id.clone(),
-                    meta.name.to_string(),
+                    meta.name.clone(),
                     meta.icon.to_string(),
                     keyword,
                     p.enabled,

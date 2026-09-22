@@ -8,17 +8,28 @@ use std::collections::HashSet;
 
 use crate::plugin::{Meta, Plugin};
 use crate::wire::{Action, ResultItem};
+use rust_i18n::t;
 
-pub struct Runner;
+pub struct Runner {
+    meta: Meta,
+}
+
+impl Runner {
+    pub fn new() -> Self {
+        Self {
+            meta: Meta {
+                id: "runner",
+                name: t!("plugin.runner.name"),
+                icon: "builtin:terminal",
+                ready: t!("plugin.runner.ready"),
+            },
+        }
+    }
+}
 
 impl Plugin for Runner {
     fn meta(&self) -> &Meta {
-        &Meta {
-            id: "runner",
-            name: "Run Action",
-            icon: "builtin:terminal",
-            ready: "Run an executable on PATH",
-        }
+        &self.meta
     }
 
     fn search(

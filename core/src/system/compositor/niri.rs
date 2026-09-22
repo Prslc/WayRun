@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use super::{Compositor, Window};
+use rust_i18n::t;
 
 pub struct Niri;
 
@@ -57,7 +58,7 @@ impl From<RawWindow> for Window {
         Window {
             id: w.id.to_string(),
             title: if title.is_empty() {
-                "Untitled".to_string()
+                t!("window.untitled")
             } else {
                 title
             },
@@ -101,7 +102,7 @@ mod tests {
         let json = r#"[{"id":1,"title":"  ","app_id":"firefox"},{"id":2,"title":""}]"#;
         let windows = parse(json);
         assert_eq!(windows[0].title, "firefox");
-        assert_eq!(windows[1].title, "Untitled");
+        assert_eq!(windows[1].title, t!("window.untitled"));
     }
 
     #[test]

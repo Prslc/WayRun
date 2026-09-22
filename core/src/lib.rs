@@ -1,6 +1,11 @@
 use anyhow::Result;
 
+// The launcher's strings, shared with the shell: both crates read the same
+// tables, so one locale covers the core's rows and the shell's own chrome.
+rust_i18n::i18n!("../locales", fallback = "en");
+
 pub mod config;
+pub mod i18n;
 mod notify;
 mod plugin;
 mod protocol;
@@ -31,6 +36,7 @@ async fn serve_or_list() -> Result<()> {
 /// Run the core on stdin/stdout. `wayrun --core` (or invoking the binary as
 /// `wayrun-core`) calls this and blocks for the process's life.
 pub fn run() -> Result<()> {
+    i18n::init();
     // Before the runtime exists: the env write must be single-threaded.
     system::fs::ensure_flatpak_data_dirs();
     system::icon::warn_if_no_icon_theme();

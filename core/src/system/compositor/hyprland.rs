@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use super::{Compositor, Window};
+use rust_i18n::t;
 
 pub struct Hyprland;
 
@@ -92,7 +93,7 @@ impl From<RawClient> for Window {
         Window {
             id: client.address,
             title: if title.is_empty() {
-                "Untitled".to_string()
+                t!("window.untitled")
             } else {
                 title
             },
@@ -148,7 +149,7 @@ mod tests {
         let windows = parse(json);
         assert_eq!(windows[0].title, "firefox");
         assert_eq!(windows[1].title, "kitty");
-        assert_eq!(windows[2].title, "Untitled");
+        assert_eq!(windows[2].title, t!("window.untitled"));
         assert_eq!(windows[2].app_id, None);
     }
 

@@ -8,6 +8,7 @@ use tokio::process::Command;
 use crate::plugin::{Meta, Plugin};
 use crate::system::icon::host_icon_path;
 use crate::wire::{Action, ResultItem};
+use rust_i18n::t;
 
 /// Identity of one plugin as described by an external host's `list_plugins`.
 /// The host owns its own name/icon/ready hint; the core just relays them.
@@ -41,7 +42,7 @@ pub struct External {
 }
 
 /// The registry is built once per process, so these small strings live exactly
-/// the process lifetime that `Meta`'s `&'static str` requires.
+/// the process lifetime that `Meta`'s `&'static str` fields require.
 fn leak(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
 }
@@ -55,7 +56,7 @@ impl External {
             None => (
                 id.to_string(),
                 String::new(),
-                format!("External plugin via {command}"),
+                t!("plugin.external.ready", command = command),
             ),
         };
         // A symbolic identity icon is a miss: a host ships its own absolute paths.
@@ -63,9 +64,9 @@ impl External {
         Self {
             meta: Meta {
                 id: leak(id.to_string()),
-                name: leak(name),
+                name,
                 icon: leak(icon),
-                ready: leak(ready),
+                ready,
             },
             command,
         }

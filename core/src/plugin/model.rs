@@ -25,9 +25,9 @@ const fn default_enabled() -> bool {
 
 pub struct Meta {
     pub id: &'static str,
-    pub name: &'static str,
+    pub name: String,
     pub icon: &'static str,
-    pub ready: &'static str,
+    pub ready: String,
 }
 
 #[derive(Clone)]

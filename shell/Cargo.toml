@@ -23,6 +23,7 @@ cosmic-text = "0.15"
 env_logger = { version = "0.11", default-features = false }
 libc = "0.2"
 notify = "8.2"
+rust-i18n = { version = "1.2.2", default-features = false }
 # Icons are paths, never text: the default `text`/`system-fonts` features would
 # build and load a system font database for every `Options::default()`, which
 # maps tens of MB of font files the shell never draws with.

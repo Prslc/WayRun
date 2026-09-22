@@ -13,6 +13,7 @@ use crate::plugin::{Meta, Plugin};
 use crate::system::fs::get_home;
 use crate::system::icon::resolve;
 use crate::wire::{Action, ActionItem, ResultItem};
+use rust_i18n::t;
 
 use super::copy_url_action;
 
@@ -182,17 +183,27 @@ async fn do_search(mode: Mode, query: &str) -> Result<Vec<ResultItem>> {
 }
 
 macro_rules! firefox_plugin {
-    ($name:ident, $mode:ident, $id:literal, $display:literal, $icon:literal, $ready:literal) => {
-        pub struct $name;
+    ($name:ident, $mode:ident, $id:literal, $display:expr, $icon:literal, $ready:expr) => {
+        pub struct $name {
+            meta: Meta,
+        }
+
+        impl $name {
+            pub fn new() -> Self {
+                Self {
+                    meta: Meta {
+                        id: $id,
+                        name: $display,
+                        icon: $icon,
+                        ready: $ready,
+                    },
+                }
+            }
+        }
 
         impl Plugin for $name {
             fn meta(&self) -> &Meta {
-                &Meta {
-                    id: $id,
-                    name: $display,
-                    icon: $icon,
-                    ready: $ready,
-                }
+                &self.meta
             }
 
             fn search(
@@ -215,17 +226,17 @@ firefox_plugin!(
     FirefoxBookmarks,
     Bookmarks,
     "firefox-bookmarks",
-    "Firefox Bookmarks",
+    t!("plugin.bookmarks.name"),
     "builtin:bookmark",
-    "Search Firefox bookmarks"
+    t!("plugin.bookmarks.ready")
 );
 firefox_plugin!(
     FirefoxHistory,
     History,
     "firefox-history",
-    "Firefox History",
+    t!("plugin.history.name"),
     "builtin:clock",
-    "Search Firefox history"
+    t!("plugin.history.ready")
 );
 
 #[cfg(test)]

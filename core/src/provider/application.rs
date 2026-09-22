@@ -10,6 +10,7 @@ use gio::prelude::{AppInfoExt, IconExt};
 use crate::plugin::{Meta, Plugin};
 use crate::system::icon::resolve;
 use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
+use rust_i18n::t;
 
 // Tiered weights: a strong textual tier wins outright and fuzzy matching is a
 // last resort for 3+ char queries, so a short query hits a strong tier or misses.
@@ -108,16 +109,26 @@ pub fn desktop_id_for_exec(executable: &str) -> Option<&'static str> {
         .map(|app| app.id.as_str())
 }
 
-pub struct AppSearch;
+pub struct AppSearch {
+    meta: Meta,
+}
+
+impl AppSearch {
+    pub fn new() -> Self {
+        Self {
+            meta: Meta {
+                id: "app-search",
+                name: t!("plugin.app.name"),
+                icon: "builtin:app",
+                ready: t!("plugin.app.ready"),
+            },
+        }
+    }
+}
 
 impl Plugin for AppSearch {
     fn meta(&self) -> &Meta {
-        &Meta {
-            id: "app-search",
-            name: "Applications",
-            icon: "builtin:app",
-            ready: "Search installed applications",
-        }
+        &self.meta
     }
 
     fn search(

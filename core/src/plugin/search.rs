@@ -3,6 +3,7 @@ use super::model::Meta;
 use super::registry::{REGISTRY, ensure_loaded, resolve_pending};
 use crate::system::icon::find_icon_path;
 use crate::wire::ResultItem;
+use rust_i18n::t;
 
 /// Run a search and surface its action panel: the query's pins are prepended
 /// and every row is decorated with its secondary commands.
@@ -34,12 +35,12 @@ async fn search(input: &str) -> Vec<ResultItem> {
             .map(|entry| {
                 let meta = entry.plugin.meta();
                 let usage = if entry.keyword.is_empty() {
-                    "* (default)".to_string()
+                    t!("help.usage_default")
                 } else {
                     format!("{} <query>", entry.keyword)
                 };
                 let default = defaults.get(meta.id).map(String::as_str);
-                identity_card(meta, help_summary(usage, meta.ready, default))
+                identity_card(meta, help_summary(usage, &meta.ready, default))
             })
             .collect();
     }
@@ -64,7 +65,7 @@ async fn search(input: &str) -> Vec<ResultItem> {
                 return fill_icons(entry.plugin.meta().icon, items);
             }
             let meta = entry.plugin.meta();
-            return vec![identity_card(meta, meta.ready.to_string())];
+            return vec![identity_card(meta, meta.ready.clone())];
         }
 
         for entry in reg.iter().filter(|e| e.keyword == keyword) {
@@ -106,15 +107,20 @@ fn fill_icons(meta_icon: &str, mut items: Vec<ResultItem>) -> Vec<ResultItem> {
 /// `Enter` runs when the user has remembered one.
 fn help_summary(usage: String, ready: &str, default: Option<&str>) -> String {
     match default {
-        Some(action_id) => format!("{usage} - {ready} · Enter: {action_id}"),
-        None => format!("{usage} - {ready}"),
+        Some(action) => t!(
+            "help.line_default",
+            usage = usage,
+            ready = ready,
+            action = action
+        ),
+        None => t!("help.line", usage = usage, ready = ready),
     }
 }
 
 /// A plugin's identity card, also its `?` help row and empty default view.
 fn identity_card(meta: &Meta, summary: String) -> ResultItem {
     ResultItem {
-        title: meta.name.to_string(),
+        title: meta.name.clone(),
         summary: Some(summary),
         on_click: None,
         icon: find_icon_path(meta.icon).or_else(|| Some(String::new())),
@@ -139,14 +145,13 @@ mod tests {
     #[test]
     fn the_help_line_names_a_remembered_default_action() {
         let usage = || "f <query>".to_string();
-        assert_eq!(
-            help_summary(usage(), "Search files by name or path", None),
-            "f <query> - Search files by name or path"
-        );
-        assert_eq!(
-            help_summary(usage(), "Search files by name or path", Some("terminal")),
-            "f <query> - Search files by name or path · Enter: terminal"
-        );
+        let plain = help_summary(usage(), "Search files by name or path", None);
+        assert!(plain.contains("f <query>"));
+        assert!(plain.contains("Search files by name or path"));
+
+        let marked = help_summary(usage(), "Search files by name or path", Some("terminal"));
+        assert!(marked.contains("terminal"), "{marked}");
+        assert!(marked.len() > plain.len());
     }
 
     #[test]

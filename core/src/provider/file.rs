@@ -10,6 +10,7 @@ use crate::plugin::{Meta, Plugin};
 use crate::system::fs::get_home;
 use crate::system::icon::{find_first_icon_path, resolve};
 use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
+use rust_i18n::t;
 
 /// The icon the system MIME database assigns to `path`. Its themed-icon list is
 /// a priority order, so the first name the theme actually ships wins.
@@ -22,17 +23,27 @@ fn mime_icon(path: &Path) -> Option<String> {
 }
 
 macro_rules! search_plugin {
-    ($name:ident, $id:literal, $display:literal, $icon:literal, $by_name:literal, $dirs:literal, $ready:literal) => {
-        pub struct $name;
+    ($name:ident, $id:literal, $display:expr, $icon:literal, $by_name:literal, $dirs:literal, $ready:expr) => {
+        pub struct $name {
+            meta: Meta,
+        }
+
+        impl $name {
+            pub fn new() -> Self {
+                Self {
+                    meta: Meta {
+                        id: $id,
+                        name: $display,
+                        icon: $icon,
+                        ready: $ready,
+                    },
+                }
+            }
+        }
 
         impl Plugin for $name {
             fn meta(&self) -> &Meta {
-                &Meta {
-                    id: $id,
-                    name: $display,
-                    icon: $icon,
-                    ready: $ready,
-                }
+                &self.meta
             }
 
             fn search(
@@ -75,7 +86,7 @@ fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
     let path = path.to_string_lossy();
     vec![
         ActionItem {
-            title: "Open in terminal".to_string(),
+            title: t!("action.terminal"),
             action: PanelAction::Execute {
                 command: Action::Terminal { uri: uri.clone() },
             },
@@ -85,7 +96,7 @@ fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
             default: false,
         },
         ActionItem {
-            title: "Reveal in file manager".to_string(),
+            title: t!("action.reveal"),
             action: PanelAction::Execute {
                 command: Action::Reveal { uri: uri.clone() },
             },
@@ -95,7 +106,7 @@ fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
             default: false,
         },
         ActionItem {
-            title: "Copy path".to_string(),
+            title: t!("action.copy_path"),
             action: PanelAction::Execute {
                 command: Action::Copy {
                     text: path.into_owned(),
@@ -112,20 +123,20 @@ fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
 search_plugin!(
     FileSearch,
     "file-search",
-    "Files",
+    t!("plugin.file.name"),
     "builtin:file",
     true,
     false,
-    "Search files by name or path"
+    t!("plugin.file.ready")
 );
 search_plugin!(
     PathSearch,
     "path-search",
-    "Directories",
+    t!("plugin.directory.name"),
     "builtin:folder",
     false,
     true,
-    "Search directories by path"
+    t!("plugin.directory.ready")
 );
 
 /// `file-search` cares about the name only; shallower paths break ties.
@@ -323,7 +334,11 @@ mod tests {
         let titles: Vec<&str> = actions.iter().map(|a| a.title.as_str()).collect();
         assert_eq!(
             titles,
-            ["Open in terminal", "Reveal in file manager", "Copy path"],
+            [
+                t!("action.terminal"),
+                t!("action.reveal"),
+                t!("action.copy_path")
+            ],
             "opening leads, so it sits next to the row's own command"
         );
         assert_eq!(

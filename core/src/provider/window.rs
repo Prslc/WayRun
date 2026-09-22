@@ -11,17 +11,28 @@ use crate::system::compositor::{self, Compositor, Window};
 use crate::system::desktop_action;
 use crate::system::executor::shell_join;
 use crate::wire::{Action, ResultItem};
+use rust_i18n::t;
 
-pub struct WindowPlugin;
+pub struct WindowPlugin {
+    meta: Meta,
+}
+
+impl WindowPlugin {
+    pub fn new() -> Self {
+        Self {
+            meta: Meta {
+                id: "window",
+                name: t!("plugin.window.name"),
+                icon: "builtin:window",
+                ready: t!("plugin.window.ready"),
+            },
+        }
+    }
+}
 
 impl Plugin for WindowPlugin {
     fn meta(&self) -> &Meta {
-        &Meta {
-            id: "window",
-            name: "Window",
-            icon: "builtin:window",
-            ready: "Switch open windows",
-        }
+        &self.meta
     }
 
     fn search(

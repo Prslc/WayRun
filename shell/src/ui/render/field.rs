@@ -1,6 +1,8 @@
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use cosmic_text::Weight;
+use rust_i18n::t;
 use tiny_skia::Pixmap;
 
 use crate::app::{Hover, State};
@@ -37,6 +39,13 @@ fn text_area(field: Rect) -> (f32, f32) {
     (field.x + TEXT_INSET, field.w - TEXT_INSET - 40.0)
 }
 
+/// The field's placeholder, translated once: it is drawn on every frame of an
+/// empty query.
+fn placeholder_text() -> &'static str {
+    static TEXT: OnceLock<String> = OnceLock::new();
+    TEXT.get_or_init(|| t!("field.placeholder"))
+}
+
 /// How far the query has to be scrolled left for a caret at `caret_x` to stay
 /// inside the text area.
 fn scroll_for(caret_x: f32, area: (f32, f32)) -> f32 {
@@ -64,7 +73,7 @@ pub(super) fn draw_query(
 
     let placeholder = state.query.is_empty() && state.preedit.is_none();
     if placeholder {
-        let shaped = text.shape("Search apps, files, web...", size, Weight::MEDIUM);
+        let shaped = text.shape(placeholder_text(), size, Weight::MEDIUM);
         let top = field.center_y() - shaped.height / (2.0 * canvas.scale);
         text.draw(
             pixmap,

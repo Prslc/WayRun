@@ -13,6 +13,7 @@ use std::collections::HashMap;
 
 use crate::plugin::Plugin;
 use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
+use rust_i18n::t;
 
 /// The common tail every scored provider shares: strongest score first,
 /// optionally one row per title, capped at `max` results.
@@ -53,7 +54,7 @@ pub fn copy_url_action(item: &ResultItem) -> Vec<ActionItem> {
         return Vec::new();
     }
     vec![ActionItem {
-        title: "Copy URL".to_string(),
+        title: t!("action.copy_url"),
         action: PanelAction::Execute {
             command: Action::Copy { text: uri.clone() },
         },
@@ -66,16 +67,19 @@ pub fn copy_url_action(item: &ResultItem) -> Vec<ActionItem> {
 
 pub fn plugin_map() -> HashMap<&'static str, Box<dyn Plugin>> {
     let mut m: HashMap<&'static str, Box<dyn Plugin>> = HashMap::default();
-    m.insert("calculator", Box::new(calculator::Calculator));
-    m.insert("app-search", Box::new(application::AppSearch));
-    m.insert("firefox-bookmarks", Box::new(firefox::FirefoxBookmarks));
-    m.insert("firefox-history", Box::new(firefox::FirefoxHistory));
-    m.insert("file-search", Box::new(file::FileSearch));
-    m.insert("path-search", Box::new(file::PathSearch));
-    m.insert("clipboard", Box::new(clipboard::Clipboard));
-    m.insert("system-commands", Box::new(system::SystemCommands));
-    m.insert("runner", Box::new(runner::Runner));
-    m.insert("window", Box::new(window::WindowPlugin));
+    m.insert("calculator", Box::new(calculator::Calculator::new()));
+    m.insert("app-search", Box::new(application::AppSearch::new()));
+    m.insert(
+        "firefox-bookmarks",
+        Box::new(firefox::FirefoxBookmarks::new()),
+    );
+    m.insert("firefox-history", Box::new(firefox::FirefoxHistory::new()));
+    m.insert("file-search", Box::new(file::FileSearch::new()));
+    m.insert("path-search", Box::new(file::PathSearch::new()));
+    m.insert("clipboard", Box::new(clipboard::Clipboard::new()));
+    m.insert("system-commands", Box::new(system::SystemCommands::new()));
+    m.insert("runner", Box::new(runner::Runner::new()));
+    m.insert("window", Box::new(window::WindowPlugin::new()));
     m
 }
 
@@ -101,7 +105,7 @@ mod tests {
             uri: "https://example.com".to_string(),
         })));
         assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].title, "Copy URL");
+        assert_eq!(actions[0].title, t!("action.copy_url"));
         assert_eq!(
             actions[0].action,
             PanelAction::Execute {

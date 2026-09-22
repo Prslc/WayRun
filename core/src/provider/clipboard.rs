@@ -6,17 +6,28 @@ use crate::plugin::{Meta, Plugin};
 use crate::system::icon::resolve;
 use crate::wire::{Action, ResultItem};
 use anyhow::Result;
+use rust_i18n::t;
 
-pub struct Clipboard;
+pub struct Clipboard {
+    meta: Meta,
+}
+
+impl Clipboard {
+    pub fn new() -> Self {
+        Self {
+            meta: Meta {
+                id: "clipboard",
+                name: t!("plugin.clipboard.name"),
+                icon: "builtin:clipboard",
+                ready: t!("plugin.clipboard.ready"),
+            },
+        }
+    }
+}
 
 impl Plugin for Clipboard {
     fn meta(&self) -> &Meta {
-        &Meta {
-            id: "clipboard",
-            name: "Clipboard History",
-            icon: "builtin:clipboard",
-            ready: "Search clipboard history",
-        }
+        &self.meta
     }
 
     fn search(

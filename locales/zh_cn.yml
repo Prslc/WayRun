@@ -1,0 +1,76 @@
+# 界面文案的简体中文翻译。键与 `en.yml` 一一对应；缺一个键就会退回英文。
+#
+# 语言标签取文件名（`locales/zh_cn.yml` → `zh_cn`），由 `$LC_ALL`、`$LC_MESSAGES`、
+# `$LANG` 推导；任何 `zh_*` 变体都读这一份表。
+
+plugin.calculator.name: 计算器
+plugin.calculator.ready: 输入数学表达式
+
+plugin.app.name: 应用
+plugin.app.ready: 搜索已安装的应用
+
+plugin.clipboard.name: 剪贴板历史
+plugin.clipboard.ready: 搜索剪贴板历史
+
+plugin.file.name: 文件
+plugin.file.ready: 按名称或路径搜索文件
+
+plugin.directory.name: 目录
+plugin.directory.ready: 按路径搜索目录
+
+plugin.bookmarks.name: 书签
+plugin.bookmarks.ready: 搜索 Firefox 书签
+
+plugin.history.name: 历史记录
+plugin.history.ready: 搜索 Firefox 历史记录
+
+plugin.runner.name: 运行命令
+plugin.runner.ready: 运行 PATH 中的可执行文件
+
+plugin.system.name: 系统命令
+plugin.system.ready: 搜索系统命令
+
+plugin.window.name: 窗口
+plugin.window.ready: 切换已打开的窗口
+
+plugin.web.ready: 搜索 %{engine} 建议词
+plugin.web.summary: 在 %{engine} 上搜索
+plugin.web.search: "搜索：%{query}"
+
+plugin.external.ready: 来自 %{command} 的外部插件
+
+command.lock: 锁定
+command.suspend: 挂起
+command.reboot: 重启
+command.shutdown: 关机
+command.logout: 注销
+
+action.open: 打开
+action.pin: 置顶
+action.unpin: 取消置顶
+action.remove_history: 从历史记录中移除
+action.copy_url: 复制链接
+action.copy_path: 复制路径
+action.reveal: 在文件管理器中显示
+action.terminal: 在终端中打开
+
+help.usage_default: "*（默认）"
+help.line: "%{usage} - %{ready}"
+help.line_default: "%{usage} - %{ready} · Enter: %{action}"
+
+window.untitled: 无标题
+
+field.placeholder: 搜索应用、文件、网页…
+
+footer.launch: 打开
+footer.actions: 动作
+footer.run: 运行
+footer.default: 设为默认
+footer.clear_default: 清除默认
+footer.back: 返回
+footer.help: 输入 ? 查看帮助
+footer.no_results: 无匹配结果
+footer.count_action_one: 1 个动作
+footer.count_action_many: "%{count} 个动作"
+footer.count_result_one: 1 条结果
+footer.count_result_many: "%{count} 条结果"

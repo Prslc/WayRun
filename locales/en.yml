@@ -1,0 +1,77 @@
+# Every string the launcher shows. `zh_cn.yml` must define the same keys, and
+# every `t!` key in the sources must appear here; a guard test checks both.
+#
+# The locale is the file stem: `locales/<locale>.yml`, and a locale with no file
+# of its own reads this one (`i18n!("../locales", fallback = "en")`).
+
+plugin.calculator.name: Calculator
+plugin.calculator.ready: Enter a math expression
+
+plugin.app.name: Applications
+plugin.app.ready: Search installed applications
+
+plugin.clipboard.name: Clipboard History
+plugin.clipboard.ready: Search clipboard history
+
+plugin.file.name: Files
+plugin.file.ready: Search files by name or path
+
+plugin.directory.name: Directories
+plugin.directory.ready: Search directories by path
+
+plugin.bookmarks.name: Bookmarks
+plugin.bookmarks.ready: Search Firefox bookmarks
+
+plugin.history.name: History
+plugin.history.ready: Search Firefox history
+
+plugin.runner.name: Run Action
+plugin.runner.ready: Run an executable on PATH
+
+plugin.system.name: System Commands
+plugin.system.ready: Search system commands
+
+plugin.window.name: Window
+plugin.window.ready: Switch open windows
+
+plugin.web.ready: Search %{engine} suggestions
+plugin.web.summary: Search on %{engine}
+plugin.web.search: "Search: %{query}"
+
+plugin.external.ready: External plugin via %{command}
+
+command.lock: Lock
+command.suspend: Suspend
+command.reboot: Reboot
+command.shutdown: Shutdown
+command.logout: Logout
+
+action.open: Open
+action.pin: Pin to top
+action.unpin: Unpin
+action.remove_history: Remove from history
+action.copy_url: Copy URL
+action.copy_path: Copy path
+action.reveal: Reveal in file manager
+action.terminal: Open in terminal
+
+help.usage_default: "* (default)"
+help.line: "%{usage} - %{ready}"
+help.line_default: "%{usage} - %{ready} · Enter: %{action}"
+
+window.untitled: Untitled
+
+field.placeholder: Search apps, files, web...
+
+footer.launch: Launch
+footer.actions: Actions
+footer.run: Run
+footer.default: Default
+footer.clear_default: Clear default
+footer.back: Back
+footer.help: Type ? for help
+footer.no_results: No results
+footer.count_action_one: 1 action
+footer.count_action_many: "%{count} actions"
+footer.count_result_one: 1 result
+footer.count_result_many: "%{count} results"

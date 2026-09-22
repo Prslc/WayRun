@@ -4,16 +4,17 @@ use std::pin::Pin;
 use crate::plugin::{Meta, Plugin};
 use crate::wire::{Action, ActionItem, ResultItem};
 use anyhow::{Context, Result};
+use rust_i18n::t;
 
 use super::copy_url_action;
 
 /// One search backend. Every engine answers the Firefox-style suggest payload
 /// (`["query", ["suggestion", …]]`), so the parser is shared.
 struct Engine {
+    /// A brand name, so it stays as it is; it is interpolated into the
+    /// translated strings around it.
     name: &'static str,
     icon: &'static str,
-    ready: &'static str,
-    summary: &'static str,
     /// Search page prefix; the percent-encoded query is appended.
     search_url: &'static str,
     /// Suggest endpoint without `q`, which `with_param` adds encoded.
@@ -23,8 +24,6 @@ struct Engine {
 const GOOGLE: Engine = Engine {
     name: "Google",
     icon: "builtin:globe",
-    ready: "Search Google suggestions",
-    summary: "Search on Google",
     search_url: "https://www.google.com/search?q=",
     suggest_url: "https://suggestqueries.google.com/complete/search?client=firefox",
 };
@@ -32,8 +31,6 @@ const GOOGLE: Engine = Engine {
 const DUCKDUCKGO: Engine = Engine {
     name: "DuckDuckGo",
     icon: "builtin:globe",
-    ready: "Search DuckDuckGo suggestions",
-    summary: "Search on DuckDuckGo",
     search_url: "https://duckduckgo.com/?q=",
     suggest_url: "https://duckduckgo.com/ac/?type=list",
 };
@@ -52,9 +49,9 @@ fn resolve(engine: &str) -> &'static Engine {
 fn meta_of(engine: &Engine) -> Meta {
     Meta {
         id: "web-search",
-        name: engine.name,
+        name: engine.name.to_string(),
         icon: engine.icon,
-        ready: engine.ready,
+        ready: t!("plugin.web.ready", engine = engine.name),
     }
 }
 
@@ -149,9 +146,10 @@ fn do_search(engine: &Engine, query: &str) -> Result<Vec<ResultItem>> {
     // one resolved engine icon shared by every row (header + suggestions)
     let icon = crate::system::icon::resolve(engine.icon);
 
+    let summary = t!("plugin.web.summary", engine = engine.name);
     let mut results = vec![ResultItem {
-        title: format!("Search: {query}"),
-        summary: Some(engine.summary.to_string()),
+        title: t!("plugin.web.search", query = query),
+        summary: Some(summary.clone()),
         on_click: Some(Action::Open {
             uri: result_url(engine, query),
         }),
@@ -170,7 +168,7 @@ fn do_search(engine: &Engine, query: &str) -> Result<Vec<ResultItem>> {
                 .filter_map(|item| item.as_str())
                 .map(|phrase| ResultItem {
                     title: phrase.to_string(),
-                    summary: Some(engine.summary.to_string()),
+                    summary: Some(summary.clone()),
                     on_click: Some(Action::Open {
                         uri: result_url(engine, phrase),
                     }),

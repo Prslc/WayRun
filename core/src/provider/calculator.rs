@@ -5,17 +5,28 @@ use crate::plugin::{Meta, Plugin};
 use crate::system::icon::resolve;
 use crate::wire::ResultItem;
 use anyhow::Result;
+use rust_i18n::t;
 
-pub struct Calculator;
+pub struct Calculator {
+    meta: Meta,
+}
+
+impl Calculator {
+    pub fn new() -> Self {
+        Self {
+            meta: Meta {
+                id: "calculator",
+                name: t!("plugin.calculator.name"),
+                icon: "builtin:calculator",
+                ready: t!("plugin.calculator.ready"),
+            },
+        }
+    }
+}
 
 impl Plugin for Calculator {
     fn meta(&self) -> &Meta {
-        &Meta {
-            id: "calculator",
-            name: "Calculator",
-            icon: "builtin:calculator",
-            ready: "Enter a math expression",
-        }
+        &self.meta
     }
 
     fn search(
