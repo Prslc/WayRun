@@ -7,6 +7,17 @@ key keeps the built-in default shown here. The generated file comments every key
 out, so it lists the options without pinning their current defaults; uncomment
 only what you want to change.
 
+## `[ui]`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `locale` | *(session locale)* | Interface language: a `locales/<locale>.yml` stem such as `zh_cn`, or `en`. Omitted, the launcher follows `$LC_ALL`/`$LC_MESSAGES`/`$LANG`. |
+
+The shell reads `locale` at startup, since it caches its translated chrome, so a
+change takes effect on the next launch
+(`systemctl --user restart wayrun-launcher`). A value with no table of its own
+falls back to English, and a blank value is the same as leaving the key out.
+
 ## `[web_search]`
 
 | Key | Default | Meaning |

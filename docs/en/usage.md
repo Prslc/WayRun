@@ -93,9 +93,11 @@ Chinese ship; a locale with no table of its own falls back to English, and any
 Chinese variant uses the `zh_cn` table. The shell and its core child read the
 same tables, so a row's action names and the footer cannot disagree.
 
-To pin it regardless of the session, set it in the resident unit's environment
-(`Environment=LC_ALL=zh_CN.UTF-8`) and restart the service. Another language is
-one more `locales/<locale>.yml` file with the same keys.
+`config.toml`'s `[ui] locale` pins the language regardless of the session, which
+is what a resident service wants: its unit inherits the session's locale, or none
+at all. Setting `Environment=LC_ALL=zh_CN.UTF-8` in the unit works too. Either
+way the locale is read at startup, so restart the service after a change. Another
+language is one more `locales/<locale>.yml` file with the same keys.
 
 ## Pinned results
 

@@ -1,25 +1,35 @@
 /// The environment variables that name a locale, most specific first.
 const VARS: [&str; 4] = ["LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"];
 
-/// Point the process at the UI locale. The core and the shell both call this at
-/// startup, and the setting is process-global, so a row's action titles and the
-/// shell's own chrome cannot end up in different languages.
+/// Point the process at the UI locale: `config.toml`'s `ui.locale` when it names
+/// one, else the session's. The core and the shell both call this at startup,
+/// and the setting is process-global, so a row's action titles and the shell's
+/// own chrome cannot end up in different languages. A change needs a restart,
+/// since the shell caches its translated chrome.
 pub fn init() {
-    rust_i18n::set_locale(&detect());
+    let configured = crate::config::get().ui.locale;
+    rust_i18n::set_locale(&resolve(&configured, |key| std::env::var(key).ok()));
 }
 
-/// The locale from the environment, normalised to a `locales/*.yml` stem:
-/// `zh_CN.UTF-8` -> `zh_cn`. A locale with no table of its own (`en_US`) reads
-/// `en` through the crate's fallback.
-pub fn detect() -> String {
-    detect_from(|key| std::env::var(key).ok())
+/// The configured locale when it names one, else the session's.
+fn resolve(configured: &str, get: impl Fn(&str) -> Option<String>) -> String {
+    normalize(configured).unwrap_or_else(|| from_env(get))
 }
 
-fn detect_from(get: impl Fn(&str) -> Option<String>) -> String {
-    let raw = VARS
-        .iter()
+/// The locale the session names, most specific variable first; `en` when it
+/// names none.
+fn from_env(get: impl Fn(&str) -> Option<String>) -> String {
+    VARS.iter()
         .find_map(|key| get(key).filter(|value| !value.trim().is_empty()))
-        .unwrap_or_default();
+        .as_deref()
+        .and_then(normalize)
+        .unwrap_or_else(|| "en".to_string())
+}
+
+/// A locale tag as a `locales/*.yml` stem: `zh_CN.UTF-8` -> `zh_cn`. `None` for
+/// an empty value and `en` for `C`/`POSIX`, so a locale with no table of its own
+/// (`en_US`) reads `en` through the crate's fallback.
+fn normalize(raw: &str) -> Option<String> {
     // `LANGUAGE` is a colon-separated list, and any variant may carry a codeset
     // or a modifier, so keep the language tag only.
     let tag = raw
@@ -28,14 +38,17 @@ fn detect_from(get: impl Fn(&str) -> Option<String>) -> String {
         .unwrap_or_default()
         .trim()
         .to_lowercase();
-    if tag.is_empty() || tag == "c" || tag == "posix" {
-        return "en".to_string();
+    if tag.is_empty() {
+        return None;
+    }
+    if tag == "c" || tag == "posix" {
+        return Some("en".to_string());
     }
     // Every Chinese variant reads the one shipped table rather than English.
     if tag.split('_').next() == Some("zh") {
-        return "zh_cn".to_string();
+        return Some("zh_cn".to_string());
     }
-    tag
+    Some(tag)
 }
 
 #[cfg(test)]
@@ -59,24 +72,25 @@ mod tests {
 
     #[test]
     fn a_locale_becomes_a_file_stem() {
-        assert_eq!(detect_from(env(&[("LANG", "zh_CN.UTF-8")])), "zh_cn");
-        assert_eq!(detect_from(env(&[("LANG", "en_US.UTF-8")])), "en_us");
-        assert_eq!(detect_from(env(&[("LANG", "zh_TW.UTF-8")])), "zh_cn");
+        assert_eq!(normalize("zh_CN.UTF-8").as_deref(), Some("zh_cn"));
+        assert_eq!(normalize("en_US.UTF-8").as_deref(), Some("en_us"));
+        assert_eq!(normalize("zh_TW.UTF-8").as_deref(), Some("zh_cn"));
+        assert_eq!(normalize("  "), None);
     }
 
     #[test]
     fn the_most_specific_variable_wins() {
         assert_eq!(
-            detect_from(env(&[("LC_ALL", "zh_CN.UTF-8"), ("LANG", "en_US.UTF-8")])),
+            from_env(env(&[("LC_ALL", "zh_CN.UTF-8"), ("LANG", "en_US.UTF-8")])),
             "zh_cn"
         );
         assert_eq!(
-            detect_from(env(&[("LANG", "en_US.UTF-8"), ("LANGUAGE", "zh_CN:en")])),
+            from_env(env(&[("LANG", "en_US.UTF-8"), ("LANGUAGE", "zh_CN:en")])),
             "en_us"
         );
-        assert_eq!(detect_from(env(&[("LANGUAGE", "zh_CN:en")])), "zh_cn");
+        assert_eq!(from_env(env(&[("LANGUAGE", "zh_CN:en")])), "zh_cn");
         assert_eq!(
-            detect_from(env(&[("LC_ALL", "  "), ("LANG", "zh_CN.UTF-8")])),
+            from_env(env(&[("LC_ALL", "  "), ("LANG", "zh_CN.UTF-8")])),
             "zh_cn"
         );
     }
@@ -185,8 +199,22 @@ mod tests {
 
     #[test]
     fn the_c_locale_is_english() {
-        assert_eq!(detect_from(env(&[])), "en");
-        assert_eq!(detect_from(env(&[("LANG", "C")])), "en");
-        assert_eq!(detect_from(env(&[("LC_ALL", "POSIX")])), "en");
+        assert_eq!(from_env(env(&[])), "en");
+        assert_eq!(from_env(env(&[("LANG", "C")])), "en");
+        assert_eq!(from_env(env(&[("LC_ALL", "POSIX")])), "en");
+    }
+
+    #[test]
+    fn a_configured_locale_beats_the_session() {
+        let session = env(&[("LANG", "en_US.UTF-8")]);
+        assert_eq!(resolve("zh_cn", session), "zh_cn");
+        assert_eq!(
+            resolve("zh_CN.UTF-8", env(&[("LANG", "en_US.UTF-8")])),
+            "zh_cn"
+        );
+        // English can be pinned over a Chinese session
+        assert_eq!(resolve("en", env(&[("LANG", "zh_CN.UTF-8")])), "en");
+        // a blank key is an absent one
+        assert_eq!(resolve("  ", env(&[("LANG", "zh_CN.UTF-8")])), "zh_cn");
     }
 }

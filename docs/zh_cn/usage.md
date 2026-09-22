@@ -77,8 +77,9 @@ cliphist，复制/粘贴需要 `wl-clipboard`。缺少组件时，对应关键�
 目前内置英文与简体中文；没有对应语言表时退回英文，任何 `zh_*` 变体都用简体中文表。前端与后端读
 同一份表，所以结果行的动作名与页脚不会各说各话。
 
-要让语言不随会话变化，在常驻 unit 的环境里设定（`Environment=LC_ALL=zh_CN.UTF-8`）后重启服务。
-新增一门语言就是再加一个键相同的 `locales/<locale>.yml`。
+要让语言不随会话变化，用 `config.toml` 的 `[ui] locale` 固定即可；常驻服务尤其需要它——它的 unit
+要么继承会话的语言环境，要么什么都没有。在 unit 里设 `Environment=LC_ALL=zh_CN.UTF-8` 同样有效。
+两种方式都只在启动时读取，改完需重启服务。新增一门语言就是再加一个键相同的 `locales/<locale>.yml`。
 
 ## 置顶
 

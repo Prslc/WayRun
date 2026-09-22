@@ -1,5 +1,8 @@
 # ~/.config/wayrun/config.toml — every key is optional; commented keys keep the default.
 
+[ui]
+# locale = "zh_cn"             # interface language; omitted follows the session locale
+
 [web_search]
 # engine = "google"             # suggestion backend: google or duckduckgo
 

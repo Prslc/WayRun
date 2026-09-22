@@ -4,9 +4,17 @@ use super::path;
 /// defaults to the compiled-in constant, so an absent file changes nothing.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Config {
+    pub ui: Ui,
     pub web_search: WebSearch,
     pub font: Font,
     pub icon: Icon,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Ui {
+    /// Interface language: a `locales/<locale>.yml` stem such as `zh_cn`; empty
+    /// follows the session's `$LC_ALL`/`$LC_MESSAGES`/`$LANG`.
+    pub locale: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -47,11 +55,18 @@ impl Default for Font {
 #[derive(serde::Deserialize, Default)]
 struct ConfigFile {
     #[serde(default)]
+    ui: UiFile,
+    #[serde(default)]
     web_search: WebSearchFile,
     #[serde(default)]
     font: FontFile,
     #[serde(default)]
     icon: IconFile,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct UiFile {
+    locale: Option<String>,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -86,6 +101,9 @@ impl Config {
     }
 
     fn apply(&mut self, file: ConfigFile) {
+        if let Some(locale) = file.ui.locale.filter(|l| !l.trim().is_empty()) {
+            self.ui.locale = locale;
+        }
         if let Some(engine) = file.web_search.engine {
             self.web_search.engine = engine;
         }
@@ -145,6 +163,13 @@ mod tests {
     #[test]
     fn a_blank_family_keeps_the_default() {
         assert_eq!(parse("[font]\nfamily = \"  \"").font, Font::default());
+    }
+
+    #[test]
+    fn a_locale_is_read_and_a_blank_one_is_absent() {
+        assert_eq!(parse("[ui]\nlocale = \"zh_cn\"").ui.locale, "zh_cn");
+        // a blank key follows the session locale instead of pinning English
+        assert_eq!(parse("[ui]\nlocale = \"  \"").ui, Ui::default());
     }
 
     #[test]
