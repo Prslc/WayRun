@@ -2,7 +2,7 @@
 
 # WayRun
 
-<img src="images/application_default.png" alt="App Icon" width="150" height="150"><br>
+<img src="images/logo.svg" alt="App Icon" width="150" height="150"><br>
 
 English | [Chinese](docs/zh_cn/README_CN.md)
 

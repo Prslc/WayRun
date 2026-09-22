@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="100%" height="100%">
+  <!-- Trail steps 0.6 apart at rest, which centres the painted extent with
+       equal 1.43-unit margins; the peak spread still clears the left edge. -->
+  <g fill="none" stroke="#8ab4f8" stroke-width="2.9" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Each echo peaks after the one inside it (0.26 / 0.33 / 0.40), rising
+         fast into a long glide back, so the blur unfurls outward. -->
+    <g transform="translate(3.15 0)" opacity="0.16">
+      <path d="M4.2 6 8.2 18 12 10.2 15.8 18 19.8 6" transform="skewX(-22)"/>
+      <animateTransform attributeName="transform" type="translate" values="3.15 0; 2.9 0; 3.15 0"
+                        keyTimes="0; 0.26; 1" calcMode="spline" keySplines="0.35 0 0.85 1; 0 0 0.25 1"
+                        dur="4.2s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.16; 0.34; 0.16" keyTimes="0; 0.26; 1"
+               calcMode="spline" keySplines="0.35 0 0.85 1; 0 0 0.25 1" dur="4.2s" repeatCount="indefinite"/>
+    </g>
+    <g transform="translate(2.55 0)" opacity="0.36">
+      <path d="M4.2 6 8.2 18 12 10.2 15.8 18 19.8 6" transform="skewX(-22)"/>
+      <animateTransform attributeName="transform" type="translate" values="2.55 0; 2.05 0; 2.55 0"
+                        keyTimes="0; 0.33; 1" calcMode="spline" keySplines="0.35 0 0.85 1; 0 0 0.25 1"
+                        dur="4.2s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.36; 0.56; 0.36" keyTimes="0; 0.33; 1"
+               calcMode="spline" keySplines="0.35 0 0.85 1; 0 0 0.25 1" dur="4.2s" repeatCount="indefinite"/>
+    </g>
+    <g transform="translate(1.95 0)" opacity="0.66">
+      <path d="M4.2 6 8.2 18 12 10.2 15.8 18 19.8 6" transform="skewX(-22)"/>
+      <animateTransform attributeName="transform" type="translate" values="1.95 0; 1.2 0; 1.95 0"
+                        keyTimes="0; 0.4; 1" calcMode="spline" keySplines="0.35 0 0.85 1; 0 0 0.25 1"
+                        dur="4.2s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0.66; 0.84; 0.66" keyTimes="0; 0.4; 1"
+               calcMode="spline" keySplines="0.35 0 0.85 1; 0 0 0.25 1" dur="4.2s" repeatCount="indefinite"/>
+    </g>
+    <path d="M4.2 6 8.2 18 12 10.2 15.8 18 19.8 6" stroke="#1a73e8" transform="translate(3.75 0) skewX(-22)"/>
+  </g>
+</svg>

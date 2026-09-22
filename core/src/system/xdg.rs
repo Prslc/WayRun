@@ -167,7 +167,7 @@ mod tests {
     fn a_bundled_resource_is_found_up_from_the_binary() {
         // The test binary lives under the workspace's target dir, so the
         // `images/` tree at the root is reachable by walking up from it.
-        let p = resource_path("images/application_default.png");
-        assert!(p.is_some_and(|p| p.ends_with("images/application_default.png")));
+        let p = resource_path("images/logo.svg");
+        assert!(p.is_some_and(|p| p.ends_with("images/logo.svg")));
     }
 }

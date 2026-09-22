@@ -2,7 +2,7 @@
 
 # WayRun
 
-<img src="../../images/application_default.png" alt="appicon" width="150" height="150"><br>
+<img src="../../images/logo.svg" alt="App Icon" width="150" height="150"><br>
 
 中文 | [English](../../README.md)
 
