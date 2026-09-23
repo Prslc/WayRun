@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::plugin::{Meta, Plugin};
+use crate::plugin::{Match, Meta, Plugin, Rank, Ranked};
 use crate::system::icon::find_icon_path;
 use crate::wire::{Action, ResultItem};
 use anyhow::Result;
@@ -35,11 +35,26 @@ impl Plugin for SystemCommands {
         full: &str,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<ResultItem>>> + Send + '_>> {
         let input = full.to_lowercase();
+        Box::pin(async move {
+            Ok(do_search(&input)
+                .into_iter()
+                .map(|(_, item)| item)
+                .collect())
+        })
+    }
+
+    /// A command the query spells whole is `Exact`, a prefix of one `Prefix`.
+    fn search_ranked(
+        &self,
+        _query: &str,
+        full: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<Ranked>> + Send + '_>> {
+        let input = full.to_lowercase();
         Box::pin(async move { Ok(do_search(&input)) })
     }
 }
 
-fn do_search(input: &str) -> Vec<ResultItem> {
+fn do_search(input: &str) -> Vec<(Rank, ResultItem)> {
     if input.is_empty() {
         return vec![];
     }
@@ -79,23 +94,33 @@ fn do_search(input: &str) -> Vec<ResultItem> {
         ),
     ];
 
-    // Prefix match only: the fallback chain short-circuits on the first non-empty
-    // plugin, so a mid-word hit would shadow app-search.
+    // Prefix only: the five commands are fixed, so a mid-word hit ("ock") is
+    // noise rather than a match.
     commands
         .iter()
         .filter(|(name, keyword, _, _)| {
             name.to_lowercase().starts_with(input) || keyword.starts_with(input)
         })
-        .map(|(name, _, icon, cmd)| ResultItem {
-            title: name.clone(),
-            summary: Some(cmd.to_string()),
-            on_click: Some(Action::Run {
-                cmd: (*cmd).to_string(),
-            }),
-            icon: find_icon_path(icon),
-            ephemeral: true,
-            actions: Vec::new(),
-            badge: None,
+        .map(|(name, keyword, icon, cmd)| {
+            let kind = if name.to_lowercase() == input || *keyword == input {
+                Match::Exact
+            } else {
+                Match::Prefix
+            };
+            (
+                Rank::title(kind),
+                ResultItem {
+                    title: name.clone(),
+                    summary: Some(cmd.to_string()),
+                    on_click: Some(Action::Run {
+                        cmd: (*cmd).to_string(),
+                    }),
+                    icon: find_icon_path(icon),
+                    ephemeral: true,
+                    actions: Vec::new(),
+                    badge: None,
+                },
+            )
         })
         .collect()
 }
@@ -111,7 +136,7 @@ mod tests {
 
     #[test]
     fn prefix_matches_by_name_or_keyword() {
-        assert_eq!(do_search("re")[0].title, t!("command.reboot"));
-        assert_eq!(do_search("susp")[0].title, t!("command.suspend"));
+        assert_eq!(do_search("re")[0].1.title, t!("command.reboot"));
+        assert_eq!(do_search("susp")[0].1.title, t!("command.suspend"));
     }
 }

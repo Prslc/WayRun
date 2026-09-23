@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, LazyLock, Mutex};
-use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
+use crate::plugin::{Match, classify};
 use crate::plugin::{Meta, Plugin};
-use crate::provider::rank_results;
+use crate::provider::{FreshCache, rank_results};
 use crate::system::compositor::{self, Compositor, Window};
 use crate::system::desktop_action;
 use crate::system::executor::shell_join;
@@ -50,18 +50,12 @@ impl Plugin for WindowPlugin {
     }
 }
 
-/// A typing burst shares one `niri msg` round trip; a stale row's focus is a
-/// harmless no-op, so a short lag is fine.
-const CACHE_TTL: Duration = Duration::from_millis(500);
-
-/// A window with the match forms a search needs, so a keystroke never re-lowers
-/// a title or re-encodes a nucleo key.
+/// A window with its lowercased title and app id, so a keystroke never re-lowers
+/// a title.
 struct CachedWindow {
     window: Window,
     title_lower: String,
-    title_key: nucleo::Utf32String,
     app_lower: Option<String>,
-    app_key: Option<nucleo::Utf32String>,
 }
 
 impl CachedWindow {
@@ -69,8 +63,6 @@ impl CachedWindow {
         let title_lower = window.title.to_lowercase();
         let app_lower = window.app_id.as_deref().map(str::to_lowercase);
         Self {
-            title_key: nucleo::Utf32String::from(title_lower.as_str()),
-            app_key: app_lower.as_deref().map(nucleo::Utf32String::from),
             window,
             title_lower,
             app_lower,
@@ -78,30 +70,15 @@ impl CachedWindow {
     }
 }
 
-/// The cached window list and when it was fetched.
-type WindowCache = Mutex<Option<(Instant, Arc<Vec<CachedWindow>>)>>;
+/// The compositor's window list, shared across a typing burst, so one `niri
+/// msg` round trip serves the whole burst.
+static WINDOWS: LazyLock<FreshCache<CachedWindow>> = LazyLock::new(FreshCache::new);
 
-static WINDOWS: LazyLock<WindowCache> = LazyLock::new(|| Mutex::new(None));
-
-/// The compositor's windows from a short-lived cache, so a burst of keystrokes
-/// does not shell out to the compositor on every one.
 fn cached_windows(compositor: &dyn Compositor) -> Option<Arc<Vec<CachedWindow>>> {
-    let mut cache = WINDOWS.lock().unwrap_or_else(|err| err.into_inner());
-    if let Some((at, windows)) = cache.as_ref()
-        && at.elapsed() < CACHE_TTL
-    {
-        return Some(Arc::clone(windows));
-    }
-    let windows = Arc::new(
-        compositor
-            .windows()
-            .ok()?
-            .into_iter()
-            .map(CachedWindow::new)
-            .collect(),
-    );
-    *cache = Some((Instant::now(), Arc::clone(&windows)));
-    Some(windows)
+    WINDOWS.get(|| {
+        let windows = compositor.windows().ok()?;
+        Some(windows.into_iter().map(CachedWindow::new).collect())
+    })
 }
 
 /// Fuzzy-match the query against every open window's title/app_id and emit a
@@ -119,12 +96,10 @@ fn do_search(query: &str) -> Vec<ResultItem> {
     };
 
     let query = query.to_lowercase();
-    let mut matcher = nucleo::Matcher::new(nucleo::Config::DEFAULT);
-    let pattern = nucleo::Utf32String::from(query.as_str());
     let mut results: Vec<(u32, ResultItem)> = Vec::new();
 
     for cached in windows.iter() {
-        let score = score_window(cached, &query, &pattern, &mut matcher);
+        let score = score_window(cached, &query);
         if score > 0 {
             results.push((score, row(compositor, &cached.window)));
         }
@@ -133,29 +108,15 @@ fn do_search(query: &str) -> Vec<ResultItem> {
     rank_results(results, false, 50)
 }
 
-/// Title and app_id each get a name tier; the strongest tier dominates and the
-/// fuzzy score breaks ties and matches a mere subsequence.
-fn score_window(
-    cached: &CachedWindow,
-    query_lower: &str,
-    pattern: &nucleo::Utf32String,
-    matcher: &mut nucleo::Matcher,
-) -> u32 {
-    let title_fuzzy = matcher
-        .fuzzy_match(cached.title_key.slice(..), pattern.slice(..))
-        .unwrap_or(0) as u32;
-    let app_fuzzy = cached
-        .app_key
-        .as_ref()
-        .and_then(|key| matcher.fuzzy_match(key.slice(..), pattern.slice(..)))
-        .unwrap_or(0) as u32;
-
-    let title_tier = crate::provider::name_tier(&cached.title_lower, query_lower);
-    let app_tier = cached
+/// The strongest kind either surface reaches, so a window whose app id is exact
+/// outranks one whose title merely contains the query.
+fn score_window(cached: &CachedWindow, query_lower: &str) -> u32 {
+    let title = classify(&cached.title_lower, query_lower);
+    let app = cached
         .app_lower
         .as_deref()
-        .map_or(0, |app| crate::provider::name_tier(app, query_lower));
-    title_tier.max(app_tier) * 1000 + title_fuzzy.max(app_fuzzy)
+        .and_then(|app| classify(app, query_lower));
+    title.max(app).map_or(0, Match::weight)
 }
 
 fn row(compositor: &dyn Compositor, window: &Window) -> ResultItem {
@@ -222,12 +183,12 @@ mod tests {
 
     #[test]
     fn a_typing_burst_shells_out_once() {
-        *WINDOWS.lock().unwrap() = None;
         let fake = Counting {
             calls: AtomicUsize::new(0),
         };
-        let first = cached_windows(&fake).unwrap();
-        let second = cached_windows(&fake).unwrap();
+        let cache: FreshCache<Window> = FreshCache::new();
+        let first = cache.get(|| fake.windows().ok()).unwrap();
+        let second = cache.get(|| fake.windows().ok()).unwrap();
         assert!(Arc::ptr_eq(&first, &second));
         assert_eq!(fake.calls.load(Ordering::SeqCst), 1);
     }
@@ -239,9 +200,7 @@ mod tests {
 
     #[test]
     fn an_exact_app_id_outranks_a_title_substring() {
-        let mut matcher = nucleo::Matcher::new(nucleo::Config::DEFAULT);
         let query = "firefox";
-        let pattern = nucleo::Utf32String::from(query);
         let exact = Window {
             id: "1".into(),
             title: "Mozilla Firefox".into(),
@@ -255,8 +214,8 @@ mod tests {
             workspace: None,
         };
         assert!(
-            score_window(&CachedWindow::new(exact), query, &pattern, &mut matcher)
-                > score_window(&CachedWindow::new(substring), query, &pattern, &mut matcher)
+            score_window(&CachedWindow::new(exact), query)
+                > score_window(&CachedWindow::new(substring), query)
         );
     }
 }

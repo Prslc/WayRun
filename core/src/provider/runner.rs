@@ -1,12 +1,14 @@
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::{LazyLock, Mutex};
+use std::sync::LazyLock;
 
 use anyhow::Result;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
+use crate::plugin::{Match, classify_ci};
 use crate::plugin::{Meta, Plugin};
+use crate::provider::application::needs_terminal;
 use crate::wire::{Action, ResultItem};
 use rust_i18n::t;
 
@@ -64,7 +66,6 @@ fn split_command(input: &str) -> (String, String) {
 struct Binary {
     name: String,
     name_lower: String,
-    key: nucleo::Utf32String,
     path: String,
 }
 
@@ -116,7 +117,6 @@ fn scan_path() -> Vec<Binary> {
             if seen.insert(name.to_string()) {
                 let name_lower = name.to_lowercase();
                 out.push(Binary {
-                    key: nucleo::Utf32String::from(name_lower.as_str()),
                     name: name.to_string(),
                     name_lower,
                     path: path.to_string_lossy().into_owned(),
@@ -139,13 +139,6 @@ fn action_for(desktop_id: Option<&str>, terminal: bool, has_args: bool, run_cmd:
     }
 }
 
-/// The row score: a name tier dominates (exact > prefix > substring), the fuzzy
-/// score breaks ties within a tier and is the only match for a subsequence.
-fn score(name_lower: &str, query_lower: &str, fuzzy: u32) -> u32 {
-    let tier = crate::provider::name_tier(name_lower, query_lower);
-    if tier > 0 { tier * 1000 + fuzzy } else { fuzzy }
-}
-
 /// Rows are built only for the winners, so a broad query allocates no row per PATH hit.
 const MAX_RESULTS: usize = 20;
 
@@ -156,20 +149,17 @@ fn do_search(input: &str) -> Vec<ResultItem> {
     }
 
     let query = cmd.to_lowercase();
-    let mut matcher = nucleo::Matcher::new(nucleo::Config::DEFAULT);
-    let pattern = nucleo::Utf32String::from(query.as_str());
 
-    let mut hits: Vec<(u32, &'static Binary)> = Vec::new();
-    for binary in binaries() {
-        let fuzzy = matcher
-            .fuzzy_match(binary.key.slice(..), pattern.slice(..))
-            .unwrap_or(0) as u32;
-        let score = score(&binary.name_lower, &query, fuzzy);
-        if score > 0 {
-            hits.push((score, binary));
-        }
-    }
-    hits.sort_by(|a, b| b.0.cmp(&a.0));
+    // The shared kind ranks first, then the shorter name, so `r cat` leads with
+    // `cat` rather than with every name the letters appear in.
+    let mut hits: Vec<(Match, &Binary)> = binaries()
+        .iter()
+        .filter_map(|binary| classify_ci(&binary.name_lower, &query).map(|kind| (kind, binary)))
+        .collect();
+    hits.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| a.1.name.len().cmp(&b.1.name.len()))
+    });
 
     hits.into_iter()
         .take(MAX_RESULTS)
@@ -198,48 +188,10 @@ fn row_for(binary: &Binary, args: &str) -> ResultItem {
     }
 }
 
-/// Whether the app's entry asks for a terminal, read once per desktop id.
-fn needs_terminal(desktop_id: &str) -> bool {
-    static CACHE: LazyLock<Mutex<HashMap<String, bool>>> =
-        LazyLock::new(|| Mutex::new(HashMap::default()));
-    if let Ok(cache) = CACHE.lock()
-        && let Some(terminal) = cache.get(desktop_id)
-    {
-        return *terminal;
-    }
-    let terminal = crate::system::desktop_action::entry(desktop_id, None)
-        .is_some_and(|entry| entry.terminal());
-    if let Ok(mut cache) = CACHE.lock() {
-        cache.insert(desktop_id.to_string(), terminal);
-    }
-    terminal
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{action_for, score, split_command};
+    use super::{action_for, split_command};
     use crate::wire::Action;
-
-    #[test]
-    fn an_exact_name_outranks_a_higher_scoring_prefix() {
-        assert!(
-            score("cat", "cat", 100) > score("catatonit", "cat", 60_000),
-            "an exact name must beat a prefix however fuzzy scores it"
-        );
-        assert!(
-            score("catatonit", "cat", 0) > score("pw-cat", "cat", 60_000),
-            "a prefix must beat a substring however fuzzy scores it"
-        );
-        assert!(
-            score("pw-cat", "cat", 0) > score("chart", "cat", 60_000),
-            "a substring must beat a mere subsequence however fuzzy scores it"
-        );
-    }
-
-    #[test]
-    fn a_non_matching_name_scores_zero() {
-        assert_eq!(score("ls", "cat", 0), 0);
-    }
 
     #[test]
     fn an_installed_app_launches_through_gio() {

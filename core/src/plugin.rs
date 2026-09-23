@@ -10,6 +10,8 @@ mod search;
 
 pub use actions::{decorate, forget_row};
 pub use model::Meta;
+/// The ranking vocabulary providers and the dispatcher share.
+pub use model::{Match, Rank, Ranked, classify, classify_bytes, classify_ci};
 pub use registry::{list_plugins, print_list, reload, reload_if_changed};
 pub use search::dispatch;
 
@@ -20,6 +22,24 @@ pub trait Plugin: Send + Sync {
         query: &str,
         full: &str,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<ResultItem>>> + Send + '_>>;
+
+    /// A search that reports how each row matched, for a caller that merges
+    /// several providers; the default numbers [`Plugin::search`]'s rows as listed.
+    fn search_ranked(
+        &self,
+        query: &str,
+        full: &str,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Ranked>> + Send + '_>> {
+        let rows = self.search(query, full);
+        Box::pin(async move {
+            Ok(rows
+                .await?
+                .into_iter()
+                .enumerate()
+                .map(|(at, item)| (Rank::Listed(at as u32), item))
+                .collect())
+        })
+    }
     /// Default view for a keyword-only query. `Ok(None)` keeps the identity card;
     /// external hosts override it with their `top` method.
     #[allow(clippy::type_complexity)] // same hand-rolled future type as `search`

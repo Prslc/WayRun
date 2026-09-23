@@ -17,6 +17,33 @@ pub fn get_top(limit: i32) -> Result<Vec<serde_json::Value>> {
     with_db(|conn| get_top_with(conn, limit))
 }
 
+/// The usage counts behind the given action keys, for a caller ordering a whole
+/// payload at once: one query, not one per row.
+pub fn counts(keys: &[String]) -> std::collections::HashMap<String, u32> {
+    if keys.is_empty() {
+        return std::collections::HashMap::default();
+    }
+    with_db(|conn| counts_with(conn, keys)).unwrap_or_default()
+}
+
+fn counts_with(
+    conn: &Connection,
+    keys: &[String],
+) -> Result<std::collections::HashMap<String, u32>> {
+    let placeholders = vec!["?"; keys.len()].join(",");
+    let sql = format!("SELECT on_click, count FROM usage WHERE on_click IN ({placeholders})");
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(keys), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+    })?;
+    let mut counts = std::collections::HashMap::default();
+    for row in rows {
+        let (key, count) = row?;
+        counts.insert(key, count);
+    }
+    Ok(counts)
+}
+
 /// An `ephemeral` row or a `copy` command is not re-launchable and stays out of
 /// history; the field/variant carries the semantics for every source.
 pub(crate) fn is_recordable(ephemeral: bool, command: Option<&Action>) -> bool {

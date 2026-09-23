@@ -10,10 +10,47 @@ pub mod web;
 pub mod window;
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::plugin::Plugin;
 use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
 use rust_i18n::t;
+
+/// Rows a provider shows: the one cap every scored provider passes to
+/// [`rank_results`], so the index and the fallback walk cannot diverge.
+pub const SHOW_CAP: usize = 50;
+
+/// How long a provider's burst cache keeps a fetch: a typing burst shares one
+/// shell-out, and a row a beat stale is harmless.
+pub const BURST_TTL: Duration = Duration::from_millis(500);
+
+/// A provider's short-lived fetch cache, so a burst of keystrokes does not
+/// re-run the same shell-out on every one; failures are never cached.
+pub struct FreshCache<T> {
+    rows: Mutex<Option<(Instant, Arc<Vec<T>>)>>,
+}
+
+impl<T> FreshCache<T> {
+    pub const fn new() -> Self {
+        Self {
+            rows: Mutex::new(None),
+        }
+    }
+
+    /// The cached rows, refetched when stale or empty.
+    pub fn get(&self, fetch: impl FnOnce() -> Option<Vec<T>>) -> Option<Arc<Vec<T>>> {
+        let mut cache = self.rows.lock().unwrap_or_else(|err| err.into_inner());
+        if let Some((at, rows)) = cache.as_ref()
+            && at.elapsed() < BURST_TTL
+        {
+            return Some(Arc::clone(rows));
+        }
+        let rows = Arc::new(fetch()?);
+        *cache = Some((Instant::now(), Arc::clone(&rows)));
+        Some(rows)
+    }
+}
 
 /// The common tail every scored provider shares: strongest score first,
 /// optionally one row per title, capped at `max` results.
@@ -28,54 +65,6 @@ pub fn rank_results<T: Ord>(
     }
     scored.truncate(max);
     scored.into_iter().map(|(_, item)| item).collect()
-}
-
-const TIER_EXACT: u32 = 1000;
-const TIER_PREFIX: u32 = 700;
-const TIER_CONTAINS: u32 = 400;
-
-/// Exact, then prefix, then substring, so a short exact name outranks a longer
-/// name that merely contains the query. Inputs are lowercased.
-pub fn name_tier(name: &str, query: &str) -> u32 {
-    if name == query {
-        TIER_EXACT
-    } else if name.starts_with(query) {
-        TIER_PREFIX
-    } else if name.contains(query) {
-        TIER_CONTAINS
-    } else {
-        0
-    }
-}
-
-/// [`name_tier`] without lowercasing: an ASCII name is compared byte by byte,
-/// and only a non-ASCII one pays for `to_lowercase`.
-pub fn name_tier_ci(name: &str, query: &str) -> u32 {
-    if !name.is_ascii() {
-        return name_tier(&name.to_lowercase(), query);
-    }
-    name_tier_bytes(name.as_bytes(), query.as_bytes())
-}
-
-fn contains_ci(haystack: &[u8], needle: &[u8]) -> bool {
-    !needle.is_empty()
-        && haystack
-            .windows(needle.len())
-            .any(|w| w.eq_ignore_ascii_case(needle))
-}
-
-/// [`name_tier_ci`] over raw name bytes, for a name the caller checked is ASCII:
-/// a byte compare is the same test without building a lowercased string.
-pub fn name_tier_bytes(name: &[u8], query: &[u8]) -> u32 {
-    if name.eq_ignore_ascii_case(query) {
-        TIER_EXACT
-    } else if name.len() >= query.len() && name[..query.len()].eq_ignore_ascii_case(query) {
-        TIER_PREFIX
-    } else if contains_ci(name, query) {
-        TIER_CONTAINS
-    } else {
-        0
-    }
 }
 
 /// Append `s` lowercased without allocating: ASCII goes byte by byte, anything
@@ -133,6 +122,7 @@ pub fn plugin_map() -> HashMap<&'static str, Box<dyn Plugin>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plugin::{Match, classify, classify_bytes, classify_ci};
 
     fn row(on_click: Option<Action>) -> ResultItem {
         ResultItem {
@@ -172,7 +162,7 @@ mod tests {
     }
 
     #[test]
-    fn a_case_insensitive_tier_matches_the_lowered_one() {
+    fn a_case_insensitive_classify_matches_the_lowered_one() {
         for (name, query) in [
             ("WayRun", "wayrun"),
             ("wayrun", "wayrun"),
@@ -186,15 +176,15 @@ mod tests {
             ("", ""),
         ] {
             assert_eq!(
-                name_tier_ci(name, query),
-                name_tier(&name.to_lowercase(), query),
+                classify_ci(name, query),
+                classify(&name.to_lowercase(), query),
                 "{name} / {query}"
             );
         }
     }
 
     #[test]
-    fn the_byte_tier_matches_the_text_tier_for_ascii_names() {
+    fn the_byte_classify_matches_the_text_one_for_ascii_names() {
         for (name, query) in [
             ("WayRun", "wayrun"),
             ("NOTES.txt", "notes.txt"),
@@ -204,11 +194,38 @@ mod tests {
             ("", ""),
         ] {
             assert_eq!(
-                name_tier_bytes(name.as_bytes(), query.as_bytes()),
-                name_tier(&name.to_lowercase(), query),
+                classify_bytes(name.as_bytes(), query.as_bytes()),
+                classify(&name.to_lowercase(), query),
                 "{name} / {query}"
             );
         }
+    }
+
+    /// The vocabulary's order is the contract: no provider may rank a weaker
+    /// kind over a stronger one.
+    #[test]
+    fn the_kinds_read_the_way_the_tiers_always_did() {
+        assert_eq!(classify("telegram", "telegram"), Some(Match::Exact));
+        assert_eq!(classify("telegram", "tele"), Some(Match::Prefix));
+        assert_eq!(
+            classify("dank material shell", "material"),
+            Some(Match::Word)
+        );
+        assert_eq!(classify("libreoffice", "office"), Some(Match::Substring));
+        assert_eq!(classify("chart", "cat"), Some(Match::Loose));
+        assert_eq!(classify("ls", "cat"), None);
+        assert!(Match::Exact > Match::Prefix);
+        assert!(Match::Prefix > Match::Word);
+        assert!(Match::Word > Match::Substring);
+        assert!(Match::Substring > Match::Loose);
+    }
+
+    /// A plain query stops at `Substring`: a scattered coincidence cannot shadow
+    /// every other provider.
+    #[test]
+    fn only_a_confident_kind_answers_a_plain_query() {
+        assert!(Match::Exact.confident() && Match::Substring.confident());
+        assert!(!Match::Loose.confident());
     }
 
     #[test]

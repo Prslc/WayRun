@@ -31,11 +31,17 @@ pub fn write_if_absent(path: &Path, contents: &str) -> std::io::Result<()> {
     file.write_all(contents.as_bytes())
 }
 
-/// Write `<path>.tmp`, then rename: a reader only ever sees a whole file.
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+/// The staging name [`write_atomic`] writes through, so anything cleaning up
+/// after it (a `.tmp` a crash left behind) does not spell the rule its own way.
+pub fn tmp_path(path: &Path) -> PathBuf {
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
-    let tmp = PathBuf::from(tmp);
+    PathBuf::from(tmp)
+}
+
+/// Write `<path>.tmp`, then rename: a reader only ever sees a whole file.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let tmp = tmp_path(path);
     std::fs::write(&tmp, bytes)?;
     std::fs::rename(&tmp, path)
 }

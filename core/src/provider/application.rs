@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::future::Future;
 use std::path::Path;
 use std::pin::Pin;
@@ -7,24 +8,29 @@ use anyhow::Result;
 use freedesktop_desktop_entry::DesktopEntry;
 use gio::prelude::{AppInfoExt, IconExt};
 
-use crate::plugin::{Meta, Plugin};
+use crate::plugin::{Match, Meta, Plugin, Rank, Ranked};
 use crate::system::icon::resolve;
 use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
 use rust_i18n::t;
 
-// Tiered weights: a strong textual tier wins outright and fuzzy matching is a
-// last resort for 3+ char queries, so a short query hits a strong tier or misses.
-const W_EXACT: u32 = 10_000;
-const W_PREFIX: u32 = 5_000;
-const W_WORD_BOUNDARY: u32 = 3_000;
-const W_SUBSTRING: u32 = 500;
-const W_GENERIC_PREFIX: u32 = 800;
-const W_GENERIC: u32 = 400;
-const W_ID: u32 = 350;
-const W_FUZZY: u32 = 100;
-const W_ACTION_EXACT: u32 = 8_000;
-const W_ACTION_PREFIX: u32 = 4_000;
-const W_ACTION_SUBSTRING: u32 = 400;
+// What a match surface is worth, in tenths of the shared kind's weight: a title
+// hit leads an action's own label, then the metadata tails. The merge orders by
+// the product, so a title match beats a description match of comparable
+// strength, while an exact keyword still beats a title hit the query only sits
+// inside of -- neither the surface nor the kind alone gives that.
+const TITLE: u32 = 10;
+const ACTION: u32 = 8;
+const SUMMARY: u32 = 5;
+const KEYWORD: u32 = 3;
+const GENERIC: u32 = 2;
+/// The desktop id is the last resort: its middle spells anything.
+const ID: u32 = 1;
+
+/// The typo tier's weight, under a real title kind but over the metadata tails:
+/// a near spelling is strong evidence of intent, weak evidence of a match.
+const TYPO_WEIGHT: u32 = 400;
+/// The typo tier is a title surface, near or not, only from three characters.
+const TYPO_SIMILARITY: f64 = 0.7;
 
 /// One constant match surface — a name, comment, keyword or generic — with the
 /// forms a query needs precomputed, so scoring never re-lowers or re-tokenizes.
@@ -68,20 +74,14 @@ impl Field {
 /// The lowercased query with its tokens and char form, built once per search.
 struct Query {
     lower: String,
-    words: Vec<String>,
     chars: Vec<char>,
 }
 
 impl Query {
     fn new(text: &str) -> Self {
         let lower = text.to_lowercase();
-        let words = tokenize(&lower);
         let chars = lower.chars().collect();
-        Self {
-            lower,
-            words,
-            chars,
-        }
+        Self { lower, chars }
     }
 }
 
@@ -112,6 +112,8 @@ struct CachedApp {
     /// Basename of the entry's `Exec=`, so the runner can match a PATH hit to a
     /// desktop app without reading every `.desktop` file again.
     exec: Option<String>,
+    /// `Terminal=` of the entry, read here so the runner never reopens it.
+    terminal: bool,
     meta: Option<DesktopMeta>,
     /// The id without its `.desktop` suffix, the last-resort match surface.
     id_field: Field,
@@ -147,6 +149,7 @@ static APPS: LazyLock<Vec<CachedApp>> = LazyLock::new(|| {
                 .map(|s| s.to_string());
             let entry = crate::system::desktop_action::entry(&id, Some(&locales));
             let exec = entry.as_ref().and_then(exec_basename);
+            let terminal = entry.as_ref().is_some_and(DesktopEntry::terminal);
             let meta = entry.as_ref().map(|entry| parse_meta(entry, &locales));
             Some(CachedApp {
                 title_field: Field::new(&title),
@@ -154,6 +157,7 @@ static APPS: LazyLock<Vec<CachedApp>> = LazyLock::new(|| {
                 id_field: Field::new(id.to_lowercase().trim_end_matches(".desktop")),
                 meta,
                 exec,
+                terminal,
                 title,
                 comment,
                 id,
@@ -162,6 +166,14 @@ static APPS: LazyLock<Vec<CachedApp>> = LazyLock::new(|| {
         })
         .collect()
 });
+
+/// Whether the app behind `desktop_id` asks for a terminal, off the entry the
+/// app list already parsed.
+pub(super) fn needs_terminal(desktop_id: &str) -> bool {
+    APPS.iter()
+        .find(|app| app.id == desktop_id)
+        .is_some_and(|app| app.terminal)
+}
 
 /// The desktop id of the app whose `Exec=` names `executable`: a PATH hit that
 /// is an installed app launches through `gio`, so its `Terminal=` decides.
@@ -193,16 +205,35 @@ impl Plugin for AppSearch {
         &self.meta
     }
 
-    fn search(
+    fn search_ranked(
         &self,
         _query: &str,
         full: &str,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<ResultItem>>> + Send + '_>> {
+    ) -> Pin<Box<dyn Future<Output = Result<Ranked>> + Send + '_>> {
+        // The keyword is empty, so the whole input is the query: with no plugin
+        // owning the first word, `foo bar` must match on `foo bar`, not `bar`.
         let input = full.to_string();
         Box::pin(async move {
             Ok(tokio::task::spawn_blocking(move || do_search(&input))
                 .await
                 .unwrap_or_default())
+        })
+    }
+
+    fn search(
+        &self,
+        _query: &str,
+        full: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<ResultItem>>> + Send + '_>> {
+        // the same whole-input rule as `search_ranked`
+        let input = full.to_string();
+        Box::pin(async move {
+            Ok(tokio::task::spawn_blocking(move || do_search(&input))
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(_, item)| item)
+                .collect())
         })
     }
 
@@ -239,137 +270,115 @@ impl Plugin for AppSearch {
     }
 }
 
+/// One scored candidate before its row exists: only the survivors of the cap
+/// pay for the icon lookup a row needs.
+enum Hit {
+    App(&'static CachedApp),
+    Action(&'static CachedApp, &'static DesktopAction),
+}
+
+impl Hit {
+    fn title(&self) -> &str {
+        match self {
+            Hit::App(app) => &app.title,
+            Hit::Action(_, action) => &action.name,
+        }
+    }
+
+    fn row(&self) -> ResultItem {
+        match self {
+            Hit::App(app) => ResultItem {
+                title: app.title.clone(),
+                summary: app.comment.clone(),
+                on_click: Some(Action::Launch {
+                    desktop_id: app.id.clone(),
+                }),
+                icon: app.icon_path(),
+                ephemeral: false,
+                actions: Vec::new(),
+                badge: None,
+            },
+            Hit::Action(app, action) => ResultItem {
+                title: action.name.clone(),
+                summary: Some(app.title.clone()),
+                on_click: Some(Action::DesktopAction {
+                    desktop_id: app.id.clone(),
+                    action_id: action.id.clone(),
+                }),
+                icon: app.icon_path(),
+                ephemeral: false,
+                actions: Vec::new(),
+                badge: None,
+            },
+        }
+    }
+}
+
 /// Score every cached app against the query; the query text is lowercased
 /// and tokenized once, not per app.
-fn do_search(query: &str) -> Vec<ResultItem> {
+fn do_search(query: &str) -> Vec<(Rank, ResultItem)> {
     let query = Query::new(query.trim());
     if query.lower.is_empty() {
         return Vec::new();
     }
 
-    let mut results: Vec<(u32, ResultItem)> = Vec::new();
+    let mut scored: Vec<(u32, Hit)> = Vec::new();
     for app in APPS.iter() {
-        let score = score_app(
+        let app_score = score_app(
             &app.title_field,
             app.comment_field.as_ref(),
             app.meta.as_ref(),
             &app.id_field,
             &query,
         );
-        if score > 0 {
-            results.push((
-                score,
-                ResultItem {
-                    title: app.title.clone(),
-                    summary: app.comment.clone(),
-                    on_click: Some(Action::Launch {
-                        desktop_id: app.id.clone(),
-                    }),
-                    icon: app.icon_path(),
-                    ephemeral: false,
-                    actions: Vec::new(),
-                    badge: None,
-                },
-            ));
+        if let Some((_, weight)) = app_score {
+            scored.push((weight, Hit::App(app)));
         }
 
         // Each action is its own row (DMS-style).
         for action in app.meta.iter().flat_map(|m| &m.actions) {
-            let action_score = action_score(&action.name_lower, &query.lower);
-            if action_score > 0 {
-                results.push((
-                    action_score,
-                    ResultItem {
-                        title: action.name.clone(),
-                        summary: Some(app.title.clone()),
-                        on_click: Some(Action::DesktopAction {
-                            desktop_id: app.id.clone(),
-                            action_id: action.id.clone(),
-                        }),
-                        icon: app.icon_path(),
-                        ephemeral: false,
-                        actions: Vec::new(),
-                        badge: None,
-                    },
-                ));
+            if let Some((_, weight)) = action_score(&action.name_lower, &query.lower) {
+                scored.push((weight, Hit::Action(app, action)));
             }
         }
     }
 
-    crate::provider::rank_results(results, true, 50)
-}
-
-fn tokenize(s: &str) -> Vec<String> {
-    s.split([' ', '-', '_'])
-        .filter(|w| !w.is_empty())
-        .map(str::to_owned)
+    // The cap is below the merge, so it keeps what the merge would rank first:
+    // the same relevance the merge orders by.
+    scored.sort_by_key(|a| Reverse(a.0));
+    scored.dedup_by(|a, b| a.1.title() == b.1.title());
+    scored.truncate(crate::provider::SHOW_CAP);
+    scored
+        .into_iter()
+        .map(|(weight, hit)| (Rank::Scored(weight), hit.row()))
         .collect()
 }
 
-/// DMS's action tiers: exact, prefix, substring.
-fn action_score(name_lower: &str, query_lower: &str) -> u32 {
-    if name_lower == query_lower {
-        W_ACTION_EXACT
-    } else if name_lower.starts_with(query_lower) {
-        W_ACTION_PREFIX
-    } else if name_lower.contains(query_lower) {
-        W_ACTION_SUBSTRING
-    } else {
-        0
-    }
+fn action_score(name_lower: &str, query_lower: &str) -> Option<(Match, u32)> {
+    kind_of(name_lower, query_lower).map(|kind| (kind, kind.weight() * ACTION / 10))
 }
 
-/// Score one match surface, fields tried in order: exact name, prefix,
-/// word-boundary, substring, then edit-distance fuzz.
-fn field_score(field: &Field, query: &Query) -> u32 {
-    // An empty query would prefix-match every field; treat it as no match so
-    // the scorer cannot turn into a "list everything" path.
-    if query.lower.is_empty() {
-        return 0;
-    }
-    if field.lower == query.lower {
-        return W_EXACT;
-    }
-    if field.lower.starts_with(&query.lower) {
-        return W_PREFIX;
-    }
-
-    let spans = &field.word_spans;
-    if query.words.len() <= spans.len() {
-        let bounded = (0..=spans.len() - query.words.len()).any(|i| {
-            (0..query.words.len())
-                .all(|j| char_starts_with(field.word(spans[i + j]), &query.words[j]))
-        });
-        if bounded {
-            return W_WORD_BOUNDARY;
-        }
-    }
-
-    if field.lower.contains(&query.lower) {
-        return W_SUBSTRING;
-    }
-
-    if query.chars.len() >= 3 {
-        let fs = fuzzy_score(field, query);
-        if fs > 0.0 {
-            return (fs * f64::from(W_FUZZY)) as u32;
-        }
-    }
-    0
+/// The shared kind of a surface, refusing `Loose`: an app id or a description
+/// is long enough that a scattered hit means nothing.
+fn kind_of(surface_lower: &str, query_lower: &str) -> Option<Match> {
+    crate::plugin::classify(surface_lower, query_lower).filter(|kind| *kind != Match::Loose)
 }
 
-/// Whether `hay` starts with `needle`, so a precomputed word is not rebuilt
-/// into a `String` for every boundary check.
-fn char_starts_with(hay: &[char], needle: &str) -> bool {
-    let mut needle = needle.chars();
-    for ch in hay {
-        match needle.next() {
-            Some(expected) if expected == *ch => {}
-            Some(_) => return false,
-            None => return true,
-        }
+/// Score one match surface: the shared kind, scaled by what the surface is
+/// worth. The kind travels with the weight, for a caller that merges providers.
+fn field_score(field: &Field, query: &Query, share: u32) -> Option<(Match, u32)> {
+    kind_of(&field.lower, &query.lower).map(|kind| (kind, kind.weight() * share / 10))
+}
+
+/// The typo tier: a near spelling of a 3+ char query, for the title only, so a
+/// misspelling still finds the app without a keyword asking for it.
+fn name_typo(name: &Field, query: &Query) -> Option<(Match, u32)> {
+    if query.chars.len() < 3 {
+        return None;
     }
-    needle.next().is_none()
+    let similarity = fuzzy_score(name, query);
+    (similarity >= TYPO_SIMILARITY)
+        .then_some((Match::Loose, (TYPO_WEIGHT as f64 * similarity) as u32))
 }
 
 /// Edit-distance similarity (0..1) between the whole field or any of its words
@@ -426,50 +435,50 @@ fn levenshtein(a: &[char], b: &[char]) -> usize {
     prev[b.len()]
 }
 
-/// Full app relevance: name, comment (0.5x), keywords (0.3x), `GenericName`,
-/// then the desktop id; first non-zero tier wins.
+/// Full app relevance: the title, then the metadata surfaces — a description,
+/// keywords, a `GenericName`, then the desktop id; first non-zero surface wins.
 fn score_app(
     name: &Field,
     comment: Option<&Field>,
     meta: Option<&DesktopMeta>,
     id: &Field,
     query: &Query,
-) -> u32 {
+) -> Option<(Match, u32)> {
     if query.lower.is_empty() {
-        return 0;
+        // an empty query would prefix-match every surface
+        return None;
     }
 
-    let mut score = field_score(name, query);
-    if score == 0
-        && let Some(comment) = comment
-    {
-        score = field_score(comment, query) * 5 / 10;
+    // The title takes any confident kind, and the typo tier of its own.
+    if let Some(scored) = field_score(name, query, TITLE).or_else(|| name_typo(name, query)) {
+        return Some(scored);
     }
-    if score == 0
-        && let Some(ks) = meta.and_then(|m| {
-            m.keywords.iter().find_map(|keyword| {
-                let ks = field_score(keyword, query);
-                (ks > 0).then_some(ks * 3 / 10)
-            })
-        })
-    {
-        score = ks;
+    // The metadata surfaces answer in a plain query too, each at its own
+    // strength: keywords and generics by word, a description only by prefix.
+    let at_least =
+        |scored: Option<(Match, u32)>, floor: Match| scored.filter(|(kind, _)| *kind >= floor);
+    let comment = comment
+        .and_then(|comment| field_score(comment, query, SUMMARY))
+        .filter(|(kind, _)| *kind >= Match::Prefix);
+    if let Some(scored) = comment {
+        return Some(scored);
     }
-    if score == 0
-        && let Some(generic) = meta.and_then(|m| m.generic.as_ref())
-    {
-        score = if generic.lower.starts_with(&query.lower) {
-            W_GENERIC_PREFIX
-        } else if generic.lower.contains(&query.lower) {
-            W_GENERIC
-        } else {
-            0
-        };
+    let keywords = meta.and_then(|meta| {
+        meta.keywords
+            .iter()
+            .find_map(|keyword| at_least(field_score(keyword, query, KEYWORD), Match::Word))
+    });
+    if let Some(scored) = keywords {
+        return Some(scored);
     }
-    if score == 0 && id.lower.contains(&query.lower) {
-        score = W_ID;
+    let generic = meta
+        .and_then(|meta| meta.generic.as_ref())
+        .and_then(|generic| at_least(field_score(generic, query, GENERIC), Match::Word));
+    if let Some(scored) = generic {
+        return Some(scored);
     }
-    score
+    // The id answers where a word starts only: its middle spells anything.
+    field_score(id, query, ID).filter(|(kind, _)| *kind >= Match::Word)
 }
 
 /// Read `[Desktop Entry]`'s `GenericName`/`Keywords` and its `Actions=` groups,
@@ -571,6 +580,8 @@ mod tests {
         }
     }
 
+    /// The relevance a plain query gives one app, or `0` when nothing matches:
+    /// the shared kind's weight, scaled by whatever surface matched.
     fn s(name: &str, comment: Option<&str>, m: Option<&DesktopMeta>, id: &str, q: &str) -> u32 {
         score_app(
             &Field::new(name),
@@ -579,6 +590,7 @@ mod tests {
             &Field::new(id.to_lowercase().trim_end_matches(".desktop")),
             &Query::new(q.trim()),
         )
+        .map_or(0, |(_, weight)| weight)
     }
 
     #[test]
@@ -586,13 +598,16 @@ mod tests {
         let m = meta(None, &[]);
         assert_eq!(
             s("Telegram", None, Some(&m), "telegram.desktop", "telegram"),
-            W_EXACT
+            Match::Exact.weight()
         );
         assert_eq!(
             s("Telegram", None, Some(&m), "telegram.desktop", "tele"),
-            W_PREFIX
+            Match::Prefix.weight()
         );
-        assert!(s("Bottles", None, Some(&m), "bottles.desktop", "bo") == W_PREFIX);
+        assert_eq!(
+            s("Bottles", None, Some(&m), "bottles.desktop", "bo"),
+            Match::Prefix.weight()
+        );
         assert_eq!(
             s(
                 "LibreOffice",
@@ -601,7 +616,63 @@ mod tests {
                 "libreoffice.desktop",
                 "office"
             ),
-            W_SUBSTRING
+            Match::Substring.weight()
+        );
+    }
+
+    /// A plain query takes the title, plus each metadata surface at the strength
+    /// that surface can carry.
+    #[test]
+    fn metadata_surfaces_speak_at_their_own_strength() {
+        let m = meta(Some("Text Editor"), &["notes"]);
+        let app = |q: &str| {
+            s(
+                "Zed",
+                Some("A note taking app"),
+                Some(&m),
+                "dev.zed.Zed.desktop",
+                q,
+            )
+        };
+        assert_eq!(app("ze"), Match::Prefix.weight(), "the title still leads");
+        assert_eq!(app("editor"), Match::Word.weight() * GENERIC / 10);
+        assert_eq!(app("notes"), Match::Exact.weight() * KEYWORD / 10);
+        assert_eq!(app("a note"), Match::Prefix.weight() * SUMMARY / 10);
+        assert_eq!(app("taking"), 0, "a word picked out of prose does not");
+        assert_eq!(app("dev"), Match::Prefix.weight() * ID / 10);
+        assert_eq!(app("zed dev"), 0, "and prose never prefix-matches here");
+    }
+
+    /// The share is what makes the surfaces comparable: a title match beats a
+    /// description match of comparable strength, while an exact keyword still
+    /// beats a title hit the query only sits inside of.
+    #[test]
+    fn the_surface_share_orders_against_the_kind() {
+        let m = meta(None, &[]);
+        let title_word = s("Qt D-Bus Viewer", None, Some(&m), "qtv.desktop", "viewer");
+        let summary_prefix = s(
+            "Capture Tool",
+            Some("viewer for V4L2 devices"),
+            Some(&m),
+            "v4l.desktop",
+            "viewer",
+        );
+        assert!(
+            title_word > summary_prefix,
+            "a title word beats a description prefix: {title_word} > {summary_prefix}"
+        );
+
+        let keyword_exact = s(
+            "GNU Image Manipulation Program",
+            None,
+            Some(&meta(None, &["gimp"])),
+            "org.gimp.GIMP.desktop",
+            "gimp",
+        );
+        let title_substring = s("Supergimp", None, Some(&m), "sg.desktop", "gimp");
+        assert!(
+            keyword_exact > title_substring,
+            "an exact keyword beats a title substring: {keyword_exact} > {title_substring}"
         );
     }
 
@@ -636,7 +707,7 @@ mod tests {
             "org.gimp.GIMP.desktop",
             "gimp",
         );
-        assert_eq!(sc, W_EXACT * 3 / 10);
+        assert_eq!(sc, Match::Exact.weight() * KEYWORD / 10);
     }
 
     #[test]
@@ -650,7 +721,7 @@ mod tests {
                 "dms.desktop",
                 "material shell"
             ),
-            W_WORD_BOUNDARY
+            Match::Word.weight()
         );
         // non-consecutive order is not a word-boundary hit
         assert!(
@@ -660,7 +731,7 @@ mod tests {
                 Some(&m),
                 "dms.desktop",
                 "shell material"
-            ) < W_WORD_BOUNDARY
+            ) < Match::Word.weight()
         );
     }
 
@@ -669,11 +740,11 @@ mod tests {
         let m = meta(Some("Text Editor"), &[]);
         assert_eq!(
             s("DMS Notes", None, Some(&m), "dms-notes.desktop", "editor"),
-            W_GENERIC
+            Match::Word.weight() * GENERIC / 10
         );
         assert_eq!(
             s("DMS Notes", None, Some(&m), "dms-notes.desktop", "text"),
-            W_GENERIC_PREFIX
+            Match::Prefix.weight() * GENERIC / 10
         );
     }
 
@@ -682,7 +753,7 @@ mod tests {
         let m = meta(None, &[]);
         assert_eq!(
             s("Strange Name", None, Some(&m), "firefox.desktop", "firefox"),
-            W_ID
+            Match::Exact.weight() * ID / 10
         );
         assert_eq!(
             s("Strange Name", None, Some(&m), "firefox.desktop", "zzz"),
@@ -695,29 +766,25 @@ mod tests {
         let m = meta(None, &[]);
         // krta vs Krita: one transposition-ish edit, len 4
         assert!(s("Krita", None, Some(&m), "krita.desktop", "krta") > 0);
-        assert!(s("Krita", None, Some(&m), "krita.desktop", "krta") < W_FUZZY);
+        assert!(
+            s("Krita", None, Some(&m), "krita.desktop", "krta") < Match::Substring.weight(),
+            "a typo is a title hit, but never a real title kind"
+        );
         // two-char typo is not enough to matter
         assert_eq!(s("Krita", None, Some(&m), "krita.desktop", "kt"), 0);
     }
 
+    /// An action's own label is a surface between the title and the summary.
     #[test]
-    fn char_starts_with_matches_str_starts_with() {
-        let hay: Vec<char> = "manager".chars().collect();
-        assert!(char_starts_with(&hay, "man"));
-        assert!(char_starts_with(&hay, ""));
-        assert!(!char_starts_with(&hay, "manager "));
-        assert!(!char_starts_with(&hay[..3], "manager"));
-    }
-
-    #[test]
-    fn action_rows_use_dms_tiers() {
+    fn an_action_label_ranks_between_the_title_and_the_summary() {
+        let scored = |q: &str| action_score("open vm manager", q).map(|(_, weight)| weight);
         assert_eq!(
-            action_score("open vm manager", "open vm manager"),
-            W_ACTION_EXACT
+            scored("open vm manager"),
+            Some(Match::Exact.weight() * ACTION / 10)
         );
-        assert_eq!(action_score("open vm manager", "open"), W_ACTION_PREFIX);
-        assert_eq!(action_score("open vm manager", "vm"), W_ACTION_SUBSTRING);
-        assert_eq!(action_score("open vm manager", "zzz"), 0);
+        assert_eq!(scored("open"), Some(Match::Prefix.weight() * ACTION / 10));
+        assert_eq!(scored("vm"), Some(Match::Word.weight() * ACTION / 10));
+        assert_eq!(scored("zzz"), None);
     }
 
     /// `parse_meta` against a `.desktop` body, with the locales pinned so the

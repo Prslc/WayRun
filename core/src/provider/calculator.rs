@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::plugin::{Meta, Plugin};
+use crate::plugin::{Match, Meta, Plugin, Rank, Ranked};
 use crate::system::icon::resolve;
 use crate::wire::ResultItem;
 use anyhow::Result;
@@ -27,6 +27,21 @@ impl Calculator {
 impl Plugin for Calculator {
     fn meta(&self) -> &Meta {
         &self.meta
+    }
+
+    /// Typing an expression is the exact intent, so the row carries `Exact`.
+    fn search_ranked(
+        &self,
+        _query: &str,
+        full: &str,
+    ) -> Pin<Box<dyn Future<Output = Result<Ranked>> + Send + '_>> {
+        let expr = full.to_string();
+        Box::pin(async move {
+            Ok(do_search(&expr)
+                .into_iter()
+                .map(|item| (Rank::title(Match::Exact), item))
+                .collect())
+        })
     }
 
     fn search(

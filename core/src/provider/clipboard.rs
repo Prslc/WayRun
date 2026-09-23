@@ -1,10 +1,10 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::process::Command;
-use std::sync::{Arc, LazyLock, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, LazyLock};
 
 use crate::plugin::{Meta, Plugin};
+use crate::provider::FreshCache;
 use crate::system::icon::resolve;
 use crate::wire::{Action, ResultItem};
 use anyhow::Result;
@@ -46,10 +46,6 @@ impl Plugin for Clipboard {
     }
 }
 
-/// A typing burst shares one `cliphist list` round trip; a just-copied item
-/// showing up half a second late is fine.
-const CACHE_TTL: Duration = Duration::from_millis(500);
-
 const MAX_RESULTS: usize = 50;
 
 /// One `cliphist list` entry with the match form precomputed, so a keystroke
@@ -77,25 +73,16 @@ impl Entry {
     }
 }
 
-/// The cached entry list and when it was fetched.
-type ListCache = Mutex<Option<(Instant, Arc<Vec<Entry>>)>>;
+/// The clipboard history, shared across a typing burst, so one `cliphist list`
+/// serves the whole burst.
+static LIST: LazyLock<FreshCache<Entry>> = LazyLock::new(FreshCache::new);
 
-static LIST: LazyLock<ListCache> = LazyLock::new(|| Mutex::new(None));
-
-/// The clipboard history from a short-lived cache, so a burst of keystrokes
-/// does not fork `cliphist list` on every one.
 fn cached_entries() -> Option<Arc<Vec<Entry>>> {
-    let mut cache = LIST.lock().unwrap_or_else(|err| err.into_inner());
-    if let Some((at, entries)) = cache.as_ref()
-        && at.elapsed() < CACHE_TTL
-    {
-        return Some(Arc::clone(entries));
-    }
-    let output = Command::new("cliphist").arg("list").output().ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    let entries = Arc::new(parse_entries(&text));
-    *cache = Some((Instant::now(), Arc::clone(&entries)));
-    Some(entries)
+    LIST.get(|| {
+        let output = Command::new("cliphist").arg("list").output().ok()?;
+        let text = String::from_utf8_lossy(&output.stdout);
+        Some(parse_entries(&text))
+    })
 }
 
 fn do_search(query: &str) -> Vec<ResultItem> {
@@ -186,9 +173,11 @@ mod tests {
 
     #[test]
     fn a_fresh_cache_is_reused() {
-        let entries = Arc::new(parse_entries("1\ttext/plain\thello"));
-        *LIST.lock().unwrap() = Some((Instant::now(), Arc::clone(&entries)));
-        assert!(Arc::ptr_eq(&entries, &cached_entries().unwrap()));
+        let cache: FreshCache<Entry> = FreshCache::new();
+        let fetch = || Some(parse_entries("1\ttext/plain\thello"));
+        let first = cache.get(fetch).unwrap();
+        let second = cache.get(fetch).unwrap();
+        assert!(Arc::ptr_eq(&first, &second), "the second call reuses it");
     }
 
     #[test]

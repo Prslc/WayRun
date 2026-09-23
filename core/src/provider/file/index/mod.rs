@@ -30,8 +30,9 @@ const REFRESH_TTL: Duration = Duration::from_secs(60);
 const OWNERS: [&str; 2] = ["file-search", "path-search"];
 
 struct State {
-    map: Option<Arc<Mmap>>,
-    last_used: Option<Instant>,
+    /// The mapped image and when a query last touched it. One field, so a map
+    /// can never be held without its idle clock.
+    live: Option<(Arc<Mmap>, Instant)>,
     last_check: Option<Instant>,
     /// Set by [`discard`] once it has unlinked the cache and cleared before any
     /// write: while it holds, no cache file is on disk, so unlinks can be skipped.
@@ -39,8 +40,7 @@ struct State {
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
-    map: None,
-    last_used: None,
+    live: None,
     last_check: None,
     // a previous process may have left cache files behind
     clean: false,
@@ -65,9 +65,9 @@ pub fn search(
 ) -> Option<Vec<ResultItem>> {
     let map = {
         let mut state = lock();
-        let map = state.map.clone()?;
-        state.last_used = Some(Instant::now());
-        map
+        let (map, used) = state.live.as_mut()?;
+        *used = Instant::now();
+        Arc::clone(map)
     };
     let index = Index::parse(&map[..], home)?;
     Some(search_in(&index, query_lower, want_dir, name_only))
@@ -92,14 +92,14 @@ pub async fn ensure() {
         let checked = state
             .last_check
             .is_some_and(|last| now.duration_since(last) < REFRESH_TTL);
-        if checked && state.map.is_some() {
+        if checked && state.live.is_some() {
             return;
         }
         // remember the attempt, not the success, so a failure waits a TTL too
         if !checked {
             state.last_check = Some(now);
         }
-        (!checked, state.map.is_some())
+        (!checked, state.live.is_some())
     };
     if !recheck {
         // no sweep is due, so this is a plain remap: bounded work this search
@@ -144,8 +144,7 @@ pub fn settings_changed() {
 fn store(map: Mmap) {
     {
         let mut state = lock();
-        state.map = Some(Arc::new(map));
-        state.last_used = Some(Instant::now());
+        state.live = Some((Arc::new(map), Instant::now()));
     }
     // the reaper may be parked with nothing to watch
     WAKE.notify_one();
@@ -156,8 +155,7 @@ fn store(map: Mmap) {
 pub fn discard() {
     let already_clean = {
         let mut state = lock();
-        state.map = None;
-        state.last_used = None;
+        state.live = None;
         // re-enabling must rebuild at once, not wait out the refresh TTL
         state.last_check = None;
         let clean = state.clean;
@@ -170,10 +168,8 @@ pub fn discard() {
     let Some(path) = path() else {
         return;
     };
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
-    let _ = std::fs::remove_file(path);
-    let _ = std::fs::remove_file(PathBuf::from(tmp));
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(crate::system::fs::tmp_path(&path));
 }
 
 /// Unmap an index nothing has used for [`IDLE`], so an idle launcher holds no
@@ -182,11 +178,11 @@ async fn reaper() {
     loop {
         let wait = {
             let state = lock();
-            let until_due = state
-                .last_used
-                .map_or(IDLE, |used| IDLE.saturating_sub(used.elapsed()));
             // with no map there is nothing to unmap: park until a store, not every IDLE
-            state.map.as_ref().map(|_| until_due)
+            state
+                .live
+                .as_ref()
+                .map(|(_, used)| IDLE.saturating_sub(used.elapsed()))
         };
         let Some(wait) = wait else {
             WAKE.notified().await;
@@ -198,12 +194,11 @@ async fn reaper() {
             _ = WAKE.notified() => continue,
         }
         let mut state = lock();
-        if state.map.is_none() {
+        let Some((_, used)) = state.live.as_ref() else {
             continue;
-        }
-        if state.last_used.is_some_and(|used| used.elapsed() >= IDLE) {
-            state.map = None;
-            state.last_used = None;
+        };
+        if used.elapsed() >= IDLE {
+            state.live = None;
             // `last_check` stands, or the next search would sweep again
             // drop the guard first so a search never queues behind the arena walk
             drop(state);
@@ -340,12 +335,10 @@ fn refresh(home: &Path) {
         eprintln!("wayrun: file index write failed: {err}");
         return;
     }
-    if let Some(map) = load() {
-        // the map only reaches the queries if the image it came from can be
-        // walked: `store` is the one gate for that
-        if Index::parse(&map[..], home).is_some_and(|index| layout_ok(&index)) {
-            store(map);
-        }
+    // the map only reaches the queries if the image it came from can be
+    // walked: the load gate is the one gate for that
+    if let Some((map, _)) = load_swept(home, &exclude, false) {
+        store(map);
     }
 
     let dir_count = u32_at(&bytes, 8);

@@ -151,7 +151,15 @@ search_plugin!(
 /// `file-search` cares about the name only; shallower paths break ties.
 /// `query_lower` is already lowercased.
 pub(super) fn score_name(name: &str, query_lower: &str, depth: usize) -> u32 {
-    crate::provider::name_tier_ci(name, query_lower).saturating_sub(depth as u32)
+    kind_weight(name, query_lower).saturating_sub(depth as u32)
+}
+
+/// The shared kind's weight for a plain query: a scattered hit is not a row.
+fn kind_weight(name: &str, query_lower: &str) -> u32 {
+    match crate::plugin::classify_ci(name, query_lower) {
+        Some(kind) if kind.confident() => kind.weight(),
+        _ => 0,
+    }
 }
 
 /// `path-search` matches when every token is somewhere on the path, but a name
@@ -187,10 +195,13 @@ pub(super) fn score_split_path(
 /// The path-mode score once a match is known: a name hit beats a
 /// parent-directory-only hit, and shallower paths break ties.
 fn path_score(name: &str, query_lower: &str, depth: usize) -> u32 {
-    crate::provider::name_tier_ci(name, query_lower)
-        .max(200)
+    kind_weight(name, query_lower)
+        .max(PATH_ONLY)
         .saturating_sub(depth as u32)
 }
+
+/// A hit only on a parent directory still lists the row, below any name hit.
+const PATH_ONLY: u32 = 200;
 
 /// Whether `token` occurs in `dir_lower + "/" + name_lower`: inside either
 /// half, or across the separator (`sub/deep` matching across the join).
@@ -270,7 +281,6 @@ fn keep_entry(name: &str, depth: usize, exclude: &[String]) -> bool {
 /// A walk may match thousands of entries; rank the first `MATCH_CAP` and show
 /// the best `SHOW_CAP`, so one keystroke cannot walk an unbounded tree.
 const MATCH_CAP: usize = 200;
-const SHOW_CAP: usize = 50;
 
 /// `want_dir` keeps `f` to files and `d` to directories, so the two providers stay
 /// complementary; `by_name` is `f`'s name-only match; a path query matches the path.
@@ -293,18 +303,18 @@ fn do_search(query: &str, want_dir: bool, by_name: bool) -> Vec<ResultItem> {
     }
 
     let path_mode = query.starts_with('~') || query.contains('/');
+    let name_only = by_name && !path_mode;
     let query_lower = query.to_lowercase();
 
-    if let Some(items) = index::search(&home, &query_lower, want_dir, by_name && !path_mode) {
+    if let Some(items) = index::search(&home, &query_lower, want_dir, name_only) {
         return items;
     }
 
     quick_search(
         &home,
-        query,
         &query_lower,
         want_dir,
-        by_name,
+        name_only,
         &crate::config::get().files,
     )
 }
@@ -312,15 +322,11 @@ fn do_search(query: &str, want_dir: bool, by_name: bool) -> Vec<ResultItem> {
 /// The fallback when no index is available: the four roots, `depth` levels.
 fn quick_search(
     home: &Path,
-    query: &str,
     query_lower: &str,
     want_dir: bool,
-    by_name: bool,
+    name_only: bool,
     files: &Files,
 ) -> Vec<ResultItem> {
-    let path_mode = query.starts_with('~') || query.contains('/');
-    let name_only = by_name && !path_mode;
-
     let roots = [
         home.join("Desktop"),
         home.join("Documents"),
@@ -383,12 +389,12 @@ fn quick_search(
     // Rows only for the survivors: `entry_item` builds a gio URI and looks up a
     // MIME icon, work the discarded rest of `MATCH_CAP` would waste.
     scored.sort_by_key(|a| Reverse(a.0));
-    scored.truncate(SHOW_CAP);
+    scored.truncate(crate::provider::SHOW_CAP);
     let rows: Vec<(u32, ResultItem)> = scored
         .into_iter()
         .map(|(score, path, is_dir)| (score, entry_item(&path, is_dir)))
         .collect();
-    crate::provider::rank_results(rows, false, SHOW_CAP)
+    crate::provider::rank_results(rows, false, crate::provider::SHOW_CAP)
 }
 
 /// A stat'd path as one row, or `None` when it is not the kind this provider
@@ -663,19 +669,12 @@ mod tests {
         std::fs::write(deep.join("deep.txt"), "x").unwrap();
 
         let files = Files::default();
-        let found = quick_search(
-            dir.path(),
-            "shallow.txt",
-            "shallow.txt",
-            false,
-            true,
-            &files,
-        );
+        let found = quick_search(dir.path(), "shallow.txt", false, true, &files);
         assert_eq!(found.len(), 1, "{found:?}");
         assert_eq!(found[0].title, "shallow.txt");
 
         assert!(
-            quick_search(dir.path(), "deep.txt", "deep.txt", false, true, &files).is_empty(),
+            quick_search(dir.path(), "deep.txt", false, true, &files).is_empty(),
             "one level past the configured depth is out of reach"
         );
         let deeper = Files {
@@ -683,7 +682,7 @@ mod tests {
             ..Files::default()
         };
         assert_eq!(
-            quick_search(dir.path(), "deep.txt", "deep.txt", false, true, &deeper).len(),
+            quick_search(dir.path(), "deep.txt", false, true, &deeper).len(),
             1,
             "raising the depth reaches it"
         );

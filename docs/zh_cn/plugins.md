@@ -26,7 +26,9 @@ enabled = true
 只有某个插件拥有输入的第一个词作为 keyword 时，才会路由到该插件；否则整段输入（含第一个词）都作为
 默认提供者的查询：`foo bar` 会以 `foo bar` 到达默认提供者，而不是 `bar`。
 
-默认提供者（keyword 为 `""`）按条目顺序尝试，第一个返回非空结果者胜出，因此裸查询是应用/命令搜索，而非所有插件的并集。
+默认提供者（keyword 为 `""`）全部作答并合并：先按每行的相关度（命中档位的权重 × 该行命中的面），
+其次按该行的使用次数，最后按条目顺序。因此强度相当的名字命中会排到描述命中之前，而一个精确的关键字
+命中仍会排在只是恰好包含查询词的名字命中之前。
 
 ## 内置插件
 
@@ -34,7 +36,7 @@ enabled = true
 | --- | --- | --- | --- |
 | `calculator` | `""` | 行内算术。 | — |
 | `system-commands` | `""` | `lock`、`reboot`、`shutdown`、`suspend`、`logout`。 | — |
-| `app-search` | `""` | 已安装应用（desktop 条目）。 | — |
+| `app-search` | `""` | 已安装应用（desktop 条目）：名字、名字的近似拼写，以及各元数据面按各自能承载的强度参与匹配（关键字与通用名按词、描述按前缀）。 | — |
 | `runner` | `r` | 模糊匹配 `$PATH` 可执行文件；可带参数。命中已安装应用时经 GLib 启动（遵循 `Terminal=`），其余在终端中运行。 | 终端模拟器 |
 | `firefox-bookmarks` | `b` | Firefox 书签。 | 已配置 profile 的 Firefox |
 | `firefox-history` | `h` | Firefox 历史。 | 已配置 profile 的 Firefox |

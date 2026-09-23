@@ -79,6 +79,7 @@ fn build_entries(config: &Config) -> Vec<Entry> {
             entries.push(Entry {
                 plugin,
                 keyword: p.keyword.clone(),
+                external: false,
                 pending: None,
             });
             continue;
@@ -100,6 +101,7 @@ fn build_entries(config: &Config) -> Vec<Entry> {
                 meta,
             )),
             keyword: p.keyword.clone(),
+            external: true,
             pending,
         });
     }

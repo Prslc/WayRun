@@ -4,13 +4,12 @@ use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
+use crate::plugin::{classify_bytes, classify_ci};
 use crate::provider::file::index::format::{Index, push_dir_path};
 use crate::provider::file::{entry_item, score_path, score_split_path};
-use crate::provider::{name_tier_ci, push_lowered};
+use crate::provider::{SHOW_CAP, push_lowered};
 use crate::wire::ResultItem;
 
-/// Rows kept per search, matching `rank_results`' show cap.
-pub(super) const TOP: usize = 50;
 /// Entries a scan must hold before it is split across threads; below it a
 /// chunk's spawn costs more than the scan it would run.
 pub(super) const PARALLEL_FLOOR: u32 = 8192;
@@ -48,7 +47,7 @@ pub(super) fn par_chunks<T: Send>(
     })
 }
 
-/// The best [`TOP`] candidates by score, ties keeping the earlier position,
+/// The best [`SHOW_CAP`] candidates by score, ties keeping the earlier position,
 /// with no row built until the scan is over.
 #[derive(Default)]
 pub(super) struct Top {
@@ -60,7 +59,7 @@ impl Top {
         if score == 0 {
             return;
         }
-        if self.heap.len() == TOP {
+        if self.heap.len() == SHOW_CAP {
             // the worst kept row: the lowest score, and among equals the latest
             // position, which a new offer can only lose to
             if score <= self.heap.peek().expect("full").0.0 {
@@ -97,18 +96,17 @@ fn scan_chunk<S>(
     top.into_candidates()
 }
 
-/// Merges per-chunk candidates into the best [`TOP`] by (score, earlier
+/// Merges per-chunk candidates into the best [`SHOW_CAP`] by (score, earlier
 /// position), the order `rank_results` keeps among equal scores.
 fn merge_chunks(chunks: impl IntoIterator<Item = Vec<(u32, u32)>>) -> Vec<(u32, u32)> {
     let mut all: Vec<(u32, u32)> = chunks.into_iter().flatten().collect();
     all.sort_by_key(|&(score, position)| (Reverse(score), position));
-    all.truncate(TOP);
+    all.truncate(SHOW_CAP);
     all
 }
 
-/// The best [`TOP`] of `0..n` as scored by `scan`, in chunks on separate
-/// threads; merging per-chunk tops by (score, earlier position) keeps the
-/// answer independent of the thread and chunk count.
+/// The best [`SHOW_CAP`] of `0..n` as scored by `scan`, in chunks on separate
+/// threads; merging by (score, earlier position) keeps it thread-count-proof.
 fn scan_top<S>(
     n: u32,
     init: impl Fn() -> S + Sync,
@@ -130,10 +128,15 @@ pub(super) fn search_in(
 ) -> Vec<ResultItem> {
     let query_bytes = query_lower.as_bytes();
     let tier = |name: &[u8]| -> u32 {
-        if name.is_ascii() {
-            crate::provider::name_tier_bytes(name, query_bytes)
+        let kind = if name.is_ascii() {
+            classify_bytes(name, query_bytes)
         } else {
-            name_tier_ci(&String::from_utf8_lossy(name), query_lower)
+            classify_ci(&String::from_utf8_lossy(name), query_lower)
+        };
+        // the index serves plain queries, so a scattered hit is not a row
+        match kind {
+            Some(kind) if kind.confident() => kind.weight(),
+            _ => 0,
         }
     };
 
@@ -202,7 +205,7 @@ pub(super) fn search_in(
         }
         scored.push((score, entry_item(&path, want_dir)));
     }
-    crate::provider::rank_results(scored, false, TOP)
+    crate::provider::rank_results(scored, false, SHOW_CAP)
 }
 
 #[cfg(test)]
@@ -264,7 +267,7 @@ mod tests {
         let index = parsed(&bytes, home);
 
         let files = search_in(&index, "hit.txt", false, true);
-        assert_eq!(files.len(), TOP);
+        assert_eq!(files.len(), SHOW_CAP);
         let deep = summaries(&files)
             .iter()
             .filter(|path| path.contains("/sub/"))

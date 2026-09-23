@@ -8,7 +8,7 @@ otherwise the whole input is an app/command query (see
 
 | Input | Action |
 | --- | --- |
-| `firefox` | fuzzy-search installed applications |
+| `firefox` | search installed applications (name, keywords, description) |
 | `b <query>` | search Firefox bookmarks |
 | `h <query>` | search Firefox history |
 | `f <query>` | search files by name or path |

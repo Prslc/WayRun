@@ -1,3 +1,167 @@
+use crate::wire::ResultItem;
+
+/// One provider's rows, each with how the query matched it.
+pub type Ranked = Vec<(Rank, ResultItem)>;
+
+/// Where a provider's rows sit next to another provider's: the relevance a
+/// scoring provider computed, or its own listed order when it cannot score.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Rank {
+    /// A row from a provider that does not score: the lower the position, the
+    /// better, and every one of them sits below a scored row.
+    Listed(u32),
+    /// The row's relevance: the shared kind's weight, scaled by the surface it
+    /// matched on. The product, not either alone, is what the merge orders by.
+    Scored(u32),
+}
+
+impl Rank {
+    /// A row that matched on its own title, the common case: the kind's weight,
+    /// unscaled. A provider with metadata surfaces computes its own weights.
+    pub fn title(kind: Match) -> Self {
+        Rank::Scored(kind.weight())
+    }
+
+    /// The sort key: a scored row by relevance; a listed row below every scored
+    /// one and in its provider's own order.
+    pub fn key(self) -> (u8, u32) {
+        match self {
+            Rank::Listed(at) => (0, u32::MAX - at),
+            Rank::Scored(weight) => (1, weight),
+        }
+    }
+}
+
+/// How a query matches one surface: the vocabulary every provider ranks by, so
+/// "exact beats prefix" means one thing; weakest first, for the derived `Ord`.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum Match {
+    /// The query's letters appear in order, scattered.
+    Loose,
+    /// The query sits inside the surface.
+    Substring,
+    /// The query starts a word inside the surface.
+    Word,
+    /// The surface starts with the query.
+    Prefix,
+    /// The surface is the query.
+    Exact,
+}
+
+impl Match {
+    /// One weight table; its gaps are wider than any depth or length modifier
+    /// a provider subtracts, so a modifier can only break ties within a kind.
+    pub fn weight(self) -> u32 {
+        match self {
+            Match::Exact => 10_000,
+            Match::Prefix => 5_000,
+            Match::Word => 3_000,
+            Match::Substring => 500,
+            Match::Loose => 100,
+        }
+    }
+
+    /// Whether the match may answer a plain query: a plain query stops at
+    /// `Substring`, so a scattered coincidence cannot shadow other providers.
+    pub fn confident(self) -> bool {
+        self >= Match::Substring
+    }
+}
+
+/// The strongest way a lowercased `query` matches an already lowercased surface.
+pub fn classify(surface: &str, query: &str) -> Option<Match> {
+    if query.is_empty() {
+        return None;
+    }
+    if surface == query {
+        return Some(Match::Exact);
+    }
+    if surface.starts_with(query) {
+        return Some(Match::Prefix);
+    }
+    if at_word(surface, query) {
+        return Some(Match::Word);
+    }
+    if surface.contains(query) {
+        return Some(Match::Substring);
+    }
+    scattered(surface, query).then_some(Match::Loose)
+}
+
+/// [`classify`] without a lowercased surface: an ASCII surface compares byte by
+/// byte, and only a non-ASCII one pays for `to_lowercase`.
+pub fn classify_ci(surface: &str, query: &str) -> Option<Match> {
+    if surface.is_ascii() {
+        return classify_bytes(surface.as_bytes(), query.as_bytes());
+    }
+    classify(&surface.to_lowercase(), query)
+}
+
+/// [`classify`] over raw bytes, for a surface and query the caller checked are
+/// ASCII: a byte compare is the same test without building a string.
+pub fn classify_bytes(surface: &[u8], query: &[u8]) -> Option<Match> {
+    if query.is_empty() {
+        return None;
+    }
+    if surface.eq_ignore_ascii_case(query) {
+        return Some(Match::Exact);
+    }
+    if surface.len() >= query.len() && surface[..query.len()].eq_ignore_ascii_case(query) {
+        return Some(Match::Prefix);
+    }
+    if at_word_ci(surface, query) {
+        return Some(Match::Word);
+    }
+    if contains_ci(surface, query) {
+        return Some(Match::Substring);
+    }
+    scattered_ci(surface, query).then_some(Match::Loose)
+}
+
+fn contains_ci(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty()
+        && haystack
+            .windows(needle.len())
+            .any(|w| w.eq_ignore_ascii_case(needle))
+}
+
+/// Whether `query` occurs in `surface` at the start of a word.
+fn at_word(surface: &str, query: &str) -> bool {
+    surface.match_indices(query).any(|(at, _)| {
+        at > 0
+            && !surface[..at]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_alphanumeric)
+    })
+}
+
+fn at_word_ci(surface: &[u8], query: &[u8]) -> bool {
+    surface.windows(query.len()).enumerate().any(|(at, w)| {
+        at > 0 && !surface[at - 1].is_ascii_alphanumeric() && w.eq_ignore_ascii_case(query)
+    })
+}
+
+/// Whether `query`'s characters appear in `surface` in order.
+fn scattered(surface: &str, query: &str) -> bool {
+    let mut chars = surface.chars();
+    query.chars().all(|wanted| chars.any(|c| c == wanted))
+}
+
+fn scattered_ci(surface: &[u8], query: &[u8]) -> bool {
+    let mut at = 0;
+    for &wanted in query {
+        while at < surface.len() && !surface[at].eq_ignore_ascii_case(&wanted) {
+            at += 1;
+        }
+        if at == surface.len() {
+            return false;
+        }
+        at += 1;
+    }
+    true
+}
+
 use serde::Deserialize;
 
 use crate::provider::external::HostMeta;
@@ -39,6 +203,9 @@ pub struct PendingHost {
 pub(super) struct Entry {
     pub(super) plugin: Box<dyn super::Plugin>,
     pub(super) keyword: String,
+    /// An external host forks a process per call, so the default chain bounds it
+    /// with a deadline; a built-in answers off its own lists and is never cut off.
+    pub(super) external: bool,
     /// Set while an external plugin runs on its placeholder identity, so startup
     /// forks nothing; `resolve_pending` clears it on first use.
     pub(super) pending: Option<PendingHost>,

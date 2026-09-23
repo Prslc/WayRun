@@ -29,9 +29,11 @@ The first word of the input routes to a plugin only when some plugin owns that
 keyword. Otherwise the whole input, first word included, is the default
 providers' query: `foo bar` reaches a default provider as `foo bar`, not `bar`.
 
-Default providers (keyword `""`) are tried in entry order and the first one with
-non-empty results wins, so a bare query is app/command search, not a union of
-everything.
+Default providers (keyword `""`) all answer, and their rows are merged: by each
+row's relevance — the match kind's weight, scaled by the surface it matched on —
+then by the row's usage count, then by entry order. A title match therefore leads
+a description match of comparable strength, while an exact keyword still beats a
+title the query only sits inside of.
 
 ## Built-in plugins
 
@@ -39,7 +41,7 @@ everything.
 | --- | --- | --- | --- |
 | `calculator` | `""` | Inline arithmetic. | — |
 | `system-commands` | `""` | `lock`, `reboot`, `shutdown`, `suspend`, `logout`. | — |
-| `app-search` | `""` | Installed applications (desktop entries). | — |
+| `app-search` | `""` | Installed applications (desktop entries): the name, a near-spelling of it, and each metadata surface at the strength it can carry (a keyword or generic name by word, a description by prefix). | — |
 | `runner` | `r` | Fuzzy `$PATH` executables; accepts arguments. An installed app launches through GLib (honoring `Terminal=`), anything else runs in a terminal. | a terminal emulator |
 | `firefox-bookmarks` | `b` | Firefox bookmarks. | Firefox with a profile |
 | `firefox-history` | `h` | Firefox history. | Firefox with a profile |

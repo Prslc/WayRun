@@ -15,7 +15,6 @@ dirs = "6.0.0"
 fasteval = "0.2.4"
 gio = "0.22.9"
 libc = "0.2"
-nucleo = "0.5.0"
 notify = "8.2"
 rusqlite = "0.38.0"
 rust-i18n = { version = "1.2.2", default-features = false }

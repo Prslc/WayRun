@@ -1,7 +1,12 @@
+use std::cmp::Reverse;
+use std::time::Duration;
+
 use super::actions::{decorate, pin_scope};
-use super::model::Meta;
+use super::model::{Meta, Rank};
 use super::registry::{REGISTRY, ensure_loaded, resolve_pending};
+use crate::provider::SHOW_CAP;
 use crate::system::icon::find_icon_path;
+use crate::wire::Action;
 use crate::wire::ResultItem;
 use rust_i18n::t;
 
@@ -79,15 +84,65 @@ async fn search(input: &str) -> Vec<ResultItem> {
         return vec![];
     }
 
-    for entry in reg.iter().filter(|e| e.keyword.is_empty()) {
-        if let Ok(results) = entry.plugin.search(query, input).await
-            && !results.is_empty()
-        {
-            return fill_icons(entry.plugin.meta().icon, results);
+    // Every default provider answers and the merge orders them, so a prefix
+    // command can no longer hide an exact app.
+    let mut rows: Vec<(Rank, u32, ResultItem)> = Vec::new();
+    for (at, entry) in reg.iter().filter(|e| e.keyword.is_empty()).enumerate() {
+        // only a forked host runs under the deadline; a built-in answers off its
+        // own lists, where a broad query's first icon lookups can cost real time
+        let answer = if entry.external {
+            tokio::time::timeout(DEFAULT_DEADLINE, entry.plugin.search_ranked(query, input))
+                .await
+                .ok()
+        } else {
+            Some(entry.plugin.search_ranked(query, input).await)
+        };
+        if let Some(Ok(answered)) = answer {
+            let fallback = find_icon_path(entry.plugin.meta().icon);
+            rows.extend(answered.into_iter().map(|(rank, mut item)| {
+                fill_icon(&fallback, &mut item);
+                (rank, at as u32, item)
+            }));
         }
     }
+    let keys: Vec<String> = rows
+        .iter()
+        .filter_map(|(_, _, item)| item.on_click.as_ref())
+        .map(Action::key)
+        .collect();
+    merge_ranked(rows, &crate::system::usage::counts(&keys))
+}
 
-    vec![]
+/// How long the default chain waits for a keyword-less external host before
+/// answering without it.
+const DEFAULT_DEADLINE: Duration = Duration::from_millis(50);
+
+/// Order the default providers' rows: the strongest kind first, then the most
+/// picked row of that kind, then the registry order that otherwise ties them.
+fn merge_ranked(
+    mut rows: Vec<(Rank, u32, ResultItem)>,
+    counts: &std::collections::HashMap<String, u32>,
+) -> Vec<ResultItem> {
+    rows.sort_by_key(|(rank, provider, item)| {
+        let used = item
+            .on_click
+            .as_ref()
+            .and_then(|action| counts.get(&action.key()))
+            .copied()
+            .unwrap_or(0);
+        (Reverse(rank.key()), Reverse(used), *provider)
+    });
+    rows.into_iter()
+        .map(|(_, _, item)| item)
+        .take(SHOW_CAP)
+        .collect()
+}
+
+/// A row a provider left iconless takes the provider's identity icon.
+fn fill_icon(fallback: &Option<String>, item: &mut ResultItem) {
+    if item.icon.as_deref().is_none_or(str::is_empty) {
+        item.icon.clone_from(fallback);
+    }
 }
 
 /// Rows a provider left iconless take its identity icon, so no placeholder ever
@@ -95,9 +150,7 @@ async fn search(input: &str) -> Vec<ResultItem> {
 fn fill_icons(meta_icon: &str, mut items: Vec<ResultItem>) -> Vec<ResultItem> {
     let fallback = find_icon_path(meta_icon);
     for item in &mut items {
-        if item.icon.as_deref().is_none_or(str::is_empty) {
-            item.icon.clone_from(&fallback);
-        }
+        fill_icon(&fallback, item);
     }
     items
 }
@@ -132,8 +185,9 @@ fn identity_card(meta: &Meta, summary: String) -> ResultItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin::item;
+    use crate::plugin::{Match, item};
     use crate::wire::Action;
+    use std::collections::HashMap;
 
     fn run(cmd: &str) -> Action {
         Action::Run {
@@ -166,5 +220,106 @@ mod tests {
             "an empty spec is a miss, not an icon"
         );
         assert_eq!(filled[1].icon.as_deref(), Some("/tmp/kept.svg"));
+    }
+
+    fn row(title: &str, command: &str) -> ResultItem {
+        ResultItem {
+            title: title.to_string(),
+            summary: None,
+            on_click: Some(Action::Run {
+                cmd: command.to_string(),
+            }),
+            icon: None,
+            ephemeral: false,
+            actions: Vec::new(),
+            badge: None,
+        }
+    }
+
+    fn ranked(kind: Match, provider: u32, title: &str) -> (Rank, u32, ResultItem) {
+        (
+            Rank::title(kind),
+            provider,
+            row(title, &format!("cmd {title}")),
+        )
+    }
+
+    /// A prefix command may no longer hide an exact app, whatever the registry
+    /// order says.
+    #[test]
+    fn an_exact_row_leads_a_prefix_one_from_an_earlier_provider() {
+        let rows = vec![
+            ranked(Match::Prefix, 1, "command"),
+            ranked(Match::Exact, 2, "the app"),
+        ];
+        let merged = merge_ranked(rows, &HashMap::default());
+        assert_eq!(merged[0].title, "the app");
+    }
+
+    /// Within one kind the row picked more often leads, and otherwise the
+    /// registry order stands.
+    #[test]
+    fn a_used_row_leads_its_own_kind() {
+        let rows = vec![
+            ranked(Match::Exact, 1, "first"),
+            ranked(Match::Exact, 2, "second"),
+        ];
+        // the usage table is keyed by the canonical action, not the command
+        let key = rows[1].2.on_click.as_ref().expect("clickable").key();
+        let counts = HashMap::from([(key, 3)]);
+        assert_eq!(merge_ranked(rows, &counts)[0].title, "second");
+
+        let rows = vec![
+            ranked(Match::Exact, 1, "first"),
+            ranked(Match::Exact, 2, "second"),
+        ];
+        assert_eq!(merge_ranked(rows, &HashMap::default())[0].title, "first");
+    }
+
+    /// A provider that only lists sits below every scored row and keeps its own
+    /// order.
+    #[test]
+    fn a_listed_row_sits_below_a_scored_one() {
+        let rows = vec![
+            (Rank::Listed(0), 0, row("first", "a")),
+            (Rank::title(Match::Loose), 1, row("scored", "b")),
+            (Rank::Listed(1), 0, row("second", "c")),
+        ];
+        let merged = merge_ranked(rows, &HashMap::default());
+        let titles: Vec<&str> = merged.iter().map(|item| item.title.as_str()).collect();
+        assert_eq!(titles, ["scored", "first", "second"]);
+    }
+
+    /// The merge orders by the weight a provider computed, not by the kind band:
+    /// a title word (3000) beats a description's prefix (2500) but not a
+    /// description's exact match (5000), and a plain title substring (500) is
+    /// below a scaled-up metadata kind.
+    #[test]
+    fn a_scaled_weight_orders_across_kinds() {
+        let rows = vec![
+            (Rank::Scored(500), 0, row("title substring", "a")),
+            (Rank::Scored(2500), 0, row("summary prefix", "b")),
+            (Rank::title(Match::Word), 0, row("title word", "c")),
+            (Rank::Scored(5000), 0, row("summary exact", "d")),
+        ];
+        let merged = merge_ranked(rows, &HashMap::default());
+        let titles: Vec<&str> = merged.iter().map(|item| item.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            [
+                "summary exact",
+                "title word",
+                "summary prefix",
+                "title substring"
+            ]
+        );
+    }
+
+    #[test]
+    fn the_payload_is_capped() {
+        let rows: Vec<_> = (0..SHOW_CAP as u32 + 10)
+            .map(|at| ranked(Match::Exact, 0, &format!("row {at}")))
+            .collect();
+        assert_eq!(merge_ranked(rows, &HashMap::default()).len(), SHOW_CAP);
     }
 }
