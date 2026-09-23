@@ -639,9 +639,26 @@ async fn reaper() {
             // the map is gone, so the next search must be allowed to remap at
             // once instead of falling back to the walk for a whole TTL
             state.last_check = None;
+            // drop the guard first so a search never queues behind the arena walk
+            drop(state);
+            trim_allocator();
         }
     }
 }
+
+/// Release the allocator's free pages back to the kernel. Only glibc's
+/// `malloc_trim` does this; other targets leave it to their allocator.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn trim_allocator() {
+    // SAFETY: `malloc_trim` is a plain libc allocator call with no
+    // preconditions and no memory effects beyond returning free pages.
+    unsafe {
+        libc::malloc_trim(0);
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn trim_allocator() {}
 
 /// Reset [`BUILDING`] on every exit path out of [`refresh`].
 struct BuildGuard;
