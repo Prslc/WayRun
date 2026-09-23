@@ -39,7 +39,8 @@ const TOP: usize = 50;
 /// DFS pre-order and the file table is sorted by `dir`, which queries rely on.
 struct Index<'a> {
     bytes: &'a [u8],
-    home: &'a str,
+    // bytes, not `str`: `$HOME` need not be UTF-8
+    home: &'a [u8],
     dirs: usize,
     files: usize,
     names: usize,
@@ -88,7 +89,7 @@ impl<'a> Index<'a> {
         }
         Some(Index {
             bytes,
-            home: std::str::from_utf8(home_bytes).ok()?,
+            home: home_bytes,
             dirs,
             files,
             names,
@@ -279,7 +280,7 @@ fn build(home: &Path, cap: usize) -> Option<Vec<u8>> {
 /// the caller's scratch, and `dir_count` bounds a corrupt parent cycle.
 fn push_dir_path(index: &Index, i: u32, out: &mut PathBuf, chain: &mut Vec<u32>) {
     out.clear();
-    out.push(index.home);
+    out.push(OsStr::from_bytes(index.home));
     if i == 0 {
         return;
     }
@@ -376,7 +377,9 @@ fn search_in(index: &Index, query_lower: &str, want_dir: bool, name_only: bool) 
                 stack.push(rec.name);
             }
             path.clear();
-            path.push_str(index.home);
+            // lossy only for the matching haystack; a query is UTF-8 and so
+            // can never carry the replaced bytes
+            path.push_str(&String::from_utf8_lossy(index.home));
             for name in &stack {
                 path.push('/');
                 path.push_str(&String::from_utf8_lossy(name));
@@ -776,6 +779,30 @@ mod tests {
         let index = parsed(&bytes, home);
 
         assert_eq!(search_in(&index, "k", false, true).len(), 1);
+    }
+
+    #[test]
+    fn a_non_utf8_home_still_indexes_and_searches() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join(OsStr::from_bytes(b"h\xffme"));
+        let sub = OsStr::from_bytes(b"d\xffir");
+        std::fs::create_dir(&home).unwrap();
+        write(&home.join(sub).join("x.txt"));
+
+        let bytes = build_ok(&home, MAX_ENTRIES);
+        let index = parsed(&bytes, &home);
+
+        let files = search_in(&index, "x.txt", false, true);
+        assert_eq!(files.len(), 1);
+        assert_eq!(
+            files[0].summary.as_deref(),
+            Some(home.join(sub).join("x.txt").to_string_lossy().as_ref()),
+            "the reported path keeps the raw bytes"
+        );
+        // a path-mode `d` scan rebuilds each path from the stored home; the
+        // query carries the replacement char so the temp dir's random suffix
+        // cannot match the root's path the way a plain `d` could
+        assert_eq!(search_in(&index, "\u{fffd}ir", true, false).len(), 1);
     }
 
     #[test]
