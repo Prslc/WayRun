@@ -2,7 +2,7 @@ use std::io::Write as _;
 
 use anyhow::Result;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
 use crate::wire::ResultItem;
@@ -67,18 +67,18 @@ pub async fn serve() -> Result<()> {
     let _plugins_watcher = watchers::watch_plugins();
 
     let mut reader = BufReader::new(io::stdin()).lines();
-    let mut search: Option<JoinHandle<()>> = None;
+    let search = Search::spawn(tx.clone());
     // `forget` waits on external hosts, so it runs in a task; the handles are
     // awaited before returning so a one-shot client still gets its reply.
     let mut forgets: Vec<JoinHandle<()>> = Vec::new();
 
     while let Some(line) = reader.next_line().await? {
-        rpc::handle(&line, &tx, &mut search, &mut forgets).await;
+        rpc::handle(&line, &tx, &search, &mut forgets).await;
     }
 
-    // A pending search or forget still holds a sender clone; reap them, then
-    // drain the writer so a one-shot client gets its last response.
-    abort_search(&mut search);
+    // A pending search or forget still holds a sender clone; cancel or reap
+    // them, then drain the writer so a one-shot client gets its last response.
+    search.cancel();
     for handle in forgets {
         let _ = handle.await;
     }
@@ -105,22 +105,44 @@ pub async fn emit_history(tx: &mpsc::Sender<String>) {
     emit(tx, &results_notification(&history_items().await)).await;
 }
 
-/// Searches supersede each other: the pending one is aborted, the new one emits
-/// its payload when it lands.
-pub fn start_search(tx: &mpsc::Sender<String>, pending: &mut Option<JoinHandle<()>>, query: &str) {
-    abort_search(pending);
-
-    let tx = tx.clone();
-    let query = query.to_string();
-    *pending = Some(tokio::spawn(async move {
-        let results = plugin::dispatch(&query).await;
-        emit(&tx, &results_notification(&results)).await;
-    }));
+/// The streaming search's one worker: a new query supersedes the pending one,
+/// and a superseded payload is dropped instead of emitted.
+pub struct Search {
+    query: watch::Sender<Option<String>>,
 }
 
-/// Drop the in-flight search, if any.
-pub fn abort_search(pending: &mut Option<JoinHandle<()>>) {
-    if let Some(handle) = pending.take() {
-        handle.abort();
+impl Search {
+    /// Start the session's worker; it exits when the returned `Search` drops.
+    pub fn spawn(tx: mpsc::Sender<String>) -> Self {
+        let (query, mut rx) = watch::channel(None::<String>);
+        tokio::spawn(async move {
+            while rx.changed().await.is_ok() {
+                let Some(query) = rx.borrow_and_update().clone() else {
+                    continue;
+                };
+                // Each query gets its own task: a panicking provider must not
+                // silence the worker that answers every later search.
+                let Ok(results) = tokio::spawn(async move { plugin::dispatch(&query).await }).await
+                else {
+                    continue;
+                };
+                // A newer request, or a cancel, supersedes this payload.
+                if !rx.has_changed().unwrap_or(true) {
+                    emit(&tx, &results_notification(&results)).await;
+                }
+            }
+        });
+        Self { query }
+    }
+
+    /// Queue a query, superseding anything pending.
+    pub fn request(&self, query: &str) {
+        self.query.send_replace(Some(query.to_string()));
+    }
+
+    /// Drop the pending query, so a payload still in flight is not emitted and
+    /// the history it superseded stays the last one.
+    pub fn cancel(&self) {
+        self.query.send_replace(None);
     }
 }

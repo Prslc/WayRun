@@ -73,7 +73,7 @@ fn command_payload(params: Option<&Value>) -> Result<Action, ()> {
 pub async fn handle(
     line: &str,
     tx: &mpsc::Sender<String>,
-    search: &mut Option<JoinHandle<()>>,
+    search: &protocol::Search,
     forgets: &mut Vec<JoinHandle<()>>,
 ) {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
@@ -101,7 +101,7 @@ pub async fn handle(
                         let results = crate::plugin::dispatch(&text).await;
                         respond(tx, id, Ok(json!(results))).await;
                     } else {
-                        protocol::start_search(tx, search, &text);
+                        search.request(&text);
                     }
                 }
                 // an empty text is not a search; `top` serves the empty query
@@ -113,7 +113,7 @@ pub async fn handle(
             }
         }
         "top" => {
-            protocol::abort_search(search);
+            search.cancel();
             if has_id {
                 respond(tx, id, Ok(json!(protocol::history_items().await))).await;
             } else {
@@ -271,12 +271,12 @@ mod tests {
     use super::*;
     use tokio::sync::mpsc;
 
-    /// Returns whether a streaming search was started, and the emitted messages.
-    async fn run(line: &str) -> (bool, Vec<String>) {
+    /// Returns the messages emitted while one line is handled.
+    async fn run(line: &str) -> Vec<String> {
         let (tx, mut rx) = mpsc::channel::<String>(32);
-        let mut search = None;
+        let search = protocol::Search::spawn(tx.clone());
         let mut forgets = Vec::new();
-        handle(line, &tx, &mut search, &mut forgets).await;
+        handle(line, &tx, &search, &mut forgets).await;
         for handle in forgets {
             let _ = handle.await;
         }
@@ -284,12 +284,12 @@ mod tests {
         while let Ok(m) = rx.try_recv() {
             msgs.push(m);
         }
-        (search.is_some(), msgs)
+        msgs
     }
 
     #[tokio::test]
     async fn ping_returns_pong_with_id() {
-        let (_, msgs) = run(r#"{"jsonrpc":"2.0","method":"ping","id":1}"#).await;
+        let msgs = run(r#"{"jsonrpc":"2.0","method":"ping","id":1}"#).await;
         assert_eq!(msgs.len(), 1);
         let v: Value = serde_json::from_str(&msgs[0]).unwrap();
         assert_eq!(v["result"], "pong");
@@ -298,21 +298,19 @@ mod tests {
 
     #[tokio::test]
     async fn a_notification_sends_no_response() {
-        let (_, msgs) = run(r#"{"jsonrpc":"2.0","method":"ping"}"#).await;
+        let msgs = run(r#"{"jsonrpc":"2.0","method":"ping"}"#).await;
         assert!(msgs.is_empty());
     }
 
     #[tokio::test]
-    async fn a_search_notification_starts_the_streaming_search() {
-        let (started, msgs) =
-            run(r#"{"jsonrpc":"2.0","method":"search","params":{"text":"x"}}"#).await;
-        assert!(started, "a search notification streams its results later");
-        assert!(msgs.is_empty());
+    async fn a_search_notification_queues_the_query_without_a_reply() {
+        let msgs = run(r#"{"jsonrpc":"2.0","method":"search","params":{"text":"x"}}"#).await;
+        assert!(msgs.is_empty(), "the worker streams the payload later");
     }
 
     #[tokio::test]
     async fn a_non_json_line_returns_32700() {
-        let (_, msgs) = run("firefox").await;
+        let msgs = run("firefox").await;
         assert_eq!(msgs.len(), 1);
         let v: Value = serde_json::from_str(&msgs[0]).unwrap();
         assert_eq!(v["error"]["code"], -32700);
@@ -321,28 +319,28 @@ mod tests {
 
     #[tokio::test]
     async fn a_missing_method_returns_32600() {
-        let (_, msgs) = run(r#"{"jsonrpc":"2.0","params":null,"id":8}"#).await;
+        let msgs = run(r#"{"jsonrpc":"2.0","params":null,"id":8}"#).await;
         let v: Value = serde_json::from_str(&msgs[0]).unwrap();
         assert_eq!(v["error"]["code"], -32600);
     }
 
     #[tokio::test]
     async fn a_non_20_object_returns_32600() {
-        let (_, msgs) = run(r#"{"method":"ping","id":1}"#).await;
+        let msgs = run(r#"{"method":"ping","id":1}"#).await;
         let v: Value = serde_json::from_str(&msgs[0]).unwrap();
         assert_eq!(v["error"]["code"], -32600);
     }
 
     #[tokio::test]
     async fn unknown_method_returns_32601() {
-        let (_, msgs) = run(r#"{"jsonrpc":"2.0","method":"nope","id":7}"#).await;
+        let msgs = run(r#"{"jsonrpc":"2.0","method":"nope","id":7}"#).await;
         let v: Value = serde_json::from_str(&msgs[0]).unwrap();
         assert_eq!(v["error"]["code"], -32601);
     }
 
     #[tokio::test]
     async fn a_command_with_a_bad_payload_returns_32602() {
-        let (_, msgs) =
+        let msgs =
             run(r#"{"jsonrpc":"2.0","method":"command","params":{"type":"nope"},"id":3}"#).await;
         let v: Value = serde_json::from_str(&msgs[0]).unwrap();
         assert_eq!(v["error"]["code"], -32602);
@@ -350,7 +348,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_command_with_a_target_returns_null() {
-        let (_, msgs) = run(
+        let msgs = run(
             r#"{"jsonrpc":"2.0","method":"command","params":{"type":"open","uri":"file:///no/such"},"id":4}"#,
         )
         .await;
@@ -361,14 +359,14 @@ mod tests {
     #[tokio::test]
     async fn default_requires_a_scope() {
         // no scope means no DB write, so this cannot touch real history
-        let (_, msgs) = run(r#"{"jsonrpc":"2.0","method":"default","id":12}"#).await;
+        let msgs = run(r#"{"jsonrpc":"2.0","method":"default","id":12}"#).await;
         let v: Value = serde_json::from_str(&msgs[0]).unwrap();
         assert_eq!(v["error"]["code"], -32602);
     }
 
     #[tokio::test]
     async fn default_rejects_a_non_string_action_id() {
-        let (_, msgs) = run(
+        let msgs = run(
             r#"{"jsonrpc":"2.0","method":"default","params":{"scope":"x","action_id":42},"id":13}"#,
         )
         .await;
@@ -378,7 +376,7 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_params_returns_32602() {
-        let (_, msgs) = run(r#"{"jsonrpc":"2.0","method":"search","params":42,"id":9}"#).await;
+        let msgs = run(r#"{"jsonrpc":"2.0","method":"search","params":42,"id":9}"#).await;
         let v: Value = serde_json::from_str(&msgs[0]).unwrap();
         assert_eq!(v["error"]["code"], -32602);
     }
@@ -386,7 +384,7 @@ mod tests {
     #[tokio::test]
     async fn search_with_empty_text_returns_32602() {
         // an absent/empty query is not a search; `top` serves the empty query
-        let (_, msgs) = run(r#"{"jsonrpc":"2.0","method":"search","id":10}"#).await;
+        let msgs = run(r#"{"jsonrpc":"2.0","method":"search","id":10}"#).await;
         let v: Value = serde_json::from_str(&msgs[0]).unwrap();
         assert_eq!(v["error"]["code"], -32602);
     }
