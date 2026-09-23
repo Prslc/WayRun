@@ -1,7 +1,6 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::ffi::OsStr;
-use std::mem::size_of;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -22,8 +21,25 @@ const FORMAT_VERSION: u32 = 1;
 /// The header before the tables, all little-endian: magic, version, dir_count,
 /// file_count, names_len, home_len.
 const HEADER: usize = 24;
-const DIR_REC: usize = size_of::<DirOut>();
-const FILE_REC: usize = size_of::<FileOut>();
+const H_VERSION: usize = 4;
+const H_DIRS: usize = H_VERSION + 4;
+const H_FILES: usize = H_DIRS + 4;
+const H_NAMES: usize = H_FILES + 4;
+const H_HOME: usize = H_NAMES + 4;
+/// The directory record: parent slot, name offset, name length, depth (32-bit
+/// each), then the mtime in nanoseconds (64-bit). The `D_*` offsets are the
+/// layout `DirOut::bytes` writes and `Index::dir` reads.
+const DIR_REC: usize = 24;
+const D_PARENT: usize = 0;
+const D_NAME_OFF: usize = D_PARENT + 4;
+const D_NAME_LEN: usize = D_NAME_OFF + 4;
+const D_DEPTH: usize = D_NAME_LEN + 4;
+const D_MTIME: usize = D_DEPTH + 4;
+/// The file record: directory slot, name offset, name length (32-bit each).
+const FILE_REC: usize = 12;
+const F_DIR: usize = 0;
+const F_NAME_OFF: usize = F_DIR + 4;
+const F_NAME_LEN: usize = F_NAME_OFF + 4;
 /// Records kept; beyond it the build stops and reports that on stderr.
 const MAX_ENTRIES: usize = 1_000_000;
 /// How long a mapped index may sit unused before it is unmapped.
@@ -67,14 +83,13 @@ impl<'a> Index<'a> {
         if bytes.len() < HEADER || bytes[0..4] != MAGIC {
             return None;
         }
-        let u32_at = |o: usize| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
-        if u32_at(4) != FORMAT_VERSION {
+        if u32_at(bytes, H_VERSION) != FORMAT_VERSION {
             return None;
         }
-        let dir_count = u32_at(8);
-        let file_count = u32_at(12);
-        let names_len = u32_at(16);
-        let home_len = u32_at(20) as usize;
+        let dir_count = u32_at(bytes, H_DIRS);
+        let file_count = u32_at(bytes, H_FILES);
+        let names_len = u32_at(bytes, H_NAMES);
+        let home_len = u32_at(bytes, H_HOME) as usize;
 
         let home_end = HEADER.checked_add(home_len)?;
         let home_bytes = bytes.get(HEADER..home_end)?;
@@ -101,18 +116,18 @@ impl<'a> Index<'a> {
     fn dir(&self, i: u32) -> DirRec<'a> {
         let rec = self.rec(self.dirs, i, DIR_REC);
         DirRec {
-            parent: u32_at(rec, 0),
-            depth: u32_at(rec, 12),
-            mtime_ns: i64::from_le_bytes(rec[16..24].try_into().unwrap()),
-            name: self.name(u32_at(rec, 4), u32_at(rec, 8)),
+            parent: u32_at(rec, D_PARENT),
+            depth: u32_at(rec, D_DEPTH),
+            mtime_ns: i64::from_le_bytes(rec[D_MTIME..D_MTIME + 8].try_into().unwrap()),
+            name: self.name(u32_at(rec, D_NAME_OFF), u32_at(rec, D_NAME_LEN)),
         }
     }
 
     fn file(&self, i: u32) -> FileRec<'a> {
         let rec = self.rec(self.files, i, FILE_REC);
         FileRec {
-            dir: u32_at(rec, 0),
-            name: self.name(u32_at(rec, 4), u32_at(rec, 8)),
+            dir: u32_at(rec, F_DIR),
+            name: self.name(u32_at(rec, F_NAME_OFF), u32_at(rec, F_NAME_LEN)),
         }
     }
 
@@ -172,16 +187,55 @@ struct DirOut {
     mtime_ns: i64,
 }
 
+impl DirOut {
+    /// The record's bytes; `Index::dir` reads the same fields back at the same
+    /// `D_*` offsets.
+    fn bytes(&self) -> [u8; DIR_REC] {
+        let mut rec = [0; DIR_REC];
+        rec[D_PARENT..D_PARENT + 4].copy_from_slice(&self.parent.to_le_bytes());
+        rec[D_NAME_OFF..D_NAME_OFF + 4].copy_from_slice(&self.name_off.to_le_bytes());
+        rec[D_NAME_LEN..D_NAME_LEN + 4].copy_from_slice(&self.name_len.to_le_bytes());
+        rec[D_DEPTH..D_DEPTH + 4].copy_from_slice(&self.depth.to_le_bytes());
+        rec[D_MTIME..D_MTIME + 8].copy_from_slice(&self.mtime_ns.to_le_bytes());
+        rec
+    }
+}
+
 struct FileOut {
     dir: u32,
     name_off: u32,
     name_len: u32,
 }
 
+impl FileOut {
+    /// The record's bytes; `Index::file` reads the same fields back at the same
+    /// `F_*` offsets.
+    fn bytes(&self) -> [u8; FILE_REC] {
+        let mut rec = [0; FILE_REC];
+        rec[F_DIR..F_DIR + 4].copy_from_slice(&self.dir.to_le_bytes());
+        rec[F_NAME_OFF..F_NAME_OFF + 4].copy_from_slice(&self.name_off.to_le_bytes());
+        rec[F_NAME_LEN..F_NAME_LEN + 4].copy_from_slice(&self.name_len.to_le_bytes());
+        rec
+    }
+}
+
 fn push_name(names: &mut Vec<u8>, bytes: &[u8]) -> (u32, u32) {
     let off = names.len() as u32;
     names.extend_from_slice(bytes);
     (off, bytes.len() as u32)
+}
+
+/// The header's bytes; `parse` reads the same fields back at the same `H_*`
+/// offsets.
+fn header_bytes(dir_count: u32, file_count: u32, names_len: u32, home_len: u32) -> [u8; HEADER] {
+    let mut head = [0; HEADER];
+    head[0..4].copy_from_slice(&MAGIC);
+    head[H_VERSION..H_VERSION + 4].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
+    head[H_DIRS..H_DIRS + 4].copy_from_slice(&dir_count.to_le_bytes());
+    head[H_FILES..H_FILES + 4].copy_from_slice(&file_count.to_le_bytes());
+    head[H_NAMES..H_NAMES + 4].copy_from_slice(&names_len.to_le_bytes());
+    head[H_HOME..H_HOME + 4].copy_from_slice(&home_len.to_le_bytes());
+    head
 }
 
 /// Walk `home` into the index image; `cap` bounds dirs and files together.
@@ -253,24 +307,18 @@ fn build(home: &Path, cap: usize) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(
         HEADER + home_bytes.len() + dirs.len() * DIR_REC + files.len() * FILE_REC + names.len(),
     );
-    out.extend_from_slice(&MAGIC);
-    out.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
-    out.extend_from_slice(&(dirs.len() as u32).to_le_bytes());
-    out.extend_from_slice(&(files.len() as u32).to_le_bytes());
-    out.extend_from_slice(&(names.len() as u32).to_le_bytes());
-    out.extend_from_slice(&(home_bytes.len() as u32).to_le_bytes());
+    out.extend_from_slice(&header_bytes(
+        dirs.len() as u32,
+        files.len() as u32,
+        names.len() as u32,
+        home_bytes.len() as u32,
+    ));
     out.extend_from_slice(home_bytes);
     for d in &dirs {
-        out.extend_from_slice(&d.parent.to_le_bytes());
-        out.extend_from_slice(&d.name_off.to_le_bytes());
-        out.extend_from_slice(&d.name_len.to_le_bytes());
-        out.extend_from_slice(&d.depth.to_le_bytes());
-        out.extend_from_slice(&d.mtime_ns.to_le_bytes());
+        out.extend_from_slice(&d.bytes());
     }
     for f in &files {
-        out.extend_from_slice(&f.dir.to_le_bytes());
-        out.extend_from_slice(&f.name_off.to_le_bytes());
-        out.extend_from_slice(&f.name_len.to_le_bytes());
+        out.extend_from_slice(&f.bytes());
     }
     out.extend_from_slice(&names);
     Some(out)
@@ -703,6 +751,41 @@ mod tests {
             .iter()
             .map(|item| item.summary.clone().unwrap_or_default())
             .collect()
+    }
+
+    /// The golden bytes below pin the on-disk layout: the writer and the reader
+    /// go through the `H_*`/`D_*`/`F_*` offsets, and a change to any of them
+    /// must be a deliberate format change (with `FORMAT_VERSION` in mind).
+    #[test]
+    fn the_record_layouts_are_the_documented_bytes() {
+        let head = header_bytes(1, 2, 3, 4);
+        assert_eq!(head.len(), HEADER);
+        assert_eq!(&head[0..8], b"WRFI\x01\0\0\0");
+        assert_eq!(u32_at(&head, H_DIRS), 1);
+        assert_eq!(u32_at(&head, H_FILES), 2);
+        assert_eq!(u32_at(&head, H_NAMES), 3);
+        assert_eq!(u32_at(&head, H_HOME), 4);
+
+        let dir = DirOut {
+            parent: 1,
+            name_off: 2,
+            name_len: 3,
+            depth: 4,
+            mtime_ns: 5,
+        };
+        assert_eq!(
+            dir.bytes(),
+            [
+                1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0
+            ]
+        );
+
+        let file = FileOut {
+            dir: 1,
+            name_off: 2,
+            name_len: 3,
+        };
+        assert_eq!(file.bytes(), [1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0]);
     }
 
     #[test]
