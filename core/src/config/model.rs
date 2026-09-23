@@ -1,11 +1,8 @@
 use super::path;
 use serde::Deserialize;
 
-/// Core behaviour loaded from `~/.config/wayrun/config.toml`. Every field
-/// defaults to the compiled-in constant, so an absent file changes nothing.
-///
-/// These types are also the file's: one definition of every key serves the
-/// file and the runtime both, with each group's rule stated on its field.
+/// Core behaviour loaded from `~/.config/wayrun/config.toml`, whose types are
+/// also the file's; every field defaults to the compiled-in constant.
 #[derive(serde::Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
 pub struct Config {

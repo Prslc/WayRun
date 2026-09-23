@@ -27,13 +27,11 @@ const W_ACTION_PREFIX: u32 = 4_000;
 const W_ACTION_SUBSTRING: u32 = 400;
 
 /// One constant match surface — a name, comment, keyword or generic — with the
-/// forms a query needs precomputed, so scoring never re-lowers or re-tokenizes
-/// it per keystroke.
+/// forms a query needs precomputed, so scoring never re-lowers or re-tokenizes.
 struct Field {
     lower: String,
     chars: Vec<char>,
-    /// `(start, end)` char spans of the tokens in `lower`, split on ` `, `-`
-    /// and `_`.
+    /// `(start, end)` char spans of the tokens in `lower`, split on ` `, `-` and `_`.
     word_spans: Vec<(usize, usize)>,
 }
 

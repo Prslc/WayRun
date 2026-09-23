@@ -27,8 +27,7 @@ const H_FILES: usize = H_DIRS + 4;
 const H_NAMES: usize = H_FILES + 4;
 const H_HOME: usize = H_NAMES + 4;
 /// The directory record: parent slot, name offset, name length, depth (32-bit
-/// each), then the mtime in nanoseconds (64-bit). The `D_*` offsets are the
-/// layout `DirOut::bytes` writes and `Index::dir` reads.
+/// each), ns mtime (64-bit); `DirOut::bytes` writes it, `Index::dir` reads it.
 const DIR_REC: usize = 24;
 const D_PARENT: usize = 0;
 const D_NAME_OFF: usize = D_PARENT + 4;
@@ -179,8 +178,7 @@ struct DirOut {
 }
 
 impl DirOut {
-    /// The record's bytes; `Index::dir` reads the same fields back at the same
-    /// `D_*` offsets.
+    /// The record's bytes; `Index::dir` reads the same fields back at the `D_*` offsets.
     fn bytes(&self) -> [u8; DIR_REC] {
         let mut rec = [0; DIR_REC];
         rec[D_PARENT..D_PARENT + 4].copy_from_slice(&self.parent.to_le_bytes());
@@ -199,8 +197,7 @@ struct FileOut {
 }
 
 impl FileOut {
-    /// The record's bytes; `Index::file` reads the same fields back at the same
-    /// `F_*` offsets.
+    /// The record's bytes; `Index::file` reads the same fields back at the `F_*` offsets.
     fn bytes(&self) -> [u8; FILE_REC] {
         let mut rec = [0; FILE_REC];
         rec[F_DIR..F_DIR + 4].copy_from_slice(&self.dir.to_le_bytes());
@@ -216,8 +213,7 @@ fn push_name(names: &mut Vec<u8>, bytes: &[u8]) -> (u32, u32) {
     (off, bytes.len() as u32)
 }
 
-/// The header's bytes; `parse` reads the same fields back at the same `H_*`
-/// offsets.
+/// The header's bytes; `parse` reads the same fields back at the `H_*` offsets.
 fn header_bytes(dir_count: u32, file_count: u32, names_len: u32, home_len: u32) -> [u8; HEADER] {
     let mut head = [0; HEADER];
     head[0..4].copy_from_slice(&MAGIC);
@@ -230,9 +226,7 @@ fn header_bytes(dir_count: u32, file_count: u32, names_len: u32, home_len: u32) 
 }
 
 /// Walk `home` into the index image; `cap` bounds dirs and files together.
-/// `None` when the walk cannot be vouched for: an unlistable or unstatable
-/// `$HOME` would otherwise be persisted as an authoritative empty index, and a
-/// directory recorded without an mtime could never verify as fresh.
+/// `None` when a partial walk must not be persisted as an authoritative index.
 fn build(home: &Path, cap: usize) -> Option<Vec<u8>> {
     if !home.is_dir() {
         return None;
@@ -260,8 +254,7 @@ fn build(home: &Path, cap: usize) -> Option<Vec<u8>> {
     for entry in walker {
         let entry = match entry {
             Ok(entry) => entry,
-            // an unlistable `$HOME` would index as empty; an error below it
-            // just drops that subtree
+            // an unlistable `$HOME` would index as empty; deeper errors drop the subtree
             Err(err) if err.depth() == 0 => return None,
             Err(_) => continue,
         };
@@ -339,10 +332,7 @@ fn push_dir_path(index: &Index, i: u32, out: &mut PathBuf, chain: &mut Vec<u32>)
 }
 
 /// The layout the queries rely on: the root at slot 0, every other directory
-/// exactly one level below an earlier parent. A cache that breaks it cannot be
-/// walked safely — a huge `depth` would make the dir scans rebuild paths
-/// quadratically, `depth + 1` on a file record could overflow, and a parent
-/// cycle would make `fresh` walk the whole table for every directory.
+/// exactly one level below an earlier parent; a broken chain cannot be walked safely.
 fn layout_ok(index: &Index) -> bool {
     (0..index.dir_count).all(|i| {
         let rec = index.dir(i);
@@ -502,8 +492,7 @@ struct State {
     last_used: Option<Instant>,
     last_check: Option<Instant>,
     /// Set by [`discard`] once it has unlinked the cache and cleared before any
-    /// write: while it holds, no cache file is on disk, so a discard — one per
-    /// search while indexing is off — can skip the unlinks entirely.
+    /// write: while it holds, no cache file is on disk, so unlinks can be skipped.
     clean: bool,
 }
 
@@ -620,8 +609,7 @@ pub fn discard() {
 }
 
 /// Unmap an index nothing has used for [`IDLE`], so an idle launcher holds no
-/// index pages; the wait is trimmed to the moment the unmapping is due, and
-/// with nothing mapped the reaper parks until the next [`store`].
+/// index pages; with nothing mapped the reaper parks until the next [`store`].
 async fn reaper() {
     loop {
         let wait = {
@@ -629,8 +617,7 @@ async fn reaper() {
             let until_due = state
                 .last_used
                 .map_or(IDLE, |used| IDLE.saturating_sub(used.elapsed()));
-            // with no map there is nothing to unmap: park until a store
-            // instead of waking every IDLE
+            // with no map there is nothing to unmap: park until a store, not every IDLE
             state.map.as_ref().map(|_| until_due)
         };
         let Some(wait) = wait else {
@@ -744,9 +731,8 @@ mod tests {
             .collect()
     }
 
-    /// The golden bytes below pin the on-disk layout: the writer and the reader
-    /// go through the `H_*`/`D_*`/`F_*` offsets, and a change to any of them
-    /// must be a deliberate format change (with `FORMAT_VERSION` in mind).
+    /// The golden bytes below pin the on-disk layout: changing any `H_*`, `D_*`
+    /// or `F_*` offset must be a deliberate format change (`FORMAT_VERSION`).
     #[test]
     fn the_record_layouts_are_the_documented_bytes() {
         let head = header_bytes(1, 2, 3, 4);
@@ -911,9 +897,8 @@ mod tests {
             Some(home.join(sub).join("x.txt").to_string_lossy().as_ref()),
             "the reported path keeps the raw bytes"
         );
-        // a path-mode `d` scan rebuilds each path from the stored home; the
-        // query carries the replacement char so the temp dir's random suffix
-        // cannot match the root's path the way a plain `d` could
+        // a path-mode `d` scan rebuilds each path from the stored home, so the
+        // query's replacement char, not the temp dir's suffix, carries the match
         assert_eq!(search_in(&index, "\u{fffd}ir", true, false).len(), 1);
     }
 

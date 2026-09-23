@@ -19,9 +19,8 @@ pub enum Hover {
     Clear,
 }
 
-/// The window a list moves through: the highlighted index and the top row of the
-/// fixed `max_rows` window. The result list and the action panel each own one
-/// and move theirs by the same rules.
+/// The window a list moves through: the highlighted index and the top row of
+/// the fixed `max_rows` window; list and panel move theirs by the same rules.
 #[derive(Default)]
 pub struct Cursor {
     pub selected: usize,

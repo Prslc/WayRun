@@ -126,9 +126,6 @@ pub fn plugin_map() -> HashMap<&'static str, Box<dyn Plugin>> {
     m.insert("system-commands", Box::new(system::SystemCommands::new()));
     m.insert("runner", Box::new(runner::Runner::new()));
     m.insert("window", Box::new(window::WindowPlugin::new()));
-    // The one built-in whose identity follows the config (the search engine
-    // names it), so it cannot be a static literal; building it here keeps it
-    // in the map like every other built-in.
     m.insert("web-search", Box::new(web::WebSearch::new()));
     m
 }

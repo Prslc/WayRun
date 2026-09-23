@@ -147,8 +147,7 @@ fn score(name_lower: &str, query_lower: &str, fuzzy: u32) -> u32 {
     if tier > 0 { tier * 1000 + fuzzy } else { fuzzy }
 }
 
-/// Rows are built only for the winners, so a broad query does not allocate a
-/// row per PATH hit.
+/// Rows are built only for the winners, so a broad query allocates no row per PATH hit.
 const MAX_RESULTS: usize = 20;
 
 fn do_search(input: &str) -> Vec<ResultItem> {

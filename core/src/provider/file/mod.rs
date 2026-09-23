@@ -167,8 +167,7 @@ pub(super) fn score_path(name: &str, path_lower: &str, query_lower: &str, depth:
 }
 
 /// [`score_path`] for a caller that holds the path as two lowercased halves:
-/// the directory (no trailing separator) and the leaf. The haystack tested is
-/// the same `dir_lower + "/" + name_lower`, without building it per entry.
+/// the directory (no trailing separator) and the leaf, never joined per entry.
 pub(super) fn score_split_path(
     name: &str,
     dir_lower: &str,
@@ -194,8 +193,7 @@ fn path_score(name: &str, query_lower: &str, depth: usize) -> u32 {
 }
 
 /// Whether `token` occurs in `dir_lower + "/" + name_lower`: inside either
-/// half, or across the separator (so `sub/deep` still matches when `sub/` ends
-/// the directory and `deep` starts the name).
+/// half, or across the separator (`sub/deep` matching across the join).
 fn token_on_path(dir_lower: &str, name_lower: &str, token: &str) -> bool {
     if dir_lower.contains(token) || name_lower.contains(token) {
         return true;
@@ -361,8 +359,7 @@ fn quick_search(
                 .file_name()
                 .map(|n| n.to_string_lossy())
                 .unwrap_or_default();
-            // the name tier is all `f` needs; only a path query pays for the
-            // lowercased full path
+            // the name tier is all `f` needs; only a path query lowercases the full path
             let score = if name_only {
                 score_name(&name, query_lower, depth)
             } else {

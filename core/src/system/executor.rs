@@ -433,7 +433,6 @@ mod tests {
     #[test]
     fn an_absolute_terminal_path_still_names_the_emulator() {
         let dir = Path::new("/tmp/project");
-        // the basename decides the emulator, not the full path
         assert_eq!(
             terminal_dir_arg(&argv(&["/usr/bin/wezterm"]), dir),
             Some(argv(&["start", "--cwd", "/tmp/project"]))

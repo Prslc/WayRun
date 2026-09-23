@@ -17,8 +17,7 @@ pub struct Shaped {
     pub height: f32,
 }
 
-/// The identity of a shaped line: text, size (as bits — `f32` is not `Eq`) and
-/// weight.
+/// The identity of a shaped line: text, size (as bits — `f32` is not `Eq`) and weight.
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct ShapeKey {
     text: String,
@@ -36,8 +35,8 @@ impl ShapeKey {
     }
 }
 
-/// The line cache key: a plain line by its identity, a fitted one also by the
-/// elided-to width the fit depends on.
+/// The line cache key: a plain line by its identity, a fitted one by that
+/// identity plus the width it was elided to.
 #[derive(Clone, PartialEq, Eq, Hash)]
 enum LineKey {
     Plain(ShapeKey),
@@ -193,8 +192,7 @@ impl TextEngine {
         let (mut low, mut high) = (0, boundaries.len() - 1);
         while low < high {
             let mid = low + (high - low).div_ceil(2);
-            // The probe is a throwaway width, never drawn, so it stays out of
-            // the cache.
+            // The probe is a throwaway width, never drawn, so it stays out of the cache.
             let prefix = &text[..boundaries[mid]];
             let width = self.shape_uncached(prefix, size, weight).width;
             if width + ellipsis.width <= max_width {

@@ -310,9 +310,8 @@ impl Shell {
                 // Warm only what an animated frame can draw: the visible
                 // window. A row scrolled in later decodes on a settled frame.
                 for row in self.app.rows.iter().skip(first).take(layout.max_rows) {
-                    // Each warm mirrors how the frame draws it: the row icon
-                    // plain, the badge and the panel's action glyphs tinted to
-                    // their theme colours.
+                    // Each warm mirrors how the frame draws it: the row icon plain,
+                    // the badge and action glyphs tinted to their theme colours.
                     if let Some(path) = &row.icon {
                         self.icons.warm(path, icon_size);
                     }

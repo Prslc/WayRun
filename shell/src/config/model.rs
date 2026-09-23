@@ -10,12 +10,8 @@ macro_rules! assign {
     };
 }
 
-/// The base roles are RGB; every surface takes a colour with inline alpha, so
-/// opacity travels with the colour instead of its own key.
-///
-/// This is also the `[colors]` table as written: one definition of every key
-/// serves the file and the runtime both. A colour that does not parse is
-/// dropped like an absent key.
+/// The base roles are RGB; every surface takes a colour with inline alpha, and
+/// the type is also the `[colors]` table, a bad colour dropped like an absent key.
 #[derive(serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct ColorOverrides {
     #[serde(default, deserialize_with = "lenient_rgb")]

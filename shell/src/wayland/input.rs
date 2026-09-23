@@ -173,10 +173,8 @@ impl Shell {
         }
     }
 
-    /// Every query change is one search line (the core coalesces a burst into
-    /// the latest); every editing path — typing, paste, IME, ✕ — goes through
-    /// here. An edit also cancels a panel action's pending re-emit, whose reply
-    /// must not re-open the panel.
+    /// Every editing path — typing, paste, IME, ✕ — funnels here into one search
+    /// line, and cancels a panel resume before its reply re-opens the panel.
     pub(super) fn query_changed(&mut self) {
         self.app.cancel_panel_resume();
         self.resend_query();
