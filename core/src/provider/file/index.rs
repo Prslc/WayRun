@@ -17,23 +17,27 @@ use crate::wire::ResultItem;
 
 /// The index cache's magic and format version; either mismatch rebuilds.
 const MAGIC: [u8; 4] = *b"WRFI";
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_VERSION: u32 = 2;
 /// The header before the tables, all little-endian: magic, version, dir_count,
-/// file_count, names_len, home_len.
-const HEADER: usize = 24;
+/// file_count, names_len, home_len, paths_len.
+const HEADER: usize = 28;
 const H_VERSION: usize = 4;
 const H_DIRS: usize = H_VERSION + 4;
 const H_FILES: usize = H_DIRS + 4;
 const H_NAMES: usize = H_FILES + 4;
 const H_HOME: usize = H_NAMES + 4;
+const H_PATHS: usize = H_HOME + 4;
 /// The directory record: parent slot, name offset, name length, depth (32-bit
-/// each), ns mtime (64-bit); `DirOut::bytes` writes it, `Index::dir` reads it.
-const DIR_REC: usize = 24;
+/// each), ns mtime (64-bit), lowercased path offset and length (32-bit each);
+/// `DirOut::bytes` writes it, `Index::dir` reads it.
+const DIR_REC: usize = 32;
 const D_PARENT: usize = 0;
 const D_NAME_OFF: usize = D_PARENT + 4;
 const D_NAME_LEN: usize = D_NAME_OFF + 4;
 const D_DEPTH: usize = D_NAME_LEN + 4;
 const D_MTIME: usize = D_DEPTH + 4;
+const D_PATH_OFF: usize = D_MTIME + 8;
+const D_PATH_LEN: usize = D_PATH_OFF + 4;
 /// The file record: directory slot, name offset, name length (32-bit each).
 const FILE_REC: usize = 12;
 const F_DIR: usize = 0;
@@ -62,6 +66,7 @@ struct Index<'a> {
     dirs: usize,
     files: usize,
     names: usize,
+    paths: usize,
     dir_count: u32,
     file_count: u32,
 }
@@ -71,6 +76,7 @@ struct DirRec<'a> {
     depth: u32,
     mtime_ns: i64,
     name: &'a [u8],
+    path_lower: &'a str,
 }
 
 struct FileRec<'a> {
@@ -92,6 +98,7 @@ impl<'a> Index<'a> {
         let file_count = u32_at(bytes, H_FILES);
         let names_len = u32_at(bytes, H_NAMES);
         let home_len = u32_at(bytes, H_HOME) as usize;
+        let paths_len = u32_at(bytes, H_PATHS) as usize;
 
         let home_end = HEADER.checked_add(home_len)?;
         let home_bytes = bytes.get(HEADER..home_end)?;
@@ -101,7 +108,8 @@ impl<'a> Index<'a> {
         let dirs = home_end;
         let files = dirs.checked_add((dir_count as usize).checked_mul(DIR_REC)?)?;
         let names = files.checked_add((file_count as usize).checked_mul(FILE_REC)?)?;
-        if names.checked_add(names_len as usize)? != bytes.len() {
+        let paths = names.checked_add(names_len as usize)?;
+        if paths.checked_add(paths_len)? != bytes.len() {
             return None;
         }
         Some(Index {
@@ -110,6 +118,7 @@ impl<'a> Index<'a> {
             dirs,
             files,
             names,
+            paths,
             dir_count,
             file_count,
         })
@@ -122,6 +131,7 @@ impl<'a> Index<'a> {
             depth: u32_at(rec, D_DEPTH),
             mtime_ns: i64::from_le_bytes(rec[D_MTIME..D_MTIME + 8].try_into().unwrap()),
             name: self.name(u32_at(rec, D_NAME_OFF), u32_at(rec, D_NAME_LEN)),
+            path_lower: self.path_lower(u32_at(rec, D_PATH_OFF), u32_at(rec, D_PATH_LEN)),
         }
     }
 
@@ -145,6 +155,14 @@ impl<'a> Index<'a> {
         let start = self.names.saturating_add(off as usize);
         let end = start.saturating_add(len as usize);
         self.bytes.get(start..end).unwrap_or(&[])
+    }
+
+    /// A stored lowercased path, or `""` for a corrupt span: like `rec`, it
+    /// degrades to an empty haystack and never panics.
+    fn path_lower(&self, off: u32, len: u32) -> &'a str {
+        let start = self.paths.saturating_add(off as usize);
+        let end = start.saturating_add(len as usize);
+        std::str::from_utf8(self.bytes.get(start..end).unwrap_or_default()).unwrap_or_default()
     }
 }
 
@@ -178,6 +196,8 @@ struct DirOut {
     name_len: u32,
     depth: u32,
     mtime_ns: i64,
+    path_off: u32,
+    path_len: u32,
 }
 
 impl DirOut {
@@ -189,6 +209,8 @@ impl DirOut {
         rec[D_NAME_LEN..D_NAME_LEN + 4].copy_from_slice(&self.name_len.to_le_bytes());
         rec[D_DEPTH..D_DEPTH + 4].copy_from_slice(&self.depth.to_le_bytes());
         rec[D_MTIME..D_MTIME + 8].copy_from_slice(&self.mtime_ns.to_le_bytes());
+        rec[D_PATH_OFF..D_PATH_OFF + 4].copy_from_slice(&self.path_off.to_le_bytes());
+        rec[D_PATH_LEN..D_PATH_LEN + 4].copy_from_slice(&self.path_len.to_le_bytes());
         rec
     }
 }
@@ -217,7 +239,13 @@ fn push_name(names: &mut Vec<u8>, bytes: &[u8]) -> (u32, u32) {
 }
 
 /// The header's bytes; `parse` reads the same fields back at the `H_*` offsets.
-fn header_bytes(dir_count: u32, file_count: u32, names_len: u32, home_len: u32) -> [u8; HEADER] {
+fn header_bytes(
+    dir_count: u32,
+    file_count: u32,
+    names_len: u32,
+    home_len: u32,
+    paths_len: u32,
+) -> [u8; HEADER] {
     let mut head = [0; HEADER];
     head[0..4].copy_from_slice(&MAGIC);
     head[H_VERSION..H_VERSION + 4].copy_from_slice(&FORMAT_VERSION.to_le_bytes());
@@ -225,6 +253,7 @@ fn header_bytes(dir_count: u32, file_count: u32, names_len: u32, home_len: u32) 
     head[H_FILES..H_FILES + 4].copy_from_slice(&file_count.to_le_bytes());
     head[H_NAMES..H_NAMES + 4].copy_from_slice(&names_len.to_le_bytes());
     head[H_HOME..H_HOME + 4].copy_from_slice(&home_len.to_le_bytes());
+    head[H_PATHS..H_PATHS + 4].copy_from_slice(&paths_len.to_le_bytes());
     head
 }
 
@@ -238,18 +267,27 @@ fn build(home: &Path, cap: usize) -> Option<Vec<u8>> {
     let root_name = home.file_name().map(OsStr::as_bytes).unwrap_or(home_bytes);
     let mut names: Vec<u8> = Vec::new();
     let (name_off, name_len) = push_name(&mut names, root_name);
+    let mut paths: Vec<u8> = Vec::new();
+    let mut lower = String::new();
+    // lossy only for the haystack: a UTF-8 query can never carry replaced bytes
+    push_lowered(&mut lower, &String::from_utf8_lossy(home_bytes));
+    let (path_off, path_len) = push_name(&mut paths, lower.as_bytes());
     let mut dirs = vec![DirOut {
         parent: u32::MAX,
         name_off,
         name_len,
         depth: 0,
         mtime_ns: mtime_ns(home)?,
+        path_off,
+        path_len,
     }];
     let mut files: Vec<FileOut> = Vec::new();
 
     // One directory index per depth along the current path, so a child's parent
     // is the entry its own depth names; the pre-recorded root is depth 0.
     let mut stack: Vec<u32> = vec![0];
+    // the lowercased path span of the directory each depth names
+    let mut spans: Vec<(u32, u32)> = vec![(path_off, path_len)];
     let walker = WalkDir::new(home)
         .min_depth(1)
         .into_iter()
@@ -266,19 +304,39 @@ fn build(home: &Path, cap: usize) -> Option<Vec<u8>> {
         }
         let depth = entry.depth() as u32;
         stack.truncate(depth as usize);
+        spans.truncate(depth as usize);
         let parent = *stack.last().unwrap_or(&0);
         let file_type = entry.file_type();
         if file_type.is_dir() {
             let (name_off, name_len) = push_name(&mut names, entry.file_name().as_bytes());
             // the mtime must be read before walkdir reads the contents below
             let mtime_ns = mtime_ns(entry.path())?;
+            // the parent's stored path is extended, so lowercasing only the name
+            // leaves the same bytes as lowercasing the joined path
+            let (parent_off, parent_len) = *spans.last().unwrap_or(&(0, 0));
+            lower.clear();
+            lower.push_str(
+                std::str::from_utf8(
+                    &paths[parent_off as usize..(parent_off + parent_len) as usize],
+                )
+                .unwrap_or(""),
+            );
+            lower.push('/');
+            push_lowered(
+                &mut lower,
+                &String::from_utf8_lossy(entry.file_name().as_bytes()),
+            );
+            let (path_off, path_len) = push_name(&mut paths, lower.as_bytes());
             stack.push(dirs.len() as u32);
+            spans.push((path_off, path_len));
             dirs.push(DirOut {
                 parent,
                 name_off,
                 name_len,
                 depth,
                 mtime_ns,
+                path_off,
+                path_len,
             });
         } else if file_type.is_file() {
             let (name_off, name_len) = push_name(&mut names, entry.file_name().as_bytes());
@@ -292,13 +350,19 @@ fn build(home: &Path, cap: usize) -> Option<Vec<u8>> {
     files.sort_by_key(|rec| rec.dir);
 
     let mut out = Vec::with_capacity(
-        HEADER + home_bytes.len() + dirs.len() * DIR_REC + files.len() * FILE_REC + names.len(),
+        HEADER
+            + home_bytes.len()
+            + dirs.len() * DIR_REC
+            + files.len() * FILE_REC
+            + names.len()
+            + paths.len(),
     );
     out.extend_from_slice(&header_bytes(
         dirs.len() as u32,
         files.len() as u32,
         names.len() as u32,
         home_bytes.len() as u32,
+        paths.len() as u32,
     ));
     out.extend_from_slice(home_bytes);
     for d in &dirs {
@@ -308,6 +372,7 @@ fn build(home: &Path, cap: usize) -> Option<Vec<u8>> {
         out.extend_from_slice(&f.bytes());
     }
     out.extend_from_slice(&names);
+    out.extend_from_slice(&paths);
     Some(out)
 }
 
@@ -478,33 +543,12 @@ fn search_in(index: &Index, query_lower: &str, want_dir: bool, name_only: bool) 
     } else if want_dir {
         scan_top(
             index.dir_count,
-            || (Vec::new(), String::new(), String::new()),
-            |scratch, i, top| {
-                let (chain, path, lower) = scratch;
-                // lossy only for the matching haystack; a query is UTF-8 and so
-                // can never carry the replaced bytes
-                path.clear();
-                path.push_str(&String::from_utf8_lossy(index.home));
-                chain.clear();
-                let mut cur = i;
-                while cur != 0 && chain.len() < index.dir_count as usize {
-                    chain.push(cur);
-                    let parent = index.dir(cur).parent;
-                    if parent == u32::MAX {
-                        break;
-                    }
-                    cur = parent;
-                }
-                for &dir in chain.iter().rev() {
-                    path.push('/');
-                    path.push_str(&String::from_utf8_lossy(index.dir(dir).name));
-                }
-                lower.clear();
-                push_lowered(lower, path);
+            || (),
+            |_, i, top| {
                 let rec = index.dir(i);
                 let score = score_path(
                     &String::from_utf8_lossy(rec.name),
-                    lower,
+                    rec.path_lower,
                     query_lower,
                     rec.depth as usize,
                 );
@@ -522,35 +566,21 @@ fn search_in(index: &Index, query_lower: &str, want_dir: bool, name_only: bool) 
             },
         )
     } else {
-        scan_top(
-            index.file_count,
-            || {
-                (
-                    u32::MAX,
-                    PathBuf::new(),
-                    Vec::new(),
-                    String::new(),
-                    String::new(),
-                )
-            },
-            |scratch, i, top| {
-                let (last, dir_path, chain, dir_lower, name_lower) = scratch;
-                let rec = index.file(i);
-                if rec.dir != *last {
-                    push_dir_path(index, rec.dir, dir_path, chain);
-                    dir_lower.clear();
-                    push_lowered(dir_lower, &dir_path.to_string_lossy());
-                    *last = rec.dir;
-                }
-                let name = String::from_utf8_lossy(rec.name);
-                name_lower.clear();
-                push_lowered(name_lower, &name);
-                let depth = index.dir(rec.dir).depth + 1;
-                let score =
-                    score_split_path(&name, dir_lower, name_lower, query_lower, depth as usize);
-                top.offer(score, i);
-            },
-        )
+        scan_top(index.file_count, String::new, |name_lower, i, top| {
+            let rec = index.file(i);
+            let dir = index.dir(rec.dir);
+            let name = String::from_utf8_lossy(rec.name);
+            name_lower.clear();
+            push_lowered(name_lower, &name);
+            let score = score_split_path(
+                &name,
+                dir.path_lower,
+                name_lower,
+                query_lower,
+                dir.depth as usize + 1,
+            );
+            top.offer(score, i);
+        })
     };
 
     let mut path = PathBuf::new();
@@ -840,13 +870,14 @@ mod tests {
     /// or `F_*` offset must be a deliberate format change (`FORMAT_VERSION`).
     #[test]
     fn the_record_layouts_are_the_documented_bytes() {
-        let head = header_bytes(1, 2, 3, 4);
+        let head = header_bytes(1, 2, 3, 4, 5);
         assert_eq!(head.len(), HEADER);
-        assert_eq!(&head[0..8], b"WRFI\x01\0\0\0");
+        assert_eq!(&head[0..8], b"WRFI\x02\0\0\0");
         assert_eq!(u32_at(&head, H_DIRS), 1);
         assert_eq!(u32_at(&head, H_FILES), 2);
         assert_eq!(u32_at(&head, H_NAMES), 3);
         assert_eq!(u32_at(&head, H_HOME), 4);
+        assert_eq!(u32_at(&head, H_PATHS), 5);
 
         let dir = DirOut {
             parent: 1,
@@ -854,11 +885,14 @@ mod tests {
             name_len: 3,
             depth: 4,
             mtime_ns: 5,
+            path_off: 6,
+            path_len: 7,
         };
         assert_eq!(
             dir.bytes(),
             [
-                1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0
+                1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0,
+                7, 0, 0, 0
             ]
         );
 
@@ -868,6 +902,35 @@ mod tests {
             name_len: 3,
         };
         assert_eq!(file.bytes(), [1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0]);
+    }
+
+    /// The path-mode scans read the stored lowercased path instead of rebuilding
+    /// one per query, so what the build stores is what matching depends on.
+    #[test]
+    fn a_directories_lowercased_path_is_stored() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        write(&home.join("MiXeD/CaSe/hit.txt"));
+
+        let bytes = build_ok(home, MAX_ENTRIES);
+        let index = parsed(&bytes, home);
+
+        let root = index.dir(0);
+        let mut expect = String::new();
+        push_lowered(&mut expect, &home.to_string_lossy());
+        assert_eq!(root.path_lower, expect, "the root keeps the home path");
+
+        let mixed = index.dir(1);
+        assert_eq!(mixed.name, b"MiXeD");
+        expect.push_str("/mixed");
+        assert_eq!(mixed.path_lower, expect);
+
+        let case = index.dir(2);
+        assert_eq!(case.name, b"CaSe");
+        expect.push_str("/case");
+        assert_eq!(case.path_lower, expect);
+        // Only the stored path can satisfy "mixed/case": the name and parent cannot.
+        assert_eq!(search_in(&index, "mixed/case", true, false).len(), 1);
     }
 
     #[test]
