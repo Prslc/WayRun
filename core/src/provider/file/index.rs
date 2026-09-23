@@ -42,7 +42,7 @@ const F_NAME_LEN: usize = F_NAME_OFF + 4;
 /// Records kept; beyond it the build stops and reports that on stderr.
 const MAX_ENTRIES: usize = 1_000_000;
 /// How long a mapped index may sit unused before it is unmapped.
-const IDLE: Duration = Duration::from_secs(120);
+const IDLE: Duration = Duration::from_secs(30);
 /// How long before a query re-checks the walk's freshness in the background.
 const REFRESH_TTL: Duration = Duration::from_secs(300);
 /// The only providers the index serves.
