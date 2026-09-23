@@ -184,7 +184,13 @@ fn push_name(names: &mut Vec<u8>, bytes: &[u8]) -> (u32, u32) {
 }
 
 /// Walk `home` into the index image; `cap` bounds dirs and files together.
-fn build(home: &Path, cap: usize) -> Vec<u8> {
+/// `None` when the walk cannot be vouched for: an unlistable or unstatable
+/// `$HOME` would otherwise be persisted as an authoritative empty index, and a
+/// directory recorded without an mtime could never verify as fresh.
+fn build(home: &Path, cap: usize) -> Option<Vec<u8>> {
+    if !home.is_dir() {
+        return None;
+    }
     let home_bytes = home.as_os_str().as_bytes();
     let root_name = home.file_name().map(OsStr::as_bytes).unwrap_or(home_bytes);
     let mut names: Vec<u8> = Vec::new();
@@ -194,7 +200,7 @@ fn build(home: &Path, cap: usize) -> Vec<u8> {
         name_off,
         name_len,
         depth: 0,
-        mtime_ns: mtime_ns(home).unwrap_or(0),
+        mtime_ns: mtime_ns(home)?,
     }];
     let mut files: Vec<FileOut> = Vec::new();
 
@@ -205,7 +211,14 @@ fn build(home: &Path, cap: usize) -> Vec<u8> {
         .min_depth(1)
         .into_iter()
         .filter_entry(|e| e.depth() == 0 || keep_name(e.file_name()));
-    for entry in walker.filter_map(Result::ok) {
+    for entry in walker {
+        let entry = match entry {
+            Ok(entry) => entry,
+            // an unlistable `$HOME` would index as empty; an error below it
+            // just drops that subtree
+            Err(err) if err.depth() == 0 => return None,
+            Err(_) => continue,
+        };
         if dirs.len() + files.len() >= cap {
             break;
         }
@@ -216,7 +229,7 @@ fn build(home: &Path, cap: usize) -> Vec<u8> {
         if file_type.is_dir() {
             let (name_off, name_len) = push_name(&mut names, entry.file_name().as_bytes());
             // the mtime must be read before walkdir reads the contents below
-            let mtime_ns = mtime_ns(entry.path()).unwrap_or(0);
+            let mtime_ns = mtime_ns(entry.path())?;
             stack.push(dirs.len() as u32);
             dirs.push(DirOut {
                 parent,
@@ -259,7 +272,7 @@ fn build(home: &Path, cap: usize) -> Vec<u8> {
         out.extend_from_slice(&f.name_len.to_le_bytes());
     }
     out.extend_from_slice(&names);
-    out
+    Some(out)
 }
 
 /// Directory `i`'s absolute path; the root uses the stored `$HOME`. `chain` is
@@ -596,7 +609,10 @@ fn refresh(home: &Path) {
     }
 
     let started = Instant::now();
-    let bytes = build(home, MAX_ENTRIES);
+    let Some(bytes) = build(home, MAX_ENTRIES) else {
+        eprintln!("wayrun: file index build skipped: the walk was not fully readable");
+        return;
+    };
     if !crate::config::get().files.index {
         return; // indexing was turned off while this build ran
     }
@@ -637,6 +653,10 @@ mod tests {
         Index::parse(bytes, home).expect("a freshly built index parses")
     }
 
+    fn build_ok(home: &Path, cap: usize) -> Vec<u8> {
+        build(home, cap).expect("a readable home builds")
+    }
+
     fn summaries(items: &[ResultItem]) -> Vec<String> {
         items
             .iter()
@@ -651,7 +671,7 @@ mod tests {
         let deep = home.join("a/b/c/d/e");
         write(&deep.join("deep.txt"));
 
-        let bytes = build(home, MAX_ENTRIES);
+        let bytes = build_ok(home, MAX_ENTRIES);
         let index = parsed(&bytes, home);
 
         let files = search_in(&index, "deep.txt", false, true);
@@ -672,7 +692,7 @@ mod tests {
         write(&home.join("x.txt"));
         write(&home.join("a/b/x.txt"));
 
-        let bytes = build(home, MAX_ENTRIES);
+        let bytes = build_ok(home, MAX_ENTRIES);
         let index = parsed(&bytes, home);
 
         let files = search_in(&index, "x.txt", false, true);
@@ -693,7 +713,7 @@ mod tests {
             write(&home.join(format!("q{i}/sub/hit.txt")));
         }
 
-        let bytes = build(home, MAX_ENTRIES);
+        let bytes = build_ok(home, MAX_ENTRIES);
         let index = parsed(&bytes, home);
 
         let files = search_in(&index, "hit.txt", false, true);
@@ -714,7 +734,7 @@ mod tests {
         let home = dir.path();
         write(&home.join("sub/deep/x.txt"));
 
-        let bytes = build(home, MAX_ENTRIES);
+        let bytes = build_ok(home, MAX_ENTRIES);
         let index = parsed(&bytes, home);
 
         assert_eq!(search_in(&index, "sub/deep", false, false).len(), 1);
@@ -733,7 +753,7 @@ mod tests {
         }
         write(&deep.join("deep.txt"));
 
-        let bytes = build(home, MAX_ENTRIES);
+        let bytes = build_ok(home, MAX_ENTRIES);
         let index = parsed(&bytes, home);
 
         let files = search_in(&index, "deep.txt", false, true);
@@ -752,7 +772,7 @@ mod tests {
         // reachable through the text tier
         write(&home.join("\u{212A}elvin.txt"));
 
-        let bytes = build(home, MAX_ENTRIES);
+        let bytes = build_ok(home, MAX_ENTRIES);
         let index = parsed(&bytes, home);
 
         assert_eq!(search_in(&index, "k", false, true).len(), 1);
@@ -767,7 +787,7 @@ mod tests {
         }
         write(&home.join("Desktop/a/b/c.txt"));
 
-        let bytes = build(home, MAX_ENTRIES);
+        let bytes = build_ok(home, MAX_ENTRIES);
         let index = parsed(&bytes, home);
 
         for pruned in [
@@ -793,7 +813,7 @@ mod tests {
         let home = dir.path();
         write(&home.join("a/keep.txt"));
 
-        let bytes = build(home, MAX_ENTRIES);
+        let bytes = build_ok(home, MAX_ENTRIES);
         let index = parsed(&bytes, home);
         assert!(fresh(&index));
 
@@ -806,7 +826,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path();
         write(&home.join("a/x.txt"));
-        let bytes = build(home, MAX_ENTRIES);
+        let bytes = build_ok(home, MAX_ENTRIES);
         assert!(Index::parse(&bytes, home).is_some());
 
         let mut bad_magic = bytes.clone();
@@ -827,9 +847,43 @@ mod tests {
         let home = dir.path();
         write(&home.join("a/b/c/d/e/deep.txt"));
 
-        let bytes = build(home, 3);
+        let bytes = build_ok(home, 3);
         let index = parsed(&bytes, home);
         assert_eq!(index.dir_count as usize + index.file_count as usize, 3);
+    }
+
+    #[test]
+    fn an_unusable_home_is_never_written_out_as_empty() {
+        assert!(
+            build(Path::new("/nonexistent-home-of-wayrun"), MAX_ENTRIES).is_none(),
+            "an unstatable root must not become an authoritative empty index"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("not-a-dir");
+        write(&home);
+        assert!(
+            build(&home, MAX_ENTRIES).is_none(),
+            "a root that is not a directory can never be walked"
+        );
+
+        // a directory that stats but cannot be listed: root ignores the mode
+        // bits, so the case cannot be staged there
+        let chmod = |mode| {
+            std::fs::set_permissions(&home, std::os::unix::fs::PermissionsExt::from_mode(mode))
+                .unwrap()
+        };
+        chmod(0o000);
+        if std::fs::read_dir(&home).is_ok() {
+            chmod(0o755);
+            return;
+        }
+        let bytes = build(&home, MAX_ENTRIES);
+        chmod(0o755);
+        assert!(
+            bytes.is_none(),
+            "an unlistable root must not become an authoritative empty index"
+        );
     }
 
     #[test]
