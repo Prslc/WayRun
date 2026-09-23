@@ -1,3 +1,4 @@
+use super::model::Entry;
 use super::registry::{REGISTRY, ensure_loaded};
 use crate::system::icon::find_icon_path;
 use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
@@ -25,6 +26,7 @@ pub(super) fn pin_scope(input: &str) -> Option<&str> {
 /// Prepend the scope's pins and attach each row's actions. A pinned row is
 /// re-emitted from storage, so its fresh copy is dropped as a duplicate.
 pub async fn decorate(items: Vec<ResultItem>, scope: &str, history: bool) -> Vec<ResultItem> {
+    ensure_loaded().await;
     let pins: Vec<ResultItem> = crate::system::pins::get_pins(scope)
         .unwrap_or_default()
         .into_iter()
@@ -34,8 +36,17 @@ pub async fn decorate(items: Vec<ResultItem>, scope: &str, history: bool) -> Vec
     // One query for every plugin's remembered default, not one per row.
     let defaults = crate::system::defaults::all().unwrap_or_default();
 
+    // One registry read for the whole list; `Plugin::actions` is synchronous,
+    // so the guard never spans an await.
+    let reg = REGISTRY.read().await;
     for item in &mut out {
-        let plugin_actions = plugin_actions(item).await;
+        // A row without a click command gets no panel at all, so it needs no
+        // scan; the rest ask the plugins which of them owns them.
+        let plugin_actions = if item.on_click.is_some() {
+            plugin_actions(&reg, item)
+        } else {
+            (None, Vec::new())
+        };
         attach_actions(item, scope, &pinned, history, &defaults, plugin_actions);
     }
     out
@@ -63,9 +74,8 @@ fn merge_pins(
 
 /// The first plugin that recognises the row and declares actions for it, with
 /// the plugin's id, which scopes a remembered default action.
-async fn plugin_actions(item: &ResultItem) -> (Option<String>, Vec<ActionItem>) {
-    let reg = REGISTRY.read().await;
-    for entry in reg.iter() {
+fn plugin_actions(entries: &[Entry], item: &ResultItem) -> (Option<String>, Vec<ActionItem>) {
+    for entry in entries {
         let actions = entry.plugin.actions(item);
         if !actions.is_empty() {
             return (Some(entry.plugin.meta().id.to_string()), actions);
