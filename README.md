@@ -8,7 +8,7 @@ English | [Chinese](docs/zh_cn/README_CN.md)
 
 [![CI](https://github.com/Prslc/WayRun/actions/workflows/ci.yml/badge.svg)](https://github.com/Prslc/WayRun/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Prslc/WayRun?color=4a90d9&label=release)](https://github.com/Prslc/WayRun/releases)
-[![License](https://img.shields.io/github/license/Prslc/WayRun?color=yellow)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-yellow)](#license)
 [![Rust](https://img.shields.io/badge/rust-stable-orange?logo=rust)](https://www.rust-lang.org/)
 [![Wayland](https://img.shields.io/badge/Wayland-native-4a90d9?logo=wayland&logoColor=white)](https://wayland.freedesktop.org/)
 
@@ -131,7 +131,10 @@ cargo build --release -p wayrun-shell --no-default-features      # no window sea
 
 ## License
 
-WayRun is [MIT licensed](LICENSE).
+Dual licensed under either of the following, at your option:
+
+- **MIT** — [LICENSE-MIT](LICENSE-MIT)
+- **Apache-2.0** — [LICENSE-APACHE](LICENSE-APACHE)
 
 The built-in UI glyphs are Google Material Symbols under the Apache License 2.0;
 see [core/assets/icons/NOTICE](core/assets/icons/NOTICE) for the attribution and

@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/Prslc/WayRun/actions/workflows/ci.yml/badge.svg)](https://github.com/Prslc/WayRun/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Prslc/WayRun?color=4a90d9&label=release)](https://github.com/Prslc/WayRun/releases)
-[![License](https://img.shields.io/github/license/Prslc/WayRun?color=yellow)](../../LICENSE)
+[![License](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-yellow)](#许可证)
 [![Rust](https://img.shields.io/badge/rust-stable-orange?logo=rust)](https://www.rust-lang.org/)
 [![Wayland](https://img.shields.io/badge/Wayland-native-4a90d9?logo=wayland&logoColor=white)](https://wayland.freedesktop.org/)
 
@@ -117,7 +117,10 @@ cargo build --release -p wayrun-shell --no-default-features      # 不做窗口�
 
 ## 许可证
 
-WayRun 采用 [MIT 许可证](../../LICENSE)。
+WayRun 采用双许可证，可任选其一：
+
+- **MIT** —— [LICENSE-MIT](../../LICENSE-MIT)
+- **Apache-2.0** —— [LICENSE-APACHE](../../LICENSE-APACHE)
 
 内置 UI 字形为 Google Material Symbols，采用 Apache License 2.0；
 署名与许可证全文见 [core/assets/icons/NOTICE](../../core/assets/icons/NOTICE)。
