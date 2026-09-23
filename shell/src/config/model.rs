@@ -12,23 +12,59 @@ macro_rules! assign {
 
 /// The base roles are RGB; every surface takes a colour with inline alpha, so
 /// opacity travels with the colour instead of its own key.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+///
+/// This is also the `[colors]` table as written: one definition of every key
+/// serves the file and the runtime both. A colour that does not parse is
+/// dropped like an absent key.
+#[derive(serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct ColorOverrides {
+    #[serde(default, deserialize_with = "lenient_rgb")]
     pub primary: Option<[u8; 3]>,
+    #[serde(default, deserialize_with = "lenient_rgb")]
     pub fg: Option<[u8; 3]>,
+    #[serde(default, deserialize_with = "lenient_rgb")]
     pub container: Option<[u8; 3]>,
+    #[serde(default, deserialize_with = "lenient_rgba")]
     pub card: Option<[u8; 4]>,
+    #[serde(default, deserialize_with = "lenient_rgba")]
     pub field: Option<[u8; 4]>,
+    #[serde(default, deserialize_with = "lenient_rgba")]
     pub selection: Option<[u8; 4]>,
+    #[serde(default, deserialize_with = "lenient_rgba")]
     pub hover: Option<[u8; 4]>,
+    #[serde(default, deserialize_with = "lenient_rgba")]
     pub hairline: Option<[u8; 4]>,
+    #[serde(default, deserialize_with = "lenient_rgba")]
     pub muted: Option<[u8; 4]>,
+    #[serde(default, deserialize_with = "lenient_rgba")]
     pub summary: Option<[u8; 4]>,
+    #[serde(default, deserialize_with = "lenient_rgba")]
     pub footer: Option<[u8; 4]>,
+    #[serde(default, deserialize_with = "lenient_rgba")]
     pub accent: Option<[u8; 4]>,
+    #[serde(default, deserialize_with = "lenient_rgba")]
     pub dim: Option<[u8; 4]>,
     /// Ignore every override in this section and follow the system palette.
+    #[serde(default)]
     pub follow_system: bool,
+}
+
+/// A hand-written `#rrggbb` role.
+fn lenient_rgb<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<[u8; 3]>, D::Error> {
+    lenient(d, theme::parse_hex)
+}
+
+/// A hand-written surface colour, alpha included.
+fn lenient_rgba<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<[u8; 4]>, D::Error> {
+    lenient(d, theme::parse_color)
+}
+
+fn lenient<'de, D: serde::Deserializer<'de>, T>(
+    d: D,
+    parse: fn(&str) -> Option<T>,
+) -> Result<Option<T>, D::Error> {
+    let text = <Option<String> as serde::Deserialize>::deserialize(d)?;
+    Ok(text.as_deref().and_then(parse))
 }
 
 /// Which system palette is active; selects the matching colour table.
@@ -51,10 +87,13 @@ impl Mode {
 
 /// The `[colors]` root plus the `[colors.dark]`/`[colors.light]` tables layered
 /// on top while that mode is active.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct ColorConfig {
+    #[serde(flatten)]
     pub shared: ColorOverrides,
+    #[serde(default)]
     pub dark: ColorOverrides,
+    #[serde(default)]
     pub light: ColorOverrides,
 }
 
@@ -153,7 +192,7 @@ impl Default for AppearanceConfig {
 #[derive(serde::Deserialize, Default)]
 struct ThemeFile {
     #[serde(default)]
-    colors: ColorsFile,
+    colors: ColorConfig,
     #[serde(default)]
     blur: BlurFile,
     #[serde(default)]
@@ -162,57 +201,6 @@ struct ThemeFile {
     font: FontFile,
     #[serde(default)]
     motion: MotionFile,
-}
-
-/// `[colors]`'s own keys flatten into `shared`, so `[colors.dark]` and
-/// `[colors.light]` are the two subtables that overlay it.
-#[derive(serde::Deserialize, Default)]
-struct ColorsFile {
-    #[serde(flatten)]
-    shared: ColorTable,
-    #[serde(default)]
-    dark: ColorTable,
-    #[serde(default)]
-    light: ColorTable,
-}
-
-#[derive(serde::Deserialize, Default)]
-struct ColorTable {
-    primary: Option<String>,
-    fg: Option<String>,
-    container: Option<String>,
-    card: Option<String>,
-    field: Option<String>,
-    selection: Option<String>,
-    hover: Option<String>,
-    hairline: Option<String>,
-    muted: Option<String>,
-    summary: Option<String>,
-    footer: Option<String>,
-    accent: Option<String>,
-    dim: Option<String>,
-    follow_system: Option<bool>,
-}
-
-impl ColorTable {
-    fn to_overrides(&self) -> ColorOverrides {
-        ColorOverrides {
-            primary: self.primary.as_deref().and_then(theme::parse_hex),
-            fg: self.fg.as_deref().and_then(theme::parse_hex),
-            container: self.container.as_deref().and_then(theme::parse_hex),
-            card: self.card.as_deref().and_then(theme::parse_color),
-            field: self.field.as_deref().and_then(theme::parse_color),
-            selection: self.selection.as_deref().and_then(theme::parse_color),
-            hover: self.hover.as_deref().and_then(theme::parse_color),
-            hairline: self.hairline.as_deref().and_then(theme::parse_color),
-            muted: self.muted.as_deref().and_then(theme::parse_color),
-            summary: self.summary.as_deref().and_then(theme::parse_color),
-            footer: self.footer.as_deref().and_then(theme::parse_color),
-            accent: self.accent.as_deref().and_then(theme::parse_color),
-            dim: self.dim.as_deref().and_then(theme::parse_color),
-            follow_system: self.follow_system.unwrap_or(false),
-        }
-    }
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -277,11 +265,7 @@ impl AppearanceConfig {
             motion,
         } = file;
 
-        self.colors = ColorConfig {
-            shared: colors.shared.to_overrides(),
-            dark: colors.dark.to_overrides(),
-            light: colors.light.to_overrides(),
-        };
+        self.colors = colors;
 
         assign!(self.blur, blur.enabled);
         assign!(self.font.size, font.size.and_then(|v| positive(v, 96.0)));
@@ -450,6 +434,13 @@ mod tests {
         assert_eq!(config.colors.shared.muted, Some([0x44, 0x55, 0x66, 255]));
         assert_eq!(config.colors.shared.dim, Some([0, 0, 0, 255]));
         assert_eq!(config.colors.shared.accent, None);
+    }
+
+    #[test]
+    fn a_colour_of_the_wrong_type_rejects_the_file() {
+        // only an unparseable string is dropped key-by-key; a value of the
+        // wrong type still fails the whole file, as with every other key
+        assert!(toml::from_str::<ThemeFile>("[colors]\nprimary = 5").is_err());
     }
 
     #[test]

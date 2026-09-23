@@ -1,8 +1,13 @@
 use super::path;
+use serde::Deserialize;
 
 /// Core behaviour loaded from `~/.config/wayrun/config.toml`. Every field
 /// defaults to the compiled-in constant, so an absent file changes nothing.
-#[derive(Clone, Debug, Default, PartialEq)]
+///
+/// These types are also the file's: one definition of every key serves the
+/// file and the runtime both, with each group's rule stated on its field.
+#[derive(serde::Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
 pub struct Config {
     pub ui: Ui,
     pub web_search: WebSearch,
@@ -11,38 +16,72 @@ pub struct Config {
     pub files: Files,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(serde::Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
 pub struct Ui {
     /// Interface language: a `locales/<locale>.yml` stem such as `zh_cn`; empty
     /// follows the session's `$LC_ALL`/`$LC_MESSAGES`/`$LANG`.
+    #[serde(deserialize_with = "lenient_blank")]
     pub locale: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(serde::Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
 pub struct WebSearch {
     /// `google` or `duckduckgo`; an unknown value falls back to google.
     pub engine: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(serde::Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
 pub struct Font {
     /// The family the UI shapes with; missing glyphs fall back to the system, so
     /// a family covering only the scripts you read keeps the rest out of memory.
+    #[serde(deserialize_with = "lenient_family")]
     pub family: String,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(serde::Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
 pub struct Icon {
     /// Icon theme name; empty follows the desktop's own setting.
+    #[serde(deserialize_with = "lenient_blank")]
     pub theme: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(serde::Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
 pub struct Files {
     /// Index `$HOME` so `f`/`d` match at any depth; the cost is one cache file.
     pub index: bool,
     /// How many levels the search descends from each root when it is not indexed.
+    #[serde(deserialize_with = "lenient_depth")]
     pub depth: usize,
+}
+
+/// A blank text key means "follow the session/desktop", the same as absent.
+fn lenient_blank<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let text = String::deserialize(d)?;
+    Ok(if text.trim().is_empty() {
+        String::new()
+    } else {
+        text
+    })
+}
+
+/// A blank family keeps the shipped default instead of shaping with nothing.
+fn lenient_family<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let family = String::deserialize(d)?;
+    Ok(if family.trim().is_empty() {
+        Font::default().family
+    } else {
+        family
+    })
+}
+
+/// The walk depth, clamped to its documented range.
+fn lenient_depth<'de, D: serde::Deserializer<'de>>(d: D) -> Result<usize, D::Error> {
+    Ok(usize::deserialize(d)?.clamp(MIN_DEPTH, MAX_DEPTH))
 }
 
 impl Default for Files {
@@ -75,81 +114,17 @@ impl Default for Font {
     }
 }
 
-#[derive(serde::Deserialize, Default)]
-struct ConfigFile {
-    #[serde(default)]
-    ui: UiFile,
-    #[serde(default)]
-    web_search: WebSearchFile,
-    #[serde(default)]
-    font: FontFile,
-    #[serde(default)]
-    icon: IconFile,
-    #[serde(default)]
-    files: FilesFile,
-}
-
-#[derive(serde::Deserialize, Default)]
-struct UiFile {
-    locale: Option<String>,
-}
-
-#[derive(serde::Deserialize, Default)]
-struct WebSearchFile {
-    engine: Option<String>,
-}
-
-#[derive(serde::Deserialize, Default)]
-struct FontFile {
-    family: Option<String>,
-}
-
-#[derive(serde::Deserialize, Default)]
-struct IconFile {
-    theme: Option<String>,
-}
-
-#[derive(serde::Deserialize, Default)]
-struct FilesFile {
-    index: Option<bool>,
-    depth: Option<usize>,
-}
-
 impl Config {
     /// The file's config, or `None` when it is absent or unparseable. A watcher
     /// reload keeps what is applied rather than resetting to defaults.
     pub(super) fn load_checked() -> Option<Self> {
         let path = path()?;
         let text = std::fs::read_to_string(path).ok()?;
-        let file = toml::from_str::<ConfigFile>(&text).ok()?;
-        let mut config = Self::default();
-        config.apply(file);
-        Some(config)
+        toml::from_str(&text).ok()
     }
 
     pub(super) fn load() -> Self {
         Self::load_checked().unwrap_or_default()
-    }
-
-    fn apply(&mut self, file: ConfigFile) {
-        if let Some(locale) = file.ui.locale.filter(|l| !l.trim().is_empty()) {
-            self.ui.locale = locale;
-        }
-        if let Some(engine) = file.web_search.engine {
-            self.web_search.engine = engine;
-        }
-        if let Some(family) = file.font.family.filter(|f| !f.trim().is_empty()) {
-            self.font.family = family;
-        }
-        if let Some(theme) = file.icon.theme.filter(|t| !t.trim().is_empty()) {
-            self.icon.theme = theme;
-        }
-        if let Some(index) = file.files.index {
-            self.files.index = index;
-        }
-        if let Some(depth) = file.files.depth {
-            self.files.depth = depth.clamp(MIN_DEPTH, MAX_DEPTH);
-        }
     }
 }
 
@@ -158,9 +133,13 @@ mod tests {
     use super::*;
 
     fn parse(src: &str) -> Config {
-        let mut config = Config::default();
-        config.apply(toml::from_str(src).unwrap());
-        config
+        toml::from_str(src).unwrap()
+    }
+
+    #[test]
+    fn a_key_of_the_wrong_type_rejects_the_file() {
+        assert!(toml::from_str::<Config>("[files]\ndepth = \"deep\"").is_err());
+        assert!(toml::from_str::<Config>("[font]\nfamily = 5").is_err());
     }
 
     #[test]
