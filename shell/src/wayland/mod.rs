@@ -299,18 +299,29 @@ impl Shell {
             BackendEvent::Results(items) => {
                 let now = Instant::now();
                 self.app.apply_results(items, now);
-                let size =
-                    (self.app.appearance.font.icon() * self.app.scale_factor()).round() as u32;
+                let font = self.app.appearance.font;
+                let scale = self.app.scale_factor();
+                let icon_size = (font.icon() * scale).round() as u32;
+                let badge_size = (font.badge() * scale).round() as u32;
                 let fg = self.app.theme.fg;
-                for row in &self.app.rows {
+                let primary = self.app.theme.primary;
+                let layout = self.app.appearance.layout;
+                let first = self.app.cursor.first;
+                // Warm only what an animated frame can draw: the visible
+                // window. A row scrolled in later decodes on a settled frame.
+                for row in self.app.rows.iter().skip(first).take(layout.max_rows) {
+                    // Each warm mirrors how the frame draws it: the row icon
+                    // plain, the badge and the panel's action glyphs tinted to
+                    // their theme colours.
                     if let Some(path) = &row.icon {
-                        self.icons.warm(path, size);
+                        self.icons.warm(path, icon_size);
                     }
-                    // The panel draws action glyphs in the theme foreground;
-                    // warm that variant, not the dark original.
+                    if let Some(path) = &row.badge {
+                        self.icons.warm_tinted(path, badge_size, primary);
+                    }
                     for action in &row.actions {
                         if let Some(path) = &action.icon {
-                            self.icons.warm_tinted(path, size, fg);
+                            self.icons.warm_tinted(path, icon_size, fg);
                         }
                     }
                 }
