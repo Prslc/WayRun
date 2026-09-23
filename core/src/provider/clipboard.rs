@@ -76,14 +76,8 @@ fn parse_entries(query: &str, raw: &str) -> Vec<ResultItem> {
             continue;
         }
 
-        let preview = if preview.len() > 80 {
-            format!("{}…", &preview[..80])
-        } else {
-            preview.to_string()
-        };
-
         results.push(ResultItem {
-            title: preview,
+            title: truncate_preview(preview),
             summary: None,
             on_click: Some(Action::Run {
                 cmd: format!("sh -c 'cliphist decode {id} | wl-copy'"),
@@ -100,6 +94,22 @@ fn parse_entries(query: &str, raw: &str) -> Vec<ResultItem> {
     }
 
     results
+}
+
+const PREVIEW_MAX: usize = 80;
+
+/// Cut a preview to [`PREVIEW_MAX`] bytes without splitting a codepoint.
+fn truncate_preview(preview: &str) -> String {
+    if preview.len() <= PREVIEW_MAX {
+        return preview.to_string();
+    }
+    let end = preview
+        .char_indices()
+        .map(|(index, _)| index)
+        .take_while(|index| *index <= PREVIEW_MAX)
+        .last()
+        .unwrap_or(0);
+    format!("{}…", &preview[..end])
 }
 
 #[cfg(test)]
@@ -134,6 +144,16 @@ mod tests {
         let entries = parse_entries("", &raw);
         assert!(entries[0].title.len() <= 83); // 80 chars max + "…"
         assert!(entries[0].title.ends_with('…'));
+    }
+
+    #[test]
+    fn a_multibyte_preview_cuts_on_a_char_boundary() {
+        let long = "汉".repeat(40);
+        let raw = format!("1\ttext/plain\t{long}");
+        let entries = parse_entries("", &raw);
+        let cut = entries[0].title.trim_end_matches('…');
+        assert_eq!(cut.len(), 78, "the last boundary at or below 80 bytes");
+        assert!(long.starts_with(cut));
     }
 
     #[test]
