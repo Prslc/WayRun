@@ -62,7 +62,7 @@ struct CachedHost {
 
 impl HostCache {
     fn path() -> Option<std::path::PathBuf> {
-        dirs::cache_dir().map(|dir| dir.join("wayrun/plugin-hosts.json"))
+        Some(crate::system::fs::cache_dir()?.join("plugin-hosts.json"))
     }
 
     pub fn load() -> Self {
@@ -101,11 +101,8 @@ impl HostCache {
         let Some(path) = Self::path() else {
             return;
         };
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
         if let Ok(text) = serde_json::to_string(self) {
-            let _ = std::fs::write(path, text);
+            let _ = crate::system::fs::write_atomic(&path, text.as_bytes());
         }
     }
 }

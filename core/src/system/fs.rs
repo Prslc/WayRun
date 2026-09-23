@@ -31,6 +31,15 @@ pub fn write_if_absent(path: &Path, contents: &str) -> std::io::Result<()> {
     file.write_all(contents.as_bytes())
 }
 
+/// Write `<path>.tmp`, then rename: a reader only ever sees a whole file.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, path)
+}
+
 /// Flatpak apps live in `<installation>/exports/share`, which only reaches
 /// `XDG_DATA_DIRS` from a login shell; runs before GLib caches the dirs.
 pub fn ensure_flatpak_data_dirs() {

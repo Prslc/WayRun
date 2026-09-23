@@ -163,7 +163,7 @@ fn write_cached(dir: &Path, name: &str, bytes: &[u8]) -> Option<String> {
     std::fs::create_dir_all(dir).ok()?;
     let target = dir.join(name);
     if std::fs::read(&target).ok().as_deref() != Some(bytes) {
-        std::fs::write(&target, bytes).ok()?;
+        crate::system::fs::write_atomic(&target, bytes).ok()?;
     }
     Some(target.to_string_lossy().into_owned())
 }

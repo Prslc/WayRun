@@ -155,15 +155,6 @@ fn path() -> Option<PathBuf> {
     Some(crate::system::fs::cache_dir()?.join("file-index.bin"))
 }
 
-/// Write `<path>.tmp`, then rename: a reader only ever sees a whole file.
-fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
-    let tmp = PathBuf::from(tmp);
-    std::fs::write(&tmp, bytes)?;
-    std::fs::rename(&tmp, path)
-}
-
 fn load() -> Option<Mmap> {
     let file = std::fs::File::open(path()?).ok()?;
     // SAFETY: the cache is only ever replaced by an atomic rename, never
@@ -702,7 +693,7 @@ fn refresh(home: &Path) {
     };
     // a cache file, or its `.tmp`, may exist from here on
     lock().clean = false;
-    if let Err(err) = write_atomic(&path, &bytes) {
+    if let Err(err) = crate::system::fs::write_atomic(&path, &bytes) {
         eprintln!("wayrun: file index write failed: {err}");
         return;
     }
