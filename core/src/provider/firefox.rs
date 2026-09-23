@@ -54,9 +54,7 @@ fn find_db() -> Result<PathBuf> {
 /// One copy at a time: a concurrent bookmark and history search share the cache.
 static COPY_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
-/// The cached copy of `source` at its current `(mtime, size)`, under
-/// `$XDG_CACHE_HOME/wayrun`. The live profile is never locked, and the 30MB copy
-/// is paid only when the profile changed, not on every keystroke.
+/// The path of `source`'s cached copy for its current `(mtime, size)`.
 fn cached_copy(source: &Path) -> Result<PathBuf> {
     let meta = fs::metadata(source)?;
     let size = meta.len();

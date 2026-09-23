@@ -90,9 +90,8 @@ async fn search(input: &str) -> Vec<ResultItem> {
     vec![]
 }
 
-/// Rows a provider left iconless take its identity icon, so a command or window
-/// row never shows the app placeholder before the shell sees it. Running before
-/// `decorate`, this is also what pins and usage history store.
+/// Rows a provider left iconless take its identity icon, so no placeholder ever
+/// reaches the shell; running before `decorate`, pins and history store the fill.
 fn fill_icons(meta_icon: &str, mut items: Vec<ResultItem>) -> Vec<ResultItem> {
     let fallback = find_icon_path(meta_icon);
     for item in &mut items {

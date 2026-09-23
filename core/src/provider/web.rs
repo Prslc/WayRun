@@ -154,8 +154,7 @@ fn do_search(engine: &Engine, query: &str) -> Result<Vec<ResultItem>> {
     }];
 
     if let Some(suggestions) = json.get(1).and_then(|s| s.as_array()) {
-        // Same engine icon and summary as the header row, so every suggestion
-        // renders uniformly.
+        // Same icon and summary as the header row, so suggestions render uniformly.
         results.extend(
             suggestions
                 .iter()

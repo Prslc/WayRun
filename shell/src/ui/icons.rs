@@ -36,8 +36,7 @@ impl IconCache {
             .or_insert_with(|| render(path, size));
     }
 
-    /// Like [`IconCache::warm`], for a glyph drawn through
-    /// [`IconCache::draw_tinted`].
+    /// Like [`IconCache::warm`], for a glyph drawn through [`IconCache::draw_tinted`].
     pub fn warm_tinted(&mut self, path: &str, size: u32, color: [u8; 3]) {
         self.tinted
             .entry((path.to_string(), size, color))
@@ -156,9 +155,8 @@ fn tint(pixmap: &mut Pixmap, color: [u8; 3]) {
     }
 }
 
-/// Render one panel action glyph. Icon families pad their artwork differently,
-/// so crop to the ink and scale that to a common box, then tint: actions from a
-/// 24px action set and a 32px symbolic set end up the same optical size.
+/// Render one panel action glyph: families pad their artwork differently, so crop
+/// to the ink, scale it to a common box, then tint; any source size lands alike.
 fn render_glyph(path: &str, size: u32, color: [u8; 3]) -> Option<Pixmap> {
     if path.to_ascii_lowercase().ends_with(".svg") {
         return render_svg_glyph(path, size, color);
@@ -199,9 +197,8 @@ fn render_glyph(path: &str, size: u32, color: [u8; 3]) -> Option<Pixmap> {
     Some(out)
 }
 
-/// The SVG path of [`render_glyph`]: probe the ink once, then rasterise the
-/// vector a second time with the ink fitted to the box, so the glyph is drawn
-/// crisp at the final size instead of being scaled after rasterising.
+/// The SVG path of [`render_glyph`]: probe the ink once, then rasterise the vector
+/// a second time with the ink fitted to the box, so it is crisp at the final size.
 fn render_svg_glyph(path: &str, size: u32, color: [u8; 3]) -> Option<Pixmap> {
     let data = std::fs::read(path).ok()?;
     let tree = resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default()).ok()?;
@@ -262,6 +259,7 @@ fn ink_bounds(pixmap: &Pixmap) -> Option<(u32, u32, u32, u32)> {
     }
     found.then(|| (min_x, min_y, max_x - min_x + 1, max_y - min_y + 1))
 }
+
 /// Render the SVG into a `size`×`size` box, contained (aspect preserved).
 fn render_svg(data: &[u8], size: u32) -> Option<Pixmap> {
     let tree = resvg::usvg::Tree::from_data(data, &resvg::usvg::Options::default()).ok()?;

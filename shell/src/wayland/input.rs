@@ -210,8 +210,7 @@ impl Shell {
     }
 
     /// Record the selected row in usage history, unless the command about to run
-    /// is a clipboard write: a copy is not a re-launchable target, so it stays
-    /// out of history exactly as a `copy` row does.
+    /// is a clipboard write: a copy is no re-launchable target and stays out of history.
     fn record_row_for(&self, command: &Action) {
         if matches!(command, Action::Copy { .. }) {
             return;
@@ -229,8 +228,8 @@ impl Shell {
         backend::select(&usage);
     }
 
-    /// The surface outlives a launch by 150ms. Without it a non-resident run can
-    /// exit before the queued verb reaches the writer thread.
+    /// The surface outlives a launch by `EXIT_DELAY_MS`. Without it a non-resident
+    /// run can exit before the queued verb reaches the writer thread.
     fn schedule_dismiss(&mut self, now: Instant) {
         let at = now + Duration::from_millis(app::EXIT_DELAY_MS);
         self.app.dismiss_at = Some(at);
@@ -259,8 +258,7 @@ impl Shell {
     }
 
     fn close_panel(&mut self, now: Instant) {
-        // The user closed it: a panel action's pending reply must not bring it
-        // back.
+        // The user closed it: a panel action's pending reply must not bring it back.
         self.app.cancel_panel_resume();
         if self.app.menu.take().is_some() {
             self.app.retarget_height(now);
@@ -276,10 +274,8 @@ impl Shell {
         self.execute_action(&action, now);
     }
 
-    /// Alt+Enter in the panel: remember the highlighted action as its plugin's
-    /// default, or clear it when it already is or when it is the row's own
-    /// command (which is the implicit default). A launcher-level action has no
-    /// plugin and is ignored, so the panel stays open.
+    /// Alt+Enter in the panel: remember the highlighted action as its plugin's default;
+    /// clear it if it already is, or is the row's command; a plugin-less one is ignored.
     fn toggle_default(&mut self) {
         let Some(action) = self.app.selected_action() else {
             return;
@@ -291,9 +287,8 @@ impl Shell {
         self.keep_panel(&action);
     }
 
-    /// One action-panel command. Pin/unpin and the default gesture re-search, so
-    /// the panel stays open on the entry that changed; the rest launch and
-    /// dismiss, except `forget`, which drops the row in place.
+    /// One action-panel command: pin/unpin and the default re-search keep the panel on
+    /// the changed entry; the rest launch and dismiss; `forget` drops its row.
     fn execute_action(&mut self, action: &ActionItem, now: Instant) {
         match &action.action {
             PanelAction::Execute { command } => {

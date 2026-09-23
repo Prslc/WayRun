@@ -8,8 +8,7 @@ use crate::notify::watch;
 pub fn watch_theme(tx: &mpsc::Sender<String>) -> Option<RecommendedWatcher> {
     let path = crate::system::theme::dms_colors_path()?;
 
-    // Seed the dedup with the theme emitted at startup, so an unchanged file
-    // never re-emits.
+    // Seed the dedup with the startup theme, so an unchanged file never re-emits.
     let mut last_sent = serde_json::to_string(&crate::protocol::theme_notification()).ok();
     let tx = tx.clone();
 

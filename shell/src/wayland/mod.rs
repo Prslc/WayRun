@@ -367,6 +367,7 @@ impl Shell {
 
     pub fn on_ipc(&mut self, command: ipc::Command) {
         let now = Instant::now();
+        // `Status` is answered by the connection thread, so it is a no-op here.
         match command {
             ipc::Command::Open => self.open(now),
             ipc::Command::Close => self.dismiss(now),
@@ -377,7 +378,6 @@ impl Shell {
                     self.open(now);
                 }
             }
-            // answered by the connection thread, never forwarded
             ipc::Command::Status => {}
         }
     }

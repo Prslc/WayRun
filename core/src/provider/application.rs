@@ -511,9 +511,8 @@ fn parse_meta(entry: &DesktopEntry, locales: &[String]) -> DesktopMeta {
     }
 }
 
-/// The program a desktop `Exec=` runs, from its parsed argv. `env` is unwrapped
-/// (`Exec=env VAR=… prog`) so the real program is the match; a shell, sandbox or
-/// interpreter wrapper runs no PATH program of its own, so it maps to nothing.
+/// The program a desktop `Exec=` runs, from its parsed argv: `env` is unwrapped
+/// to the real program; a shell, sandbox or interpreter wrapper maps to nothing.
 fn exec_program(argv: &[String]) -> Option<String> {
     let mut words = argv.iter();
     let first = program_name(words.next()?)?;
@@ -537,8 +536,7 @@ fn program_name(word: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Basename of the program a desktop entry's `Exec=` runs, for the runner's PATH
-/// hits.
+/// Basename of the program a desktop entry's `Exec=` runs, for the runner's PATH hits.
 fn exec_basename(entry: &DesktopEntry) -> Option<String> {
     let argv: Vec<String> = gio::glib::shell_parse_argv(entry.exec()?)
         .ok()?

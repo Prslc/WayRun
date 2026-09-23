@@ -127,9 +127,8 @@ fn scan_path() -> Vec<Binary> {
     out
 }
 
-/// The command for a hit: an installed app launches through `gio` so its
-/// `Terminal=` and env are honored; anything else needs a tty (a PATH tool is
-/// usually interactive) and runs in a terminal.
+/// The command for a hit: an installed app launches through `gio`, honoring its
+/// `Terminal=` and env; anything else needs a tty, so it runs in a terminal.
 fn action_for(desktop_id: Option<&str>, terminal: bool, has_args: bool, run_cmd: String) -> Action {
     match desktop_id {
         Some(id) if !has_args => Action::Launch {

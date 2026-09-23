@@ -85,7 +85,6 @@ fn do_search(expr: &str) -> Vec<ResultItem> {
                     None
                 }
             }
-            // constants
             _ if args.is_empty() => match name.as_str() {
                 "pi" => Some(std::f64::consts::PI),
                 "tau" => Some(std::f64::consts::TAU),

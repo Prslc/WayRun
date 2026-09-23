@@ -209,10 +209,8 @@ pub async fn discover(command: &str) -> Vec<HostMeta> {
         .collect()
 }
 
-/// Normalize a host response's `result` array into rows, resolving each icon to
-/// what the UI can render and stamping `plugin` as the owner of the row's
-/// actions, so a host action scopes a remembered default like a built-in's.
-/// `None` when there is no usable `result` array.
+/// A host `result` array as rows: icons resolved, and `plugin` stamped as the
+/// actions' owner so a host default scopes like a built-in's; `None` if unusable.
 fn parse_result_items(
     response: &serde_json::Value,
     plugin: &str,

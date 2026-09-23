@@ -44,8 +44,7 @@ pub fn socket_path() -> PathBuf {
     dir.join("wayrun.sock")
 }
 
-/// Bind the listener (which is also the single-instance guard) and spawn the
-/// accept loop.
+/// Bind the listener (also the single-instance guard) and spawn the accept loop.
 pub fn serve(tx: Sender<Command>) -> std::io::Result<()> {
     let path = socket_path();
     // Single-instance guard: a live listener here means another daemon owns the

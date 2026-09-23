@@ -79,9 +79,8 @@ macro_rules! search_plugin {
     };
 }
 
-/// The commands a file or directory row carries, in panel order: opening a
-/// terminal leads so the two ways to open the entry sit together, then revealing
-/// it in the file manager, then copying its path.
+/// A file or directory row's commands, in panel order: a terminal leads so the
+/// two ways to open sit together, then reveal in the file manager, then copy its path.
 fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
     let Some(Action::Open { uri }) = item.on_click.as_ref() else {
         return Vec::new();
@@ -203,9 +202,8 @@ fn token_on_path(dir_lower: &str, name_lower: &str, token: &str) -> bool {
         .any(|(i, _)| dir_lower.ends_with(&token[..i]) && name_lower.starts_with(&token[i + 1..]))
 }
 
-/// The path a path-like query names, before it is checked against the disk:
-/// `~` and a relative path resolve under `home`, an absolute path stays put.
-/// `None` when the query has no path syntax.
+/// The path a path-like query names, before any disk check: `~` and a relative
+/// path resolve under `home`, absolute stays put; `None` without path syntax.
 fn resolve_path_query(query: &str, home: &Path) -> Option<PathBuf> {
     if query.starts_with('~') {
         Some(home.join(query.trim_start_matches('~').trim_start_matches('/')))
@@ -218,9 +216,8 @@ fn resolve_path_query(query: &str, home: &Path) -> Option<PathBuf> {
     }
 }
 
-/// The existing path a query names, canonicalized. An absolute path is taken
-/// as-is, wherever it points; `~` and a relative path resolve under `$HOME` and
-/// may not climb back out of it.
+/// The existing path a query names, canonicalized: an absolute path is taken
+/// wherever it points; `~` and relative resolve under `$HOME`, never climbing out.
 fn exact_path(query: &str, home: &Path) -> Option<PathBuf> {
     let absolute = query.starts_with('/');
     let candidate = resolve_path_query(query, home)?.canonicalize().ok()?;
@@ -276,9 +273,8 @@ fn keep_entry(name: &str, depth: usize) -> bool {
 const MATCH_CAP: usize = 200;
 const SHOW_CAP: usize = 50;
 
-/// `want_dir` keeps `f` to files and `d` to directories, so the two providers
-/// stay complementary. `by_name` is `f`'s name-only match; a path query always
-/// matches the path, whichever provider is asking.
+/// `want_dir` keeps `f` to files and `d` to directories, so the two providers stay
+/// complementary; `by_name` is `f`'s name-only match; a path query matches the path.
 fn do_search(query: &str, want_dir: bool, by_name: bool) -> Vec<ResultItem> {
     let query = query.trim();
     if query.is_empty() {

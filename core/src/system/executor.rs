@@ -211,8 +211,7 @@ fn terminal_exec_flag(argv: &[String]) -> Option<Vec<String>> {
     }
 }
 
-/// The directory a terminal starts in: the path itself when a directory, else
-/// its parent.
+/// The directory a terminal starts in: the path itself when a directory, else its parent.
 fn terminal_dir(path: &Path, is_dir: bool) -> Option<PathBuf> {
     if is_dir {
         return Some(path.to_path_buf());

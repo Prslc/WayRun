@@ -1,11 +1,8 @@
 /// The environment variables that name a locale, most specific first.
 const VARS: [&str; 4] = ["LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"];
 
-/// Point the process at the UI locale: `config.toml`'s `ui.locale` when it names
-/// one, else the session's. The core and the shell both call this at startup,
-/// and the setting is process-global, so a row's action titles and the shell's
-/// own chrome cannot end up in different languages. A change needs a restart,
-/// since the shell caches its translated chrome.
+/// Point the process at the UI locale (`ui.locale`, else the session's), process-
+/// global so every crate's chrome and row text agree; a change needs a restart.
 pub fn init() {
     let configured = crate::config::get().ui.locale;
     rust_i18n::set_locale(&resolve(&configured, |key| std::env::var(key).ok()));
@@ -16,8 +13,7 @@ fn resolve(configured: &str, get: impl Fn(&str) -> Option<String>) -> String {
     normalize(configured).unwrap_or_else(|| from_env(get))
 }
 
-/// The locale the session names, most specific variable first; `en` when it
-/// names none.
+/// The locale the session names, most specific variable first; `en` when it names none.
 fn from_env(get: impl Fn(&str) -> Option<String>) -> String {
     VARS.iter()
         .find_map(|key| get(key).filter(|value| !value.trim().is_empty()))
@@ -26,9 +22,8 @@ fn from_env(get: impl Fn(&str) -> Option<String>) -> String {
         .unwrap_or_else(|| "en".to_string())
 }
 
-/// A locale tag as a `locales/*.yml` stem: `zh_CN.UTF-8` -> `zh_cn`. `None` for
-/// an empty value and `en` for `C`/`POSIX`, so a locale with no table of its own
-/// (`en_US`) reads `en` through the crate's fallback.
+/// A locale tag as a `locales/*.yml` stem: `zh_CN.UTF-8` -> `zh_cn`, `C`/`POSIX`
+/// -> `en`; a locale with no table of its own reads `en` through the fallback.
 fn normalize(raw: &str) -> Option<String> {
     // `LANGUAGE` is a colon-separated list, and any variant may carry a codeset
     // or a modifier, so keep the language tag only.

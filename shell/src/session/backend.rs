@@ -30,9 +30,8 @@ static OUTBOX: LazyLock<Mutex<Option<StdSender<String>>>> = LazyLock::new(|| Mut
 static REQUESTS: LazyLock<Mutex<HashMap<u64, String>>> = LazyLock::new(Default::default);
 static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
 
-/// Send one protocol line to the core (newline added). A no-op before the core
-/// exists. Private: every caller goes through the typed methods below, so no
-/// raw line can slip past the JSON-RPC framing.
+/// Send one protocol line to the core (newline added); a no-op before the core
+/// exists. Callers use the typed methods below; nothing raw slips past the framing.
 fn send(line: &str) {
     let guard = OUTBOX.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(tx) = guard.as_ref() {

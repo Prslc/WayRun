@@ -102,8 +102,7 @@ impl Dispatch2<WpViewport, Shell> for ViewportData {
 }
 
 impl Shell {
-    /// A `wp_fractional_scale_v1` change: the buffers have to be rebuilt at the
-    /// new ratio.
+    /// A `wp_fractional_scale_v1` change: the buffers must be rebuilt at the new ratio.
     pub fn set_fractional_scale(&mut self, scale_120: u32) {
         if scale_120 == 0 {
             return;

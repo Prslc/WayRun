@@ -12,13 +12,12 @@ use rust_i18n::t;
 
 use super::canvas::{Canvas, Rect};
 
-/// One key hint: a keycap and its label. An empty key is a plain note.
+/// One key hint: a keycap and its label. An empty key is a plain note; an
+/// `effective` label is the action a remembered default makes `Enter` run.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Hint {
     key: &'static str,
     label: String,
-    /// The label is the row's Enter action when a remembered default makes Enter
-    /// run something other than the row's own command.
     effective: bool,
 }
 
@@ -110,9 +109,8 @@ fn count_label(n: usize, one: &'static str, many: &'static str) -> String {
     if n == 1 { t!(one) } else { t!(many, count = n) }
 }
 
-/// The action the selected row's `Enter` runs instead of the row's own command,
-/// which only a remembered default changes. `None` while the panel is open, where
-/// `Enter` runs the highlighted action instead.
+/// The action the selected row's `Enter` runs instead of its own command;
+/// only a remembered default changes it; `None` while the panel is open.
 fn effective_label(state: &State) -> Option<&str> {
     if state.menu.is_some() {
         return None;

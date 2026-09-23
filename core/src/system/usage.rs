@@ -211,8 +211,7 @@ mod tests {
         });
         record_with(&conn, &item("Telegram", launch.clone())).unwrap();
 
-        // the panel's `forget` passes the current command — the whole merged
-        // entry goes
+        // `forget` passes the current command, dropping the whole merged entry
         let key = Action::Launch {
             desktop_id: "org.telegram.desktop.desktop".to_string(),
         }

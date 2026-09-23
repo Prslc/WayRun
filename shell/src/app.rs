@@ -10,8 +10,7 @@ pub const EXIT_DELAY_MS: u64 = 150;
 /// The field's caret blink interval.
 pub const CARET_BLINK_MS: u64 = 500;
 
-/// What the pointer is over: a list row's tint, an action-panel row's, or the
-/// ✕ button's.
+/// What the pointer is over: a list row's tint, an action-panel row's, or the ✕ button's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hover {
     Row(usize),
@@ -73,8 +72,7 @@ impl Menu {
 }
 
 /// A panel entry, named so a re-emit can find it again: an action id survives
-/// verbatim, the row's own command is the id-less entry the core owns, and the
-/// pin entry changes its label (`Pin to top` becomes `Unpin`) as it lands.
+/// verbatim; the row's command is the id-less `Primary`, and `Pin` relabels as it lands.
 enum PanelKey {
     Id(String),
     Primary,
@@ -160,8 +158,7 @@ pub struct Launch {
     pub title: String,
     pub summary: Option<String>,
     pub icon: Option<String>,
-    /// The row's own command, recorded in usage so history and forget stay
-    /// keyed to it.
+    /// The row's own command, recorded in usage so history and forget stay keyed to it.
     pub target: Action,
     /// The command Enter runs: the remembered default action when the row has
     /// one, else `target`.
@@ -337,8 +334,7 @@ impl State {
         self.card_from + (to - self.card_from) * ease_out_cubic(t)
     }
 
-    /// The backdrop dim's current alpha (0 → the surface's alpha), not a
-    /// progress fraction.
+    /// The backdrop dim's alpha (0 → the surface's alpha), not a progress fraction.
     pub fn dim_alpha(&self, now: Instant) -> f32 {
         (self.surfaces.dim[3] as f32 / 255.0) * self.entrance(now)
     }
@@ -525,10 +521,8 @@ impl State {
         self.menu.as_ref().and_then(Menu::selected_action).cloned()
     }
 
-    /// What `Alt+Enter` on the panel's selection would remember: the owning
-    /// plugin and the action id, `None` id clearing the scope. The row's own
-    /// command is the implicit default, so picking it drops a remembered one.
-    /// `None` when the selection cannot be a default.
+    /// What `Alt+Enter` would remember for the panel's selection, or `None` if it
+    /// cannot be a default: a scope and action id; a `None` id clears the scope.
     pub fn selected_default(&self) -> Option<(&str, Option<&str>)> {
         let menu = self.menu.as_ref()?;
         let action = menu.selected_action()?;
@@ -1496,8 +1490,7 @@ mod tests {
             remember(&mut state, 0),
             Some(("file-search".to_string(), None))
         );
-        // a plugin action is remembered by id, and re-picking the remembered one
-        // clears it
+        // a plugin action is remembered by id, and re-picking it clears it
         assert_eq!(
             remember(&mut state, 1),
             Some(("file-search".to_string(), Some("copy_path".to_string())))
@@ -1941,9 +1934,8 @@ mod tests {
         state.apply_results(vec![row.clone()], now);
         assert!(state.open_actions());
 
-        // the row is still there and the payload changed, so only the dropped
-        // resume keeps the panel closed — a dismissal or an edit must not let a
-        // slow reply resurrect it
+        // the row is still there and the payload changed: only the dropped resume keeps
+        // the panel closed; a dismissal or an edit must not let a slow reply resurrect it
         let chosen = state.selected_action().unwrap();
         state.keep_panel(&chosen);
         state.hidden();

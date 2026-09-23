@@ -39,8 +39,7 @@ fn text_area(field: Rect) -> (f32, f32) {
     (field.x + TEXT_INSET, field.w - TEXT_INSET - 40.0)
 }
 
-/// The field's placeholder, translated once: it is drawn on every frame of an
-/// empty query.
+/// The field's placeholder, translated once: it is drawn every frame while empty.
 fn placeholder_text() -> &'static str {
     static TEXT: OnceLock<String> = OnceLock::new();
     TEXT.get_or_init(|| t!("field.placeholder"))
@@ -128,8 +127,7 @@ pub(super) fn draw_query(
         let quad = Rect {
             x: caret.x,
             y: field.center_y() - 14.0,
-            // a long composition is cut at the field's edge, not painted over
-            // the toolbar
+            // a long composition is cut at the field's edge, not over the toolbar
             w: (x + width - caret.x).clamp(0.0, shaped.width / canvas.scale + 1.0),
             h: 28.0,
         };

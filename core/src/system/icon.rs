@@ -31,9 +31,8 @@ const ICON_EXTS: &[&str] = &["svg", "png"];
 /// The glyph a miss falls back to, so a row always has an icon.
 const APP_ICON: &str = "builtin:app";
 
-/// UI glyphs compiled in and referenced as `builtin:<name>`, so the panel, badges
-/// and built-in plugin identities never depend on an installed theme. See the
-/// NOTICE beside them.
+/// UI glyphs compiled in and referenced as `builtin:<name>`, so panel, badges and
+/// plugin identities never depend on a theme; the NOTICE sits beside them.
 const BUILTIN_ICONS: &[(&str, &[u8])] = &[
     ("app", include_bytes!("../../assets/icons/app.svg")),
     (
@@ -127,9 +126,8 @@ fn cache() -> &'static Mutex<HashMap<String, Option<String>>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::default()))
 }
 
-/// A real icon file for `name`, or `None` when nothing matches. Cached, because
-/// a miss scans the whole theme space. A row's own spec uses this, so a miss
-/// stays empty and the owning plugin's identity icon can answer for it.
+/// A real icon file for `name`, or `None` on a miss; cached, because a miss
+/// scans the whole theme space, and the row stays iconless for the identity fill.
 pub fn resolve(name: &str) -> Option<String> {
     if let Ok(cache) = cache().lock()
         && let Some(cached) = cache.get(name)
@@ -156,9 +154,8 @@ pub fn host_icon_path(spec: &str) -> Option<String> {
     spec.starts_with('/').then(|| spec.to_string())
 }
 
-/// Write `bytes` as `name` under `dir`, replacing a stale copy; returns the path
-/// the shell reads. A glyph's bytes change with the binary, so the cache cannot
-/// be trusted to match it.
+/// Write `bytes` as `name` under `dir`, replacing a stale copy, and return the
+/// path the shell reads; a glyph's bytes change with the binary, so compare first.
 fn write_cached(dir: &Path, name: &str, bytes: &[u8]) -> Option<String> {
     std::fs::create_dir_all(dir).ok()?;
     let target = dir.join(name);

@@ -453,8 +453,7 @@ impl Shell {
         true
     }
 
-    /// The next buffer the compositor has released, starting from
-    /// [`Shell::buffer_next`].
+    /// The next buffer the compositor has released, starting from [`Shell::buffer_next`].
     fn free_buffer_index(&self) -> Option<usize> {
         let start = self.buffer_next;
         for offset in 0..self.buffers.len() {

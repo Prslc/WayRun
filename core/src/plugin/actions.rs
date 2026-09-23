@@ -171,9 +171,8 @@ fn attach_actions(
         });
     }
 
-    // The row's own command leads the panel: it is what Enter runs while no
-    // default is remembered, and it is how the user takes the default back. A row
-    // with nothing else to offer keeps no panel at all.
+    // The row's own command leads the panel: Enter runs it while no default is
+    // remembered; re-picking takes the default back, and a lone command shows no panel.
     if !actions.is_empty() {
         actions.insert(
             0,

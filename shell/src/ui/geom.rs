@@ -25,7 +25,7 @@ pub struct Layout {
     pub offset_x: f32,
     pub offset_y: f32,
     pub radius: f32,
-    /// Explicit inner radii; `None` keeps the base each one derives from.
+    // Explicit inner radii; `None` keeps the base each one derives from.
     pub field_radius: Option<f32>,
     pub row_radius: Option<f32>,
     pub chip_radius: Option<f32>,
@@ -116,8 +116,7 @@ impl Layout {
         }
     }
 
-    /// The action panel's header band: the parent row's title, above the
-    /// actions it offers.
+    /// The action panel's header band: the parent row's title, above the actions offered.
     pub fn panel_header_h(&self) -> f32 {
         28.0
     }
