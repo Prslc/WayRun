@@ -173,23 +173,35 @@ fn terminal_run_argv(terminal: Option<&str>, cmd: &str) -> Option<Vec<String>> {
     Some(argv)
 }
 
+/// The emulator's name: the program's basename, so an absolute or aliased
+/// `$TERMINAL` argument still names the emulator it is.
+fn terminal_name(argv: &[String]) -> Option<&str> {
+    let program = argv.first()?;
+    Some(
+        Path::new(program.as_str())
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(program.as_str()),
+    )
+}
+
+/// Whether wezterm's argv still needs its subcommand: one that already names
+/// `start`, `connect` or `ssh` must not get a second.
+fn wezterm_subcommand_missing(argv: &[String]) -> bool {
+    !argv
+        .iter()
+        .any(|arg| matches!(arg.as_str(), "start" | "connect" | "ssh"))
+}
+
 /// The tokens a known emulator needs before the program; a terminal that takes
 /// the program directly (kitty, foot) needs none.
 fn terminal_exec_flag(argv: &[String]) -> Option<Vec<String>> {
-    let program = argv.first()?;
-    let name = Path::new(program.as_str())
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(program.as_str());
-    match name {
+    match terminal_name(argv)? {
         "gnome-terminal" | "kgx" => Some(vec!["--".to_string()]),
         "konsole" | "xterm" | "alacritty" => Some(vec!["-e".to_string()]),
         "wezterm" => {
             let mut flag = Vec::new();
-            if !argv
-                .iter()
-                .any(|arg| matches!(arg.as_str(), "start" | "connect" | "ssh"))
-            {
+            if wezterm_subcommand_missing(argv) {
                 flag.push("start".to_string());
             }
             flag.push("--".to_string());
@@ -250,21 +262,14 @@ fn program_on_path(name: &str) -> bool {
 /// The directory flag a known emulator needs; the rest inherit the process cwd,
 /// and wezterm needs its `start` subcommand before `--cwd`.
 fn terminal_dir_arg(argv: &[String], dir: &Path) -> Option<Vec<String>> {
-    let program = argv.first()?;
-    let name = Path::new(program.as_str())
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(program.as_str());
+    let name = terminal_name(argv)?;
     let dir = dir.to_string_lossy().into_owned();
     match name {
         "gnome-terminal" | "kgx" => Some(vec!["--working-directory".to_string(), dir]),
         "konsole" => Some(vec!["--workdir".to_string(), dir]),
         "wezterm" => {
             let mut extra = Vec::new();
-            if !argv
-                .iter()
-                .any(|arg| matches!(arg.as_str(), "start" | "connect" | "ssh"))
-            {
+            if wezterm_subcommand_missing(argv) {
                 extra.push("start".to_string());
             }
             extra.push("--cwd".to_string());
@@ -422,6 +427,20 @@ mod tests {
         assert_eq!(
             terminal_run_argv(Some("wezterm start"), "btop"),
             Some(argv(&["wezterm", "start", "--", "sh", "-c", "btop"]))
+        );
+    }
+
+    #[test]
+    fn an_absolute_terminal_path_still_names_the_emulator() {
+        let dir = Path::new("/tmp/project");
+        // the basename decides the emulator, not the full path
+        assert_eq!(
+            terminal_dir_arg(&argv(&["/usr/bin/wezterm"]), dir),
+            Some(argv(&["start", "--cwd", "/tmp/project"]))
+        );
+        assert_eq!(
+            terminal_run_argv(Some("/usr/bin/gnome-terminal"), "nvim"),
+            Some(argv(&["/usr/bin/gnome-terminal", "--", "sh", "-c", "nvim"]))
         );
     }
 }
