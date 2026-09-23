@@ -1,10 +1,10 @@
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex};
 
 use anyhow::Result;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::plugin::{Meta, Plugin};
 use crate::wire::{Action, ResultItem};
@@ -38,7 +38,11 @@ impl Plugin for Runner {
         _full: &str,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<ResultItem>>> + Send + '_>> {
         let input = query.to_string();
-        Box::pin(async move { Ok(do_search(&input)) })
+        Box::pin(async move {
+            Ok(tokio::task::spawn_blocking(move || do_search(&input))
+                .await
+                .unwrap_or_default())
+        })
     }
 }
 
@@ -55,14 +59,23 @@ fn split_command(input: &str) -> (String, String) {
     }
 }
 
-/// `(name, full path)` for every executable on `$PATH`, first match wins, scanned
-/// once per process. Dot-containing names are skipped as library noise.
-fn path_binaries() -> &'static Vec<(String, String)> {
-    static LIST: LazyLock<Vec<(String, String)>> = LazyLock::new(scan_path);
+/// One executable on `$PATH` with the keys a search matches on, precomputed so
+/// a search does not re-lower the whole PATH on every keystroke.
+struct Binary {
+    name: String,
+    name_lower: String,
+    key: nucleo::Utf32String,
+    path: String,
+}
+
+/// Every executable on `$PATH`, first match wins, scanned once per process.
+/// Dot-containing names are skipped as library noise.
+fn binaries() -> &'static Vec<Binary> {
+    static LIST: LazyLock<Vec<Binary>> = LazyLock::new(scan_path);
     &LIST
 }
 
-fn scan_path() -> Vec<(String, String)> {
+fn scan_path() -> Vec<Binary> {
     let path = std::env::var("PATH").unwrap_or_default();
     let home = std::env::var("HOME").ok();
 
@@ -101,7 +114,13 @@ fn scan_path() -> Vec<(String, String)> {
                 continue;
             }
             if seen.insert(name.to_string()) {
-                out.push((name.to_string(), path.to_string_lossy().into_owned()));
+                let name_lower = name.to_lowercase();
+                out.push(Binary {
+                    key: nucleo::Utf32String::from(name_lower.as_str()),
+                    name: name.to_string(),
+                    name_lower,
+                    path: path.to_string_lossy().into_owned(),
+                });
             }
         }
     }
@@ -128,6 +147,10 @@ fn score(name_lower: &str, query_lower: &str, fuzzy: u32) -> u32 {
     if tier > 0 { tier * 1000 + fuzzy } else { fuzzy }
 }
 
+/// Rows are built only for the winners, so a broad query does not allocate a
+/// row per PATH hit.
+const MAX_RESULTS: usize = 20;
+
 fn do_search(input: &str) -> Vec<ResultItem> {
     let (cmd, args) = split_command(input);
     if cmd.is_empty() {
@@ -138,46 +161,60 @@ fn do_search(input: &str) -> Vec<ResultItem> {
     let mut matcher = nucleo::Matcher::new(nucleo::Config::DEFAULT);
     let pattern = nucleo::Utf32String::from(query.as_str());
 
-    let mut results: Vec<(u32, ResultItem)> = Vec::new();
-
-    for (name, full_path) in path_binaries() {
-        let name_lower = name.to_lowercase();
+    let mut hits: Vec<(u32, &'static Binary)> = Vec::new();
+    for binary in binaries() {
         let fuzzy = matcher
-            .fuzzy_match(
-                nucleo::Utf32String::from(name_lower.as_str()).slice(..),
-                pattern.slice(..),
-            )
+            .fuzzy_match(binary.key.slice(..), pattern.slice(..))
             .unwrap_or(0) as u32;
-        let score = score(&name_lower, &query, fuzzy);
-        if score == 0 {
-            continue;
+        let score = score(&binary.name_lower, &query, fuzzy);
+        if score > 0 {
+            hits.push((score, binary));
         }
-        let run_cmd = if args.is_empty() {
-            full_path.clone()
-        } else {
-            format!("{full_path} {args}")
-        };
-        let desktop_id = crate::provider::application::desktop_id_for_exec(name);
-        let terminal = !args.is_empty()
-            && desktop_id.is_some_and(|id| {
-                crate::system::desktop_action::entry(id, None).is_some_and(|entry| entry.terminal())
-            });
-        results.push((
-            score,
-            ResultItem {
-                title: name.clone(),
-                summary: Some(run_cmd.clone()),
-                on_click: Some(action_for(desktop_id, terminal, !args.is_empty(), run_cmd)),
-                // `fill_icons` gives every row the plugin's terminal icon
-                icon: None,
-                ephemeral: false,
-                actions: Vec::new(),
-                badge: None,
-            },
-        ));
     }
+    hits.sort_by(|a, b| b.0.cmp(&a.0));
 
-    crate::provider::rank_results(results, false, 20)
+    hits.into_iter()
+        .take(MAX_RESULTS)
+        .map(|(_, binary)| row_for(binary, &args))
+        .collect()
+}
+
+/// One hit as a row; a query with args carries them along the command.
+fn row_for(binary: &Binary, args: &str) -> ResultItem {
+    let run_cmd = if args.is_empty() {
+        binary.path.clone()
+    } else {
+        format!("{} {args}", binary.path)
+    };
+    let desktop_id = crate::provider::application::desktop_id_for_exec(&binary.name);
+    let terminal = !args.is_empty() && desktop_id.is_some_and(needs_terminal);
+    ResultItem {
+        title: binary.name.clone(),
+        summary: Some(run_cmd.clone()),
+        on_click: Some(action_for(desktop_id, terminal, !args.is_empty(), run_cmd)),
+        // `fill_icons` gives every row the plugin's terminal icon
+        icon: None,
+        ephemeral: false,
+        actions: Vec::new(),
+        badge: None,
+    }
+}
+
+/// Whether the app's entry asks for a terminal, read once per desktop id.
+fn needs_terminal(desktop_id: &str) -> bool {
+    static CACHE: LazyLock<Mutex<HashMap<String, bool>>> =
+        LazyLock::new(|| Mutex::new(HashMap::default()));
+    if let Ok(cache) = CACHE.lock()
+        && let Some(terminal) = cache.get(desktop_id)
+    {
+        return *terminal;
+    }
+    let terminal = crate::system::desktop_action::entry(desktop_id, None)
+        .is_some_and(|entry| entry.terminal());
+    if let Ok(mut cache) = CACHE.lock() {
+        cache.insert(desktop_id.to_string(), terminal);
+    }
+    terminal
 }
 
 #[cfg(test)]

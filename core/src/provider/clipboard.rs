@@ -1,6 +1,8 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::process::Command;
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::plugin::{Meta, Plugin};
 use crate::system::icon::resolve;
@@ -44,25 +46,82 @@ impl Plugin for Clipboard {
     }
 }
 
+/// A typing burst shares one `cliphist list` round trip; a just-copied item
+/// showing up half a second late is fine.
+const CACHE_TTL: Duration = Duration::from_millis(500);
+
+const MAX_RESULTS: usize = 50;
+
+/// One `cliphist list` entry with the match form precomputed, so a keystroke
+/// does not re-split and re-lower the whole list.
+struct Entry {
+    id: String,
+    title: String,
+    preview_lower: String,
+}
+
+impl Entry {
+    /// The row that copies this entry back to the clipboard.
+    fn row(&self, icon: &Option<String>) -> ResultItem {
+        ResultItem {
+            title: self.title.clone(),
+            summary: None,
+            on_click: Some(Action::Run {
+                cmd: format!("sh -c 'cliphist decode {} | wl-copy'", self.id),
+            }),
+            icon: icon.clone(),
+            ephemeral: true,
+            actions: Vec::new(),
+            badge: None,
+        }
+    }
+}
+
+/// The cached entry list and when it was fetched.
+type ListCache = Mutex<Option<(Instant, Arc<Vec<Entry>>)>>;
+
+static LIST: LazyLock<ListCache> = LazyLock::new(|| Mutex::new(None));
+
+/// The clipboard history from a short-lived cache, so a burst of keystrokes
+/// does not fork `cliphist list` on every one.
+fn cached_entries() -> Option<Arc<Vec<Entry>>> {
+    let mut cache = LIST.lock().unwrap_or_else(|err| err.into_inner());
+    if let Some((at, entries)) = cache.as_ref()
+        && at.elapsed() < CACHE_TTL
+    {
+        return Some(Arc::clone(entries));
+    }
+    let output = Command::new("cliphist").arg("list").output().ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let entries = Arc::new(parse_entries(&text));
+    *cache = Some((Instant::now(), Arc::clone(&entries)));
+    Some(entries)
+}
+
 fn do_search(query: &str) -> Vec<ResultItem> {
     if query.is_empty() {
         return vec![];
     }
 
-    let Ok(output) = Command::new("cliphist").arg("list").output() else {
+    let Some(entries) = cached_entries() else {
         return vec![];
     };
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut results = parse_entries(query, &text);
     let icon = resolve("builtin:clipboard");
-    for r in &mut results {
-        r.icon = icon.clone();
-    }
-    results
+    matching_rows(&entries, query, &icon)
 }
 
-fn parse_entries(query: &str, raw: &str) -> Vec<ResultItem> {
-    let mut results = Vec::new();
+/// The rows whose preview contains `query_lower`, capped to [`MAX_RESULTS`].
+fn matching_rows(entries: &[Entry], query_lower: &str, icon: &Option<String>) -> Vec<ResultItem> {
+    entries
+        .iter()
+        .filter(|entry| entry.preview_lower.contains(query_lower))
+        .take(MAX_RESULTS)
+        .map(|entry| entry.row(icon))
+        .collect()
+}
+
+fn parse_entries(raw: &str) -> Vec<Entry> {
+    let mut entries = Vec::new();
 
     for line in raw.lines() {
         let parts: Vec<&str> = line.splitn(3, '\t').collect();
@@ -72,28 +131,14 @@ fn parse_entries(query: &str, raw: &str) -> Vec<ResultItem> {
             _ => continue,
         };
 
-        if !query.is_empty() && !preview.to_lowercase().contains(query) {
-            continue;
-        }
-
-        results.push(ResultItem {
+        entries.push(Entry {
+            id: id.to_string(),
             title: truncate_preview(preview),
-            summary: None,
-            on_click: Some(Action::Run {
-                cmd: format!("sh -c 'cliphist decode {id} | wl-copy'"),
-            }),
-            icon: Some(String::new()),
-            ephemeral: true,
-            actions: Vec::new(),
-            badge: None,
+            preview_lower: preview.to_lowercase(),
         });
-
-        if results.len() >= 50 {
-            break;
-        }
     }
 
-    results
+    entries
 }
 
 const PREVIEW_MAX: usize = 80;
@@ -119,29 +164,38 @@ mod tests {
     #[test]
     fn parse_standard_format() {
         let raw = "1\thttps://example.com\thello world\n2\timage/png\tscreenshot";
-        let entries = parse_entries("", raw);
+        let entries = parse_entries(raw);
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].title, "hello world");
-        let Some(Action::Run { cmd }) = entries[0].on_click.as_ref() else {
+        let row = entries[0].row(&None);
+        let Some(Action::Run { cmd }) = row.on_click.as_ref() else {
             panic!("a clipboard row runs a command");
         };
         assert!(cmd.contains("decode 1"));
         assert_eq!(entries[1].title, "screenshot");
-        assert!(entries.iter().all(|e| e.ephemeral));
+        assert!(row.ephemeral);
     }
 
     #[test]
     fn filter_by_query() {
         let raw = "1\ttext/plain\tfirefox\n2\ttext/plain\tterminal";
-        assert_eq!(parse_entries("fire", raw).len(), 1);
-        assert_eq!(parse_entries("xyz", raw).len(), 0);
+        let entries = parse_entries(raw);
+        assert_eq!(matching_rows(&entries, "fire", &None).len(), 1);
+        assert_eq!(matching_rows(&entries, "xyz", &None).len(), 0);
+    }
+
+    #[test]
+    fn a_fresh_cache_is_reused() {
+        let entries = Arc::new(parse_entries("1\ttext/plain\thello"));
+        *LIST.lock().unwrap() = Some((Instant::now(), Arc::clone(&entries)));
+        assert!(Arc::ptr_eq(&entries, &cached_entries().unwrap()));
     }
 
     #[test]
     fn truncate_long_preview() {
         let long = "a".repeat(200);
         let raw = format!("1\ttext/plain\t{long}");
-        let entries = parse_entries("", &raw);
+        let entries = parse_entries(&raw);
         assert!(entries[0].title.len() <= 83); // 80 chars max + "…"
         assert!(entries[0].title.ends_with('…'));
     }
@@ -150,7 +204,7 @@ mod tests {
     fn a_multibyte_preview_cuts_on_a_char_boundary() {
         let long = "汉".repeat(40);
         let raw = format!("1\ttext/plain\t{long}");
-        let entries = parse_entries("", &raw);
+        let entries = parse_entries(&raw);
         let cut = entries[0].title.trim_end_matches('…');
         assert_eq!(cut.len(), 78, "the last boundary at or below 80 bytes");
         assert!(long.starts_with(cut));
@@ -158,6 +212,6 @@ mod tests {
 
     #[test]
     fn empty_input() {
-        assert!(parse_entries("", "").is_empty());
+        assert!(parse_entries("").is_empty());
     }
 }

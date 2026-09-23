@@ -26,11 +26,72 @@ const W_ACTION_EXACT: u32 = 8_000;
 const W_ACTION_PREFIX: u32 = 4_000;
 const W_ACTION_SUBSTRING: u32 = 400;
 
+/// One constant match surface — a name, comment, keyword or generic — with the
+/// forms a query needs precomputed, so scoring never re-lowers or re-tokenizes
+/// it per keystroke.
+struct Field {
+    lower: String,
+    chars: Vec<char>,
+    /// `(start, end)` char spans of the tokens in `lower`, split on ` `, `-`
+    /// and `_`.
+    word_spans: Vec<(usize, usize)>,
+}
+
+impl Field {
+    fn new(text: &str) -> Self {
+        let lower = text.to_lowercase();
+        let chars: Vec<char> = lower.chars().collect();
+        let mut word_spans: Vec<(usize, usize)> = Vec::new();
+        let mut start = None;
+        for (index, ch) in chars.iter().enumerate() {
+            if matches!(ch, ' ' | '-' | '_') {
+                if let Some(from) = start.take() {
+                    word_spans.push((from, index));
+                }
+            } else if start.is_none() {
+                start = Some(index);
+            }
+        }
+        if let Some(from) = start {
+            word_spans.push((from, chars.len()));
+        }
+        Self {
+            lower,
+            chars,
+            word_spans,
+        }
+    }
+
+    fn word(&self, span: (usize, usize)) -> &[char] {
+        &self.chars[span.0..span.1]
+    }
+}
+
+/// The lowercased query with its tokens and char form, built once per search.
+struct Query {
+    lower: String,
+    words: Vec<String>,
+    chars: Vec<char>,
+}
+
+impl Query {
+    fn new(text: &str) -> Self {
+        let lower = text.to_lowercase();
+        let words = tokenize(&lower);
+        let chars = lower.chars().collect();
+        Self {
+            lower,
+            words,
+            chars,
+        }
+    }
+}
+
 /// `GenericName` + `Keywords` from the app's `.desktop` file, localised through
 /// its own `Key[locale]=` entries. gio's `AppInfo` does not expose them.
 struct DesktopMeta {
-    generic: Option<String>,
-    keywords: Vec<String>,
+    generic: Option<Field>,
+    keywords: Vec<Field>,
     actions: Vec<DesktopAction>,
 }
 
@@ -42,18 +103,20 @@ struct DesktopAction {
 }
 
 /// One installed application, precomputed at first search and reused for the
-/// process lifetime; lowercased fields avoid per-query re-lowering.
+/// process lifetime; the `Field`s carry every match form a query needs.
 struct CachedApp {
     id: String,
     title: String,
-    title_lower: String,
+    title_field: Field,
     comment: Option<String>,
-    comment_lower: Option<String>,
+    comment_field: Option<Field>,
     icon_spec: Option<String>,
     /// Basename of the entry's `Exec=`, so the runner can match a PATH hit to a
     /// desktop app without reading every `.desktop` file again.
     exec: Option<String>,
     meta: Option<DesktopMeta>,
+    /// The id without its `.desktop` suffix, the last-resort match surface.
+    id_field: Field,
 }
 
 impl CachedApp {
@@ -88,8 +151,9 @@ static APPS: LazyLock<Vec<CachedApp>> = LazyLock::new(|| {
             let exec = entry.as_ref().and_then(exec_basename);
             let meta = entry.as_ref().map(|entry| parse_meta(entry, &locales));
             Some(CachedApp {
-                title_lower: title.to_lowercase(),
-                comment_lower: comment.as_ref().map(|c| c.to_lowercase()),
+                title_field: Field::new(&title),
+                comment_field: comment.as_deref().map(Field::new),
+                id_field: Field::new(id.to_lowercase().trim_end_matches(".desktop")),
                 meta,
                 exec,
                 title,
@@ -180,21 +244,19 @@ impl Plugin for AppSearch {
 /// Score every cached app against the query; the query text is lowercased
 /// and tokenized once, not per app.
 fn do_search(query: &str) -> Vec<ResultItem> {
-    let query_lower = query.trim().to_lowercase();
-    if query_lower.is_empty() {
+    let query = Query::new(query.trim());
+    if query.lower.is_empty() {
         return Vec::new();
     }
-    let query_words = tokenize(&query_lower);
 
     let mut results: Vec<(u32, ResultItem)> = Vec::new();
     for app in APPS.iter() {
         let score = score_app(
-            &app.title_lower,
-            app.comment_lower.as_deref(),
+            &app.title_field,
+            app.comment_field.as_ref(),
             app.meta.as_ref(),
-            &app.id,
-            &query_lower,
-            &query_words,
+            &app.id_field,
+            &query,
         );
         if score > 0 {
             results.push((
@@ -215,7 +277,7 @@ fn do_search(query: &str) -> Vec<ResultItem> {
 
         // Each action is its own row (DMS-style).
         for action in app.meta.iter().flat_map(|m| &m.actions) {
-            let action_score = action_score(&action.name_lower, &query_lower);
+            let action_score = action_score(&action.name_lower, &query.lower);
             if action_score > 0 {
                 results.push((
                     action_score,
@@ -260,35 +322,37 @@ fn action_score(name_lower: &str, query_lower: &str) -> u32 {
 }
 
 /// Score one match surface, fields tried in order: exact name, prefix,
-/// word-boundary, substring, then edit-distance fuzz. Inputs must be lowercased.
-fn field_score(field_lower: &str, query_lower: &str, query_words: &[String]) -> u32 {
+/// word-boundary, substring, then edit-distance fuzz.
+fn field_score(field: &Field, query: &Query) -> u32 {
     // An empty query would prefix-match every field; treat it as no match so
     // the scorer cannot turn into a "list everything" path.
-    if query_lower.is_empty() {
+    if query.lower.is_empty() {
         return 0;
     }
-    if field_lower == query_lower {
+    if field.lower == query.lower {
         return W_EXACT;
     }
-    if field_lower.starts_with(query_lower) {
+    if field.lower.starts_with(&query.lower) {
         return W_PREFIX;
     }
 
-    let words = tokenize(field_lower);
-    if query_words.len() <= words.len() {
-        let bounded = (0..=words.len() - query_words.len())
-            .any(|i| (0..query_words.len()).all(|j| words[i + j].starts_with(&query_words[j])));
+    let spans = &field.word_spans;
+    if query.words.len() <= spans.len() {
+        let bounded = (0..=spans.len() - query.words.len()).any(|i| {
+            (0..query.words.len())
+                .all(|j| char_starts_with(field.word(spans[i + j]), &query.words[j]))
+        });
         if bounded {
             return W_WORD_BOUNDARY;
         }
     }
 
-    if field_lower.contains(query_lower) {
+    if field.lower.contains(&query.lower) {
         return W_SUBSTRING;
     }
 
-    if query_lower.chars().count() >= 3 {
-        let fs = fuzzy_score(field_lower, query_lower);
+    if query.chars.len() >= 3 {
+        let fs = fuzzy_score(field, query);
         if fs > 0.0 {
             return (fs * f64::from(W_FUZZY)) as u32;
         }
@@ -296,36 +360,48 @@ fn field_score(field_lower: &str, query_lower: &str, query_words: &[String]) -> 
     0
 }
 
-/// Edit-distance similarity (0..1) between a whole text or any of its words
+/// Whether `hay` starts with `needle`, so a precomputed word is not rebuilt
+/// into a `String` for every boundary check.
+fn char_starts_with(hay: &[char], needle: &str) -> bool {
+    let mut needle = needle.chars();
+    for ch in hay {
+        match needle.next() {
+            Some(expected) if expected == *ch => {}
+            Some(_) => return false,
+            None => return true,
+        }
+    }
+    needle.next().is_none()
+}
+
+/// Edit-distance similarity (0..1) between the whole field or any of its words
 /// and the query, within a tight per-length tolerance window.
-fn fuzzy_score(text: &str, query: &str) -> f64 {
-    let text_chars: Vec<char> = text.chars().collect();
-    let query_chars: Vec<char> = query.chars().collect();
-    let max_dist = match query_chars.len() {
+fn fuzzy_score(field: &Field, query: &Query) -> f64 {
+    let max_dist = match query.chars.len() {
         3 => 1,
         4..=6 => 2,
         _ => 3,
     };
 
     let mut best = 0.0f64;
-    if (text_chars.len() as isize - query_chars.len() as isize).unsigned_abs() <= max_dist {
-        let dist = levenshtein(&text_chars, &query_chars);
+    if (field.chars.len() as isize - query.chars.len() as isize).unsigned_abs() <= max_dist {
+        let dist = levenshtein(&field.chars, &query.chars);
         if dist <= max_dist {
-            best = 1.0 - dist as f64 / text_chars.len().max(query_chars.len()) as f64;
+            best = 1.0 - dist as f64 / field.chars.len().max(query.chars.len()) as f64;
         }
     }
 
-    for word in tokenize(text) {
+    for span in &field.word_spans {
         if best >= 0.8 {
             break;
         }
-        let word_chars: Vec<char> = word.chars().collect();
-        if (word_chars.len() as isize - query_chars.len() as isize).unsigned_abs() > max_dist {
+        let word = field.word(*span);
+        if (word.len() as isize - query.chars.len() as isize).unsigned_abs() > max_dist {
             continue;
         }
-        let dist = levenshtein(&word_chars, &query_chars);
+        let dist = levenshtein(word, &query.chars);
         if dist <= max_dist {
-            let score = 1.0 - dist as f64 / word_chars.len().max(query_chars.len()) as f64;
+            let score = 1.0 - dist as f64 / word.len().max(query.chars.len()) as f64;
             best = best.max(score);
         }
     }
@@ -353,52 +429,47 @@ fn levenshtein(a: &[char], b: &[char]) -> usize {
 }
 
 /// Full app relevance: name, comment (0.5x), keywords (0.3x), `GenericName`,
-/// then the desktop id; first non-zero tier wins. Inputs must be lowercased.
+/// then the desktop id; first non-zero tier wins.
 fn score_app(
-    name_lower: &str,
-    comment_lower: Option<&str>,
+    name: &Field,
+    comment: Option<&Field>,
     meta: Option<&DesktopMeta>,
-    id: &str,
-    query_lower: &str,
-    query_words: &[String],
+    id: &Field,
+    query: &Query,
 ) -> u32 {
-    if query_lower.is_empty() {
+    if query.lower.is_empty() {
         return 0;
     }
 
-    let mut score = field_score(name_lower, query_lower, query_words);
+    let mut score = field_score(name, query);
     if score == 0
-        && let Some(c) = comment_lower
+        && let Some(comment) = comment
     {
-        score = field_score(c, query_lower, query_words) * 5 / 10;
+        score = field_score(comment, query) * 5 / 10;
     }
     if score == 0
-        && let Some(v) = meta.and_then(|m| {
+        && let Some(ks) = meta.and_then(|m| {
             m.keywords.iter().find_map(|keyword| {
-                let ks = field_score(&keyword.to_lowercase(), query_lower, query_words);
+                let ks = field_score(keyword, query);
                 (ks > 0).then_some(ks * 3 / 10)
             })
         })
     {
-        score = v;
+        score = ks;
     }
     if score == 0
-        && let Some(g) = meta.and_then(|m| m.generic.as_deref())
+        && let Some(generic) = meta.and_then(|m| m.generic.as_ref())
     {
-        let generic_lower = g.to_lowercase();
-        score = if generic_lower.starts_with(query_lower) {
+        score = if generic.lower.starts_with(&query.lower) {
             W_GENERIC_PREFIX
-        } else if generic_lower.contains(query_lower) {
+        } else if generic.lower.contains(&query.lower) {
             W_GENERIC
         } else {
             0
         };
     }
-    if score == 0 {
-        let id_lower = id.to_lowercase().trim_end_matches(".desktop").to_string();
-        if id_lower.contains(query_lower) {
-            score = W_ID;
-        }
+    if score == 0 && id.lower.contains(&query.lower) {
+        score = W_ID;
     }
     score
 }
@@ -409,7 +480,8 @@ fn parse_meta(entry: &DesktopEntry, locales: &[String]) -> DesktopMeta {
     let generic = entry
         .generic_name(locales)
         .map(|name| name.trim().to_string())
-        .filter(|name| !name.is_empty());
+        .filter(|name| !name.is_empty())
+        .map(|name| Field::new(&name));
 
     let keywords = entry
         .keywords(locales)
@@ -417,6 +489,7 @@ fn parse_meta(entry: &DesktopEntry, locales: &[String]) -> DesktopMeta {
         .into_iter()
         .map(|word| word.trim().to_string())
         .filter(|word| !word.is_empty())
+        .map(|word| Field::new(&word))
         .collect();
 
     let actions = entry
@@ -496,24 +569,19 @@ mod tests {
 
     fn meta(generic: Option<&str>, keywords: &[&str]) -> DesktopMeta {
         DesktopMeta {
-            generic: generic.map(String::from),
-            keywords: keywords.iter().map(ToString::to_string).collect(),
+            generic: generic.map(Field::new),
+            keywords: keywords.iter().map(|word| Field::new(word)).collect(),
             actions: Vec::new(),
         }
     }
 
     fn s(name: &str, comment: Option<&str>, m: Option<&DesktopMeta>, id: &str, q: &str) -> u32 {
-        let name_lower = name.to_lowercase();
-        let comment_lower = comment.map(str::to_lowercase);
-        let query_lower = q.trim().to_lowercase();
-        let query_words = tokenize(&query_lower);
         score_app(
-            &name_lower,
-            comment_lower.as_deref(),
+            &Field::new(name),
+            comment.map(Field::new).as_ref(),
             m,
-            id,
-            &query_lower,
-            &query_words,
+            &Field::new(id.to_lowercase().trim_end_matches(".desktop")),
+            &Query::new(q.trim()),
         )
     }
 
@@ -637,6 +705,15 @@ mod tests {
     }
 
     #[test]
+    fn char_starts_with_matches_str_starts_with() {
+        let hay: Vec<char> = "manager".chars().collect();
+        assert!(char_starts_with(&hay, "man"));
+        assert!(char_starts_with(&hay, ""));
+        assert!(!char_starts_with(&hay, "manager "));
+        assert!(!char_starts_with(&hay[..3], "manager"));
+    }
+
+    #[test]
     fn action_rows_use_dms_tiers() {
         assert_eq!(
             action_score("open vm manager", "open vm manager"),
@@ -701,8 +778,12 @@ mod tests {
              Name[de]=Nur auf Deutsch\n",
             &["en"],
         );
-        assert_eq!(meta.generic.as_deref(), Some("Virtualization Software"));
-        assert_eq!(meta.keywords, ["virtualization"]);
+        assert_eq!(
+            meta.generic.as_ref().map(|g| g.lower.as_str()),
+            Some("virtualization software")
+        );
+        assert_eq!(meta.keywords.len(), 1);
+        assert_eq!(meta.keywords[0].lower, "virtualization");
         // an undeclared group is not a row, and neither is a localised-only name
         assert_eq!(meta.actions.len(), 1);
         assert_eq!(meta.actions[0].id, "Manager");
