@@ -21,10 +21,11 @@ use crate::wire::ResultItem;
 
 /// Records kept; beyond it the build stops and reports that on stderr.
 pub(super) const MAX_ENTRIES: usize = 1_000_000;
-/// How long a mapped index may sit unused before it is unmapped.
-const IDLE: Duration = Duration::from_secs(30);
+/// How long a mapped index may sit unused before it is unmapped; above
+/// [`REFRESH_TTL`] so an idle reopen answers from the map, not the walk.
+const IDLE: Duration = Duration::from_secs(120);
 /// How long before a query re-checks the walk's freshness in the background.
-const REFRESH_TTL: Duration = Duration::from_secs(300);
+const REFRESH_TTL: Duration = Duration::from_secs(60);
 /// The only providers the index serves.
 const OWNERS: [&str; 2] = ["file-search", "path-search"];
 
