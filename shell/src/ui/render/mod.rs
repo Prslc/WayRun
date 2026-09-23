@@ -231,7 +231,7 @@ pub fn draw(
     now: Instant,
     full: bool,
 ) {
-    let timing = std::env::var_os("WAYRUN_TIMING").is_some();
+    let timing = state.timing;
     let mut marks: Vec<(&str, Instant)> = Vec::new();
     let mut mark = |name: &'static str| {
         if timing {

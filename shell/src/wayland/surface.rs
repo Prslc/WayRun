@@ -80,7 +80,7 @@ impl Shell {
         // the allocation does not land on the frame that starts the entrance.
         let (physical_w, physical_h) = self.physical_size();
         self.ensure_buffers(physical_w, physical_h);
-        if self.timing {
+        if self.app.timing {
             eprintln!("wayrun: open at +{:?}", self.started.elapsed());
         }
 
@@ -404,7 +404,7 @@ impl Shell {
         self.buffer_next = other;
         self.pending_damage = Damage::EMPTY;
 
-        if self.timing {
+        if self.app.timing {
             let now = Instant::now();
             match self.last_present.take() {
                 Some(previous) => eprintln!(
@@ -418,8 +418,8 @@ impl Shell {
 
         // `WAYRUN_SNAPSHOT=<path>` writes the buffer as drawn, once per show: the
         // only way to tell what the shell produced from what the compositor did.
-        if let Some(path) = std::env::var_os("WAYRUN_SNAPSHOT")
-            && !self.first_frame_logged
+        if !self.first_frame_logged
+            && let Some(path) = std::env::var_os("WAYRUN_SNAPSHOT")
         {
             let pixmap = self.pixmap.as_ref();
             if let Some(pixmap) = pixmap {
@@ -436,7 +436,7 @@ impl Shell {
 
         if !self.first_frame_logged {
             self.first_frame_logged = true;
-            if self.timing
+            if self.app.timing
                 && let Some(at) = self.open_at
             {
                 eprintln!(
@@ -779,7 +779,7 @@ impl LayerShellHandler for Shell {
             return;
         }
 
-        if self.timing {
+        if self.app.timing {
             eprintln!(
                 "wayrun: configure {width}x{height} at +{:?}",
                 self.started.elapsed()

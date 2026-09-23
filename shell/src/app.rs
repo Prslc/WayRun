@@ -208,6 +208,8 @@ pub struct State {
     /// Whether the entrance animation has started on the first drawn frame; the
     /// layer surface configures a round trip after `shown`.
     pub entrance_started: bool,
+    /// `WAYRUN_TIMING=1`: the per-frame draw marks and the frame-pacing logs.
+    pub timing: bool,
     /// `WAYRUN_REDUCED_MOTION`: ORed with the config's `motion.reduced`.
     reduced_env: bool,
     pub reduce_motion: bool,
@@ -237,6 +239,7 @@ impl State {
         let now = Instant::now();
         let appearance = AppearanceConfig::default();
         let reduced_env = std::env::var_os("WAYRUN_REDUCED_MOTION").is_some();
+        let timing = std::env::var_os("WAYRUN_TIMING").is_some();
         let reduce_motion = reduced_env || appearance.reduced;
         let theme = Theme::default();
         let mode = Mode::default();
@@ -261,6 +264,7 @@ impl State {
             scale: 1,
             fractional: None,
             entrance_started: false,
+            timing,
             reduced_env,
             reduce_motion,
             hovered: None,

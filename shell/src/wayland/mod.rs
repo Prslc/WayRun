@@ -195,7 +195,6 @@ pub struct Shell {
     text: TextEngine,
     app: Launcher,
     resident: bool,
-    timing: bool,
     /// `WAYRUN_IME_LOG=1`: every text-input event and the state `done` left; the
     /// preedit path cannot be driven from here, so it is the only diagnosis.
     ime_log: bool,
@@ -276,7 +275,6 @@ impl Shell {
             text: TextEngine::new(),
             app: Launcher::new(),
             resident: std::env::var_os("WAYRUN_RESIDENT").is_some(),
-            timing: std::env::var_os("WAYRUN_TIMING").is_some(),
             ime_log: std::env::var_os("WAYRUN_IME_LOG").is_some(),
             started: Instant::now(),
             open_at: None,
