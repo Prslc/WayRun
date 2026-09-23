@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use memmap2::Mmap;
+use tokio::sync::Notify;
 use walkdir::WalkDir;
 
 use super::{entry_item, keep_name, score_path, score_split_path};
@@ -438,6 +439,9 @@ static STATE: Mutex<State> = Mutex::new(State {
 });
 static BUILDING: AtomicBool = AtomicBool::new(false);
 static REAPER: OnceLock<()> = OnceLock::new();
+/// Wakes the reaper when an index is stored; it parks on this while nothing is
+/// mapped, so an unmapped index costs no wakeups.
+static WAKE: Notify = Notify::const_new();
 
 fn lock() -> MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(PoisonError::into_inner)
@@ -504,9 +508,13 @@ pub fn sync_enabled(enabled: bool) {
 /// Hand a mapped index to the queries; the idle clock starts now, so a map that
 /// is stored but never searched still gets unmapped.
 fn store(map: Mmap) {
-    let mut state = lock();
-    state.map = Some(Arc::new(map));
-    state.last_used = Some(Instant::now());
+    {
+        let mut state = lock();
+        state.map = Some(Arc::new(map));
+        state.last_used = Some(Instant::now());
+    }
+    // the reaper may be parked with nothing to watch
+    WAKE.notify_one();
 }
 
 /// Unmap and delete the cache; idempotent.
@@ -528,21 +536,38 @@ pub fn discard() {
 }
 
 /// Unmap an index nothing has used for [`IDLE`], so an idle launcher holds no
-/// index pages; the wait is trimmed to the moment the unmapping is due.
+/// index pages; the wait is trimmed to the moment the unmapping is due, and
+/// with nothing mapped the reaper parks until the next [`store`].
 async fn reaper() {
     loop {
         let wait = {
             let state = lock();
-            match state.last_used {
-                Some(used) => IDLE.saturating_sub(used.elapsed()),
-                None => IDLE,
-            }
+            let until_due = state
+                .last_used
+                .map_or(IDLE, |used| IDLE.saturating_sub(used.elapsed()));
+            // with no map there is nothing to unmap: park until a store
+            // instead of waking every IDLE
+            state.map.as_ref().map(|_| until_due)
         };
-        tokio::time::sleep(wait.max(Duration::from_secs(1))).await;
+        let Some(wait) = wait else {
+            WAKE.notified().await;
+            continue;
+        };
+        tokio::select! {
+            _ = tokio::time::sleep(wait.max(Duration::from_secs(1))) => {}
+            // a store restarted the idle clock; compute the wait from it
+            _ = WAKE.notified() => continue,
+        }
         let mut state = lock();
-        if state.map.is_some() && state.last_used.is_some_and(|used| used.elapsed() >= IDLE) {
+        if state.map.is_none() {
+            continue;
+        }
+        if state.last_used.is_some_and(|used| used.elapsed() >= IDLE) {
             state.map = None;
             state.last_used = None;
+            // the map is gone, so the next search must be allowed to remap at
+            // once instead of falling back to the walk for a whole TTL
+            state.last_check = None;
         }
     }
 }
