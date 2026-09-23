@@ -16,11 +16,11 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 | `search` | `{"text"}` | array of result items; sent as a notification, streams a `results` notification |
 | `top` | — | most-used items; sent as a notification, streams a `results` notification |
 | `select` | item object | `null` (records usage; `ephemeral` and `copy` rows are not) |
-| `command` | a [`Command`](#commands) object | `null` (runs one row or panel command) |
+| `command` | an [`Action`](#actions) object | `null` (runs one row or panel command) |
 | `pin` | `{"scope","item"}` | `{"pinned": bool}` (pins an item to an exact query) |
-| `unpin` | `{"scope","on_click": Command}` | `{"unpinned": bool}` |
+| `unpin` | `{"scope","on_click": Action}` | `{"unpinned": bool}` |
 | `default` | `{"scope","action_id"}` | `null` (remembers the default Enter action for a plugin; a null `action_id` clears it) |
-| `forget` | `{"on_click": Command}` | `{"forgotten": bool}` |
+| `forget` | `{"on_click": Action}` | `{"forgotten": bool}` |
 | `list_plugins` | — | plugin metadata; see [schema](#plugin-metadata-list_plugins) |
 | `theme` | — | theme colors |
 | `ping` | — | `"pong"` |
@@ -42,9 +42,9 @@ The core also pushes JSON-RPC notifications (no `id`):
 pending search, then answers with a `results` notification. Sent **with** an
 `id` they answer synchronously with the array, for one-shot clients.
 
-## Commands
+## Actions
 
-A `Command` is one object tagged by its `type` field (`{"type": …}`), describing
+An `Action` is one object tagged by its `type` field (`{"type": …}`), describing
 what a row runs. It is the params of the `command` method and the type of a
 result's `on_click` and of a panel `execute` action:
 
@@ -68,7 +68,7 @@ characters survive; a `Terminal=true` handler is started inside a terminal.
 returns `-32602`. Use `top` for the most-used items — `search` does not serve a
 default view.
 
-`forget` drops a row from usage history. When the `on_click` is a `run` command
+`forget` drops a row from usage history. When the `on_click` is a `run` action
 whose first token is a registered external host's `command`, the core also relays
 a `forget` request to that host so it can delete its own data — e.g. the todo
 plugin removes the todo. The answer says whether anything was really dropped:
@@ -158,7 +158,7 @@ and `actions`/`badge` only when set:
 |-----|------|---------|
 | `title` | string | primary label (app name, command, file name, …) |
 | `summary` | string \| null | secondary line (command, path, description, …) |
-| `on_click` | [`Command`](#commands) \| null | action bound to Enter |
+| `on_click` | [`Action`](#actions) \| null | action bound to Enter |
 | `icon` | string \| null | absolute path to an icon image; see [Icon specs](#icon-specs) |
 | `ephemeral` | bool | when true, selecting this row is not recorded in usage history |
 | `actions` | array | optional secondary commands for the `Shift+Enter` action panel |
@@ -175,7 +175,7 @@ A `PanelAction` is one of:
 
 | `type` | Fields | Meaning |
 |--------|--------|---------|
-| `execute` | `command` | run that [`Command`](#commands) |
+| `execute` | `command` | run that [`Action`](#actions) |
 | `pin` | `scope`, `item` | pin the item to an exact query |
 | `unpin` | `scope`, `on_click` | unpin the command from an exact query |
 | `forget` | `on_click` | drop the command from usage history |
@@ -191,7 +191,7 @@ An item without `on_click` is non-interactive (display only).
 
 Selecting an item records it in usage history — the list behind an empty query
 (`top`). Two kinds of row are exempt: one the host marked `ephemeral: true` (a
-one-shot search hit, say), and one whose `on_click` is a `copy` command (its
+one-shot search hit, say), and one whose `on_click` is a `copy` action (its
 value is the copied text, not a target to re-open).
 
 ### Icon specs

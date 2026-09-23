@@ -14,11 +14,11 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 | `search` | `{"text"}` | 结果项数组；不带 `id` 时改为推送 `results` 通知 |
 | `top` | — | 最常用项；不带 `id` 时同样推送 `results` 通知 |
 | `select` | 结果项对象 | `null`（记录使用；`ephemeral` 与 `copy` 行不记录） |
-| `command` | 一个 [`Command`](#命令) 对象 | `null`（执行一条行或面板命令） |
+| `command` | 一个 [`Action`](#动作) 对象 | `null`（执行一条行或面板命令） |
 | `pin` | `{"scope","item"}` | `{"pinned": bool}`（把结果项置顶到某条精确查询） |
-| `unpin` | `{"scope","on_click": Command}` | `{"unpinned": bool}` |
+| `unpin` | `{"scope","on_click": Action}` | `{"unpinned": bool}` |
 | `default` | `{"scope","action_id"}` | `null`（记录某插件的默认 Enter 动作；`action_id` 为 null 则清除） |
-| `forget` | `{"on_click": Command}` | `{"forgotten": bool}` |
+| `forget` | `{"on_click": Action}` | `{"forgotten": bool}` |
 | `list_plugins` | — | 插件元数据；见 [schema](#插件元数据list_plugins) |
 | `theme` | — | 主题颜色 |
 | `ping` | — | `"pong"` |
@@ -38,9 +38,9 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 `search` 和 `top` 不带 `id` 时走流式：后端先中止上一个搜索，再推送 `results` 通知；
 带 `id` 时则同步返回数组，方便一次性客户端直接取回结果。
 
-## 命令
+## 动作
 
-`Command` 是用 `type` 字段标记的单个对象（`{"type": …}`），描述一行要执行什么。它既作
+`Action` 是用 `type` 字段标记的单个对象（`{"type": …}`），描述一行要执行什么。它既作
 `command` 方法的参数，也是结果项 `on_click` 的类型、面板 `execute` 动作所携带的内容：
 
 | `type` | 字段 | 效果 |
@@ -62,7 +62,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 `{"query": …}`、非字符串 `text` 都会返回 `-32602`。最常用项请用 `top`——`search`
 不承担默认视图。
 
-`forget` 把一行从使用历史中移除。如果 `on_click` 是 `run` 命令，且命令的第一个词恰好
+`forget` 把一行从使用历史中移除。如果 `on_click` 是 `run` 动作，且命令的第一个词恰好
 是某个已注册外部主机的 `command`，后端还会向该主机转发一条 `forget`，让它清理自己的数据——
 比如 todo 插件据此删掉对应待办。返回值表示是否真的删掉了东西：删掉一条历史行、**或**拥有该行的
 主机正常应答，都是 `true`，否则为 `false`。未实现 `forget` 的主机会回 `-32601`，这算
@@ -138,7 +138,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 |-----|------|------|
 | `title` | string | 主标签（应用名、命令、文件名……） |
 | `summary` | string \| null | 副行（命令、路径、描述……） |
-| `on_click` | [`Command`](#命令) \| null | Enter 绑定的动作 |
+| `on_click` | [`Action`](#动作) \| null | Enter 绑定的动作 |
 | `icon` | string \| null | 图标图像的绝对路径；见 [图标规范](#图标规范) |
 | `ephemeral` | bool | 为 true 时，选中该项不记入使用历史 |
 | `actions` | array | 可选，`Shift+Enter` 二级菜单的次级命令 |
@@ -153,7 +153,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 
 | `type` | 字段 | 含义 |
 |--------|------|------|
-| `execute` | `command` | 执行该 [`Command`](#命令) |
+| `execute` | `command` | 执行该 [`Action`](#动作) |
 | `pin` | `scope`、`item` | 把结果项置顶到某条精确查询 |
 | `unpin` | `scope`、`on_click` | 从某条精确查询取消置顶该命令 |
 | `forget` | `on_click` | 把该命令从使用历史中移除 |
@@ -166,7 +166,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 无 `on_click` 的结果项不可交互（仅展示）。
 
 选中一项会把它记入使用历史（空查询时的 `top` 列表）。有两类行不记：主机标记
-`ephemeral: true` 的行（如一次性的搜索结果），以及 `on_click` 为 `copy` 命令的行
+`ephemeral: true` 的行（如一次性的搜索结果），以及 `on_click` 为 `copy` 动作的行
 （它代表被复制的文本，而不是可再次打开的目标）。
 
 ### 图标规范
