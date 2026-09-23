@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::{OnceLock, RwLock};
 
 mod model;
-pub use model::{Config, Font, Icon, WebSearch};
+pub use model::{Config, Files, Font, Icon, WebSearch};
 
 const DEFAULT_TEMPLATE: &str = include_str!("../default-config.toml");
 

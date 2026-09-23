@@ -30,17 +30,72 @@ pub fn rank_results<T: Ord>(
     scored.into_iter().map(|(_, item)| item).collect()
 }
 
+const TIER_EXACT: u32 = 1000;
+const TIER_PREFIX: u32 = 700;
+const TIER_CONTAINS: u32 = 400;
+
 /// Exact, then prefix, then substring, so a short exact name outranks a longer
 /// name that merely contains the query. Inputs are lowercased.
 pub fn name_tier(name: &str, query: &str) -> u32 {
     if name == query {
-        1000
+        TIER_EXACT
     } else if name.starts_with(query) {
-        700
+        TIER_PREFIX
     } else if name.contains(query) {
-        400
+        TIER_CONTAINS
     } else {
         0
+    }
+}
+
+/// [`name_tier`] without lowercasing: an ASCII name is compared byte by byte,
+/// and only a non-ASCII one pays for `to_lowercase`.
+pub fn name_tier_ci(name: &str, query: &str) -> u32 {
+    if !name.is_ascii() {
+        return name_tier(&name.to_lowercase(), query);
+    }
+    let (name, query) = (name.as_bytes(), query.as_bytes());
+    if name.eq_ignore_ascii_case(query) {
+        TIER_EXACT
+    } else if name.len() >= query.len() && name[..query.len()].eq_ignore_ascii_case(query) {
+        TIER_PREFIX
+    } else if contains_ci(name, query) {
+        TIER_CONTAINS
+    } else {
+        0
+    }
+}
+
+fn contains_ci(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty()
+        && haystack
+            .windows(needle.len())
+            .any(|w| w.eq_ignore_ascii_case(needle))
+}
+
+/// [`name_tier_ci`] over raw name bytes, for a name the caller checked is ASCII:
+/// a byte compare is the same test without building a lowercased string.
+pub fn name_tier_bytes(name: &[u8], query: &[u8]) -> u32 {
+    if name.eq_ignore_ascii_case(query) {
+        TIER_EXACT
+    } else if name.len() >= query.len() && name[..query.len()].eq_ignore_ascii_case(query) {
+        TIER_PREFIX
+    } else if contains_ci(name, query) {
+        TIER_CONTAINS
+    } else {
+        0
+    }
+}
+
+/// Append `s` lowercased without allocating: ASCII goes byte by byte, anything
+/// else falls back to `to_lowercase`.
+pub fn push_lowered(out: &mut String, s: &str) {
+    if s.is_ascii() {
+        for b in s.bytes() {
+            out.push(b.to_ascii_lowercase() as char);
+        }
+    } else {
+        out.push_str(&s.to_lowercase());
     }
 }
 
@@ -122,5 +177,54 @@ mod tests {
             .is_empty()
         );
         assert!(copy_url_action(&row(None)).is_empty());
+    }
+
+    #[test]
+    fn a_case_insensitive_tier_matches_the_lowered_one() {
+        for (name, query) in [
+            ("WayRun", "wayrun"),
+            ("wayrun", "wayrun"),
+            ("wayrun-x86_64-unknown-linux-gnu.zip", "wayrun"),
+            ("NOTES.txt", "notes.txt"),
+            ("annual-Report.pdf", "report"),
+            ("报告.TXT", "报告"),
+            ("报告.txt", "report"),
+            ("Ünicode", "ünicode"),
+            ("x", "wayrun"),
+            ("", ""),
+        ] {
+            assert_eq!(
+                name_tier_ci(name, query),
+                name_tier(&name.to_lowercase(), query),
+                "{name} / {query}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_byte_tier_matches_the_text_tier_for_ascii_names() {
+        for (name, query) in [
+            ("WayRun", "wayrun"),
+            ("NOTES.txt", "notes.txt"),
+            ("report", "report"),
+            ("x", "wayrun"),
+            ("abc", "报告"),
+            ("", ""),
+        ] {
+            assert_eq!(
+                name_tier_bytes(name.as_bytes(), query.as_bytes()),
+                name_tier(&name.to_lowercase(), query),
+                "{name} / {query}"
+            );
+        }
+    }
+
+    #[test]
+    fn push_lowered_matches_to_lowercase() {
+        for s in ["", "ABC", "WayRun.zip", "Ünïcode", "报告.TXT", "İstanbul"] {
+            let mut out = String::from("keep/");
+            push_lowered(&mut out, s);
+            assert_eq!(out, format!("keep/{}", s.to_lowercase()), "{s}");
+        }
     }
 }

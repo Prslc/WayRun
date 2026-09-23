@@ -53,8 +53,13 @@ async fn rebuild() {
 
 async fn apply(new_config: Config) {
     let entries = build_entries(&new_config);
+    // The index exists only for `f`/`d`; with both gone, leave no cache behind.
+    let index_enabled = entries
+        .iter()
+        .any(|entry| crate::provider::file::index::owns(entry.plugin.meta().id));
     *CONFIG.write().await = new_config;
     *REGISTRY.write().await = entries;
+    crate::provider::file::index::sync_enabled(index_enabled);
     REGISTRY_READY.store(true, Ordering::Release);
 }
 

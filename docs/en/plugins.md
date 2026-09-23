@@ -44,12 +44,16 @@ everything.
 | `firefox-bookmarks` | `b` | Firefox bookmarks. | Firefox with a profile |
 | `firefox-history` | `h` | Firefox history. | Firefox with a profile |
 | `web-search` | `s` | Web search suggestions (engine set in `config.toml`). | network access |
-| `file-search` | `f` | Files under the home directory. | — |
-| `path-search` | `d` | Directories under the home directory. | — |
+| `file-search` | `f` | Files under the home directory, at any depth. | — |
+| `path-search` | `d` | Directories under the home directory, at any depth. | — |
 | `clipboard` | `c` | Clipboard history. | `cliphist` running |
 | `window` | `w` | Open windows (niri or Hyprland, per build). | the matching compositor backend |
 
 A keyword whose dependency is absent returns no rows instead of failing.
+
+`file-search` and `path-search` cover the whole home directory through an index.
+`config.md`'s `[files]` `index = false` restricts them to the configured `depth`
+instead; they then keep no cache.
 
 ## Result actions
 

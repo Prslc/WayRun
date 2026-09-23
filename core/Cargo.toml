@@ -26,4 +26,5 @@ toml = "1.1.2"
 urlencoding = "2"
 walkdir = "2.5.0"
 freedesktop-desktop-entry = { version = "0.8", default-features = false }
+memmap2 = "0.9"
 minreq = { version = "3.0.0", default-features = false, features = ["https-native-tls", "json-using-serde", "urlencoding", "proxy"] }

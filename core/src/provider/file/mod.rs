@@ -1,4 +1,6 @@
+use std::ffi::OsStr;
 use std::future::Future;
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
@@ -11,6 +13,10 @@ use crate::system::fs::get_home;
 use crate::system::icon::{find_first_icon_path, resolve};
 use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
 use rust_i18n::t;
+
+// The index is a detail of this provider, but the registry has to know whether
+// to keep its cache alive, so the crate may reach it.
+pub(crate) mod index;
 
 /// The icon the system MIME database assigns to `path`. Its themed-icon list is
 /// a priority order, so the first name the theme actually ships wins.
@@ -55,6 +61,7 @@ macro_rules! search_plugin {
                 // filesystem, where case matters.
                 let query = query.to_string();
                 Box::pin(async move {
+                    index::ensure().await;
                     Ok(
                         tokio::task::spawn_blocking(move || do_search(&query, $dirs, $by_name))
                             .await
@@ -140,18 +147,21 @@ search_plugin!(
 );
 
 /// `file-search` cares about the name only; shallower paths break ties.
-fn score_name(name: &str, _path: &str, query: &str, depth: usize) -> u32 {
-    crate::provider::name_tier(&name.to_lowercase(), query).saturating_sub(depth as u32)
+/// `query_lower` is already lowercased.
+pub(super) fn score_name(name: &str, _path_lower: &str, query_lower: &str, depth: usize) -> u32 {
+    crate::provider::name_tier_ci(name, query_lower).saturating_sub(depth as u32)
 }
 
 /// `path-search` matches when every token is somewhere on the path, but a name
-/// hit still outranks a parent-directory-only hit.
-fn score_path(name: &str, path: &str, query: &str, depth: usize) -> u32 {
-    let path = path.to_lowercase();
-    if !query.split_whitespace().all(|token| path.contains(token)) {
+/// hit still outranks a parent-directory-only hit. Both strings are lowercased.
+pub(super) fn score_path(name: &str, path_lower: &str, query_lower: &str, depth: usize) -> u32 {
+    if !query_lower
+        .split_whitespace()
+        .all(|token| path_lower.contains(token))
+    {
         return 0;
     }
-    crate::provider::name_tier(&name.to_lowercase(), query)
+    crate::provider::name_tier_ci(name, query_lower)
         .max(200)
         .saturating_sub(depth as u32)
 }
@@ -186,7 +196,7 @@ fn exact_path(query: &str, home: &Path) -> Option<PathBuf> {
 
 /// One walked or stat'd path as a result row. GLib builds the URI, because raw
 /// paths are invalid for spaces and non-ASCII.
-fn entry_item(path: &Path, is_dir: bool) -> ResultItem {
+pub(super) fn entry_item(path: &Path, is_dir: bool) -> ResultItem {
     let name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -208,14 +218,20 @@ fn entry_item(path: &Path, is_dir: bool) -> ResultItem {
     }
 }
 
-/// Walk filter: skip hidden dirs and build caches, and skip the three roots at
-/// depth 1 under `~` (they are walked on their own), so nothing is doubled.
+/// Walk filter: hidden dirs and build caches never enter the index or a result.
+pub(super) fn keep_name(name: &OsStr) -> bool {
+    let name = name.as_bytes();
+    !name.starts_with(b".")
+        && name != b"node_modules"
+        && name != b"target"
+        && name != b"__pycache__"
+}
+
+/// The quick walk's four roots: `Desktop`/`Documents`/`Downloads` are walked on
+/// their own, so skip them at depth 1 under `~` rather than twice.
 fn keep_entry(name: &str, depth: usize) -> bool {
-    if name.starts_with('.') || name == "node_modules" || name == "target" || name == "__pycache__"
-    {
-        return false;
-    }
-    !(depth == 1 && matches!(name, "Desktop" | "Documents" | "Downloads"))
+    keep_name(OsStr::new(name))
+        && !(depth == 1 && matches!(name, "Desktop" | "Documents" | "Downloads"))
 }
 
 /// A walk may match thousands of entries; rank the first `MATCH_CAP` and show
@@ -245,6 +261,31 @@ fn do_search(query: &str, want_dir: bool, by_name: bool) -> Vec<ResultItem> {
 
     let path_mode = query.starts_with('~') || query.contains('/');
     let query_lower = query.to_lowercase();
+
+    if let Some(items) = index::search(&home, &query_lower, want_dir, by_name && !path_mode) {
+        return items;
+    }
+
+    quick_search(
+        &home,
+        query,
+        &query_lower,
+        want_dir,
+        by_name,
+        crate::config::get().files.depth,
+    )
+}
+
+/// The fallback when no index is available: the four roots, `max_depth` levels.
+fn quick_search(
+    home: &Path,
+    query: &str,
+    query_lower: &str,
+    want_dir: bool,
+    by_name: bool,
+    max_depth: usize,
+) -> Vec<ResultItem> {
+    let path_mode = query.starts_with('~') || query.contains('/');
     let scorer = if by_name && !path_mode {
         score_name
     } else {
@@ -255,7 +296,7 @@ fn do_search(query: &str, want_dir: bool, by_name: bool) -> Vec<ResultItem> {
         home.join("Desktop"),
         home.join("Documents"),
         home.join("Downloads"),
-        home.clone(),
+        home.to_path_buf(),
     ];
 
     let mut scored: Vec<(u32, ResultItem)> = Vec::new();
@@ -266,7 +307,7 @@ fn do_search(query: &str, want_dir: bool, by_name: bool) -> Vec<ResultItem> {
         }
 
         let walker = WalkDir::new(root)
-            .max_depth(3)
+            .max_depth(max_depth)
             .into_iter()
             .filter_entry(|e| keep_entry(&e.file_name().to_string_lossy(), e.depth()));
 
@@ -279,7 +320,8 @@ fn do_search(query: &str, want_dir: bool, by_name: bool) -> Vec<ResultItem> {
 
             let path = entry.path();
             let name = entry.file_name().to_string_lossy();
-            let score = scorer(&name, &path.to_string_lossy(), &query_lower, entry.depth());
+            let path_lower = path.to_string_lossy().to_lowercase();
+            let score = scorer(&name, &path_lower, query_lower, entry.depth());
             if score == 0 {
                 continue;
             }
@@ -435,8 +477,8 @@ mod tests {
     #[test]
     fn a_path_only_hit_ranks_below_a_name_hit() {
         let query = "wayrun";
-        let named = score_path("WayRun", "/home/u/Project/WayRun", query, 2);
-        let nested = score_path("core", "/home/u/Project/WayRun/core", query, 3);
+        let named = score_path("WayRun", "/home/u/project/wayrun", query, 2);
+        let nested = score_path("core", "/home/u/project/wayrun/core", query, 3);
         assert!(named > nested, "{named} > {nested}");
         assert_eq!(score_path("core", "/home/u/other/core", query, 1), 0);
     }
@@ -498,5 +540,39 @@ mod tests {
         assert!(!keep_entry("target", 3));
         assert!(!keep_entry("__pycache__", 2));
         assert!(keep_entry("notes.txt", 2));
+    }
+
+    #[test]
+    fn the_index_prunes_only_dotdirs_and_build_caches() {
+        for name in [".config", ".git", "node_modules", "target", "__pycache__"] {
+            assert!(!keep_name(OsStr::new(name)), "{name}");
+        }
+        for name in ["Desktop", "Documents", "Downloads", "notes.txt", "src"] {
+            assert!(keep_name(OsStr::new(name)), "{name}");
+        }
+    }
+
+    #[test]
+    fn the_quick_walk_stops_at_the_depth_it_is_given() {
+        let dir = tempfile::tempdir().unwrap();
+        let shallow = dir.path().join("Documents/a/b");
+        let deep = shallow.join("c");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(shallow.join("shallow.txt"), "x").unwrap();
+        std::fs::write(deep.join("deep.txt"), "x").unwrap();
+
+        let found = quick_search(dir.path(), "shallow.txt", "shallow.txt", false, true, 3);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].title, "shallow.txt");
+
+        assert!(
+            quick_search(dir.path(), "deep.txt", "deep.txt", false, true, 3).is_empty(),
+            "one level past the configured depth is out of reach"
+        );
+        assert_eq!(
+            quick_search(dir.path(), "deep.txt", "deep.txt", false, true, 4).len(),
+            1,
+            "raising the depth reaches it"
+        );
     }
 }

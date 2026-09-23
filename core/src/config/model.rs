@@ -8,6 +8,7 @@ pub struct Config {
     pub web_search: WebSearch,
     pub font: Font,
     pub icon: Icon,
+    pub files: Files,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -36,6 +37,28 @@ pub struct Icon {
     pub theme: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Files {
+    /// Index `$HOME` so `f`/`d` match at any depth; the cost is one cache file.
+    pub index: bool,
+    /// How many levels the search descends from each root when it is not indexed.
+    pub depth: usize,
+}
+
+impl Default for Files {
+    fn default() -> Self {
+        Self {
+            index: true,
+            depth: 3,
+        }
+    }
+}
+
+/// Bounds for `[files] depth`: 0 would search nothing but a root itself, and a
+/// deep miss walks the whole tree, which is what the index is for.
+const MIN_DEPTH: usize = 1;
+const MAX_DEPTH: usize = 16;
+
 impl Default for WebSearch {
     fn default() -> Self {
         Self {
@@ -62,6 +85,8 @@ struct ConfigFile {
     font: FontFile,
     #[serde(default)]
     icon: IconFile,
+    #[serde(default)]
+    files: FilesFile,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -82,6 +107,12 @@ struct FontFile {
 #[derive(serde::Deserialize, Default)]
 struct IconFile {
     theme: Option<String>,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct FilesFile {
+    index: Option<bool>,
+    depth: Option<usize>,
 }
 
 impl Config {
@@ -112,6 +143,12 @@ impl Config {
         }
         if let Some(theme) = file.icon.theme.filter(|t| !t.trim().is_empty()) {
             self.icon.theme = theme;
+        }
+        if let Some(index) = file.files.index {
+            self.files.index = index;
+        }
+        if let Some(depth) = file.files.depth {
+            self.files.depth = depth.clamp(MIN_DEPTH, MAX_DEPTH);
         }
     }
 }
@@ -163,6 +200,21 @@ mod tests {
     #[test]
     fn a_blank_family_keeps_the_default() {
         assert_eq!(parse("[font]\nfamily = \"  \"").font, Font::default());
+    }
+
+    #[test]
+    fn the_file_index_can_be_turned_off() {
+        assert!(parse("").files.index, "indexing is on unless turned off");
+        assert!(!parse("[files]\nindex = false").files.index);
+    }
+
+    #[test]
+    fn the_search_depth_is_bounded_to_its_documented_range() {
+        assert_eq!(parse("").files.depth, 3, "the shipped depth is unchanged");
+        assert_eq!(parse("[files]\ndepth = 1").files.depth, 1);
+        assert_eq!(parse("[files]\ndepth = 16").files.depth, 16);
+        assert_eq!(parse("[files]\ndepth = 0").files.depth, 1);
+        assert_eq!(parse("[files]\ndepth = 999").files.depth, 16);
     }
 
     #[test]

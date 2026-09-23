@@ -42,3 +42,14 @@ The icon theme is optional: the panel, badge and built-in plugin glyphs are
 built into the binary, and a row icon no theme resolves falls back to a bundled
 placeholder. `theme` beats the desktop setting. A change takes effect on the next
 launch.
+
+## `[files]`
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `index` | `true` | Let `f` and `d` find files and directories anywhere under `$HOME`, not only near its top. |
+| `depth` | `3` | How many levels an unindexed search descends from each of its roots, `1` to `16`. Out-of-range values are clamped. |
+
+Indexing happens in the background, and only once `f` or `d` is used. Set
+`index = false` to search just `depth` levels under `$HOME` and leave no cache
+behind; disabling both plugins does the same.

@@ -11,3 +11,7 @@
 
 [icon]
 # theme = "Adwaita"             # icon theme; omitted follows the desktop setting
+
+[files]
+# index = true                  # match f/d at any depth under $HOME
+# depth = 3                     # levels the search descends while unindexed; 1-16

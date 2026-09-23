@@ -39,12 +39,15 @@ enabled = true
 | `firefox-bookmarks` | `b` | Firefox 书签。 | 已配置 profile 的 Firefox |
 | `firefox-history` | `h` | Firefox 历史。 | 已配置 profile 的 Firefox |
 | `web-search` | `s` | 网页搜索建议（引擎在 `config.toml` 中设置）。 | 可访问网络 |
-| `file-search` | `f` | 主目录下的文件。 | — |
-| `path-search` | `d` | 主目录下的目录。 | — |
+| `file-search` | `f` | 主目录下的文件，任意深度。 | — |
+| `path-search` | `d` | 主目录下的目录，任意深度。 | — |
 | `clipboard` | `c` | 剪贴板历史。 | `cliphist` 正在运行 |
 | `window` | `w` | 打开窗口（niri 或 Hyprland，取决于编译的后端）。 | 对应的合成器后端 |
 
 依赖缺失时，对应关键词返回空结果，而不是报错。
+
+`file-search` 与 `path-search` 经索引覆盖整个主目录。`config.md` 的 `[files]` 中设
+`index = false` 则只搜索主目录的 `depth` 层，且不留缓存。
 
 ## 结果动作
 

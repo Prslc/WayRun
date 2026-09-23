@@ -2135,6 +2135,7 @@ dependencies = [
  "fasteval",
  "freedesktop-desktop-entry",
  "gio",
+ "memmap2",
  "minreq",
  "notify",
  "nucleo",
