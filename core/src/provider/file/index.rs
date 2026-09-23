@@ -462,12 +462,18 @@ struct State {
     map: Option<Arc<Mmap>>,
     last_used: Option<Instant>,
     last_check: Option<Instant>,
+    /// Set by [`discard`] once it has unlinked the cache and cleared before any
+    /// write: while it holds, no cache file is on disk, so a discard — one per
+    /// search while indexing is off — can skip the unlinks entirely.
+    clean: bool,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
     map: None,
     last_used: None,
     last_check: None,
+    // a previous process may have left cache files behind
+    clean: false,
 });
 static BUILDING: AtomicBool = AtomicBool::new(false);
 static REAPER: OnceLock<()> = OnceLock::new();
@@ -549,14 +555,21 @@ fn store(map: Mmap) {
     WAKE.notify_one();
 }
 
-/// Unmap and delete the cache; idempotent.
+/// Unmap and delete the cache; idempotent, and the deletion itself runs once
+/// per write — with indexing off this is called on every search.
 pub fn discard() {
-    {
+    let already_clean = {
         let mut state = lock();
         state.map = None;
         state.last_used = None;
         // re-enabling must rebuild at once, not wait out the refresh TTL
         state.last_check = None;
+        let clean = state.clean;
+        state.clean = true;
+        clean
+    };
+    if already_clean {
+        return;
     }
     let Some(path) = path() else {
         return;
@@ -639,6 +652,8 @@ fn refresh(home: &Path) {
     let Some(path) = path() else {
         return;
     };
+    // a cache file, or its `.tmp`, may exist from here on
+    lock().clean = false;
     if let Err(err) = write_atomic(&path, &bytes) {
         eprintln!("wayrun: file index write failed: {err}");
         return;
