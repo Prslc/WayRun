@@ -29,3 +29,4 @@ walkdir = "2.5.0"
 freedesktop-desktop-entry = { version = "0.8", default-features = false }
 memmap2 = "0.9"
 minreq = { version = "3.0.0", default-features = false, features = ["https-native-tls", "json-using-serde", "urlencoding", "proxy"] }
+rayon = "1.12.0"

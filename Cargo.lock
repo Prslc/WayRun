@@ -2140,6 +2140,7 @@ dependencies = [
  "minreq",
  "notify",
  "nucleo",
+ "rayon",
  "rusqlite",
  "rust-i18n",
  "serde",

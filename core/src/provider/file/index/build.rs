@@ -2,7 +2,7 @@ use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, PoisonError};
 
 use crate::provider::file::index::format::{
     DIR_REC, DirOut, FILE_REC, FileOut, HEADER, exclude_hash, header_bytes, push_name,
@@ -114,16 +114,6 @@ struct Seg {
     files: Vec<Vec<u8>>,
 }
 
-/// The walk's shared state: directories to read, segments finished so far, and
-/// how many directories are being read right now.
-#[derive(Default)]
-struct Work {
-    tasks: Vec<Task>,
-    segs: Vec<Seg>,
-    active: usize,
-    parked: usize,
-}
-
 /// The walk's limits: the entries produced so far, and whether a directory's
 /// mtime could not be read at all.
 struct Limits {
@@ -205,38 +195,28 @@ pub(super) fn walk_into(
             name_len,
         });
     }
-    let first = entries
-        .dirs
-        .iter()
-        .enumerate()
-        .map(|(ordinal, name)| task_of(&[], ordinal as u32, name, root, root_lower, depth))
-        .collect::<Vec<_>>();
-
-    let work = Mutex::new(Work {
-        tasks: first,
-        ..Work::default()
-    });
-    let done = Condvar::new();
     let limits = Limits {
         cap,
         count: AtomicUsize::new(1 + entries.files.len()),
         over: AtomicBool::new(false),
         failed: AtomicBool::new(false),
     };
-    let workers = threads.clamp(1, walk_threads());
-    let mut segs = std::thread::scope(|scope| {
-        let handles: Vec<_> = (0..workers)
-            .map(|_| scope.spawn(|| worker(exclude, &work, &done, &limits)))
-            .collect();
-        for handle in handles {
-            handle.join().expect("a walk thread panicked");
+    let segs = Mutex::new(Vec::new());
+    // a pool per walk keeps the thread count a caller's parameter, not global state
+    let pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(threads.clamp(1, walk_threads()) as usize)
+        .build()
+        .ok()?;
+    pool.scope(|scope| {
+        for (ordinal, name) in entries.dirs.iter().enumerate() {
+            let task = task_of(&[], ordinal as u32, name, root, root_lower, depth);
+            scope.spawn(|scope| visit(scope, task, exclude, &segs, &limits));
         }
-        let mut queue = lock(&work);
-        queue.segs.drain(..).collect::<Vec<_>>()
     });
     if limits.failed.load(Ordering::Relaxed) {
         return None;
     }
+    let mut segs = segs.into_inner().unwrap_or_else(PoisonError::into_inner);
     segs.sort_unstable_by(|a, b| a.chain.cmp(&b.chain));
     merge(tables, root_slot, depth, cap, segs);
     Some(())
@@ -264,46 +244,28 @@ fn task_of(
     }
 }
 
-fn lock(work: &Mutex<Work>) -> MutexGuard<'_, Work> {
-    work.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// Read directories until none is left: a worker parks while others are still
-/// reading, and the last one out wakes the rest so they can stop.
-fn worker(exclude: &[String], work: &Mutex<Work>, done: &Condvar, limits: &Limits) {
-    loop {
-        let task = {
-            let mut queue = lock(work);
-            loop {
-                if let Some(task) = queue.tasks.pop() {
-                    queue.active += 1;
-                    break task;
-                }
-                if queue.active == 0 {
-                    done.notify_all();
-                    return;
-                }
-                queue.parked += 1;
-                queue = done.wait(queue).unwrap_or_else(PoisonError::into_inner);
-                queue.parked -= 1;
-            }
-        };
-        let (seg, children) = read_task(task, exclude, limits);
-        let mut queue = lock(work);
-        queue.active -= 1;
-        if let Some(seg) = seg {
-            queue.segs.push(seg);
-        }
-        queue.tasks.extend(children);
-        // only a parked worker needs waking; a busy one re-checks the queue
-        if queue.parked > 0 {
-            done.notify_all();
-        }
+/// Read one directory and spawn its children, so the whole walk rides rayon's
+/// scheduler.
+fn visit<'s>(
+    scope: &rayon::Scope<'s>,
+    task: Task,
+    exclude: &'s [String],
+    segs: &'s Mutex<Vec<Seg>>,
+    limits: &'s Limits,
+) {
+    let (seg, children) = read_task(task, exclude, limits);
+    if let Some(seg) = seg {
+        segs.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(seg);
+    }
+    for child in children {
+        scope.spawn(move |scope| visit(scope, child, exclude, segs, limits));
     }
 }
 
-/// Read one directory into a segment and push its children as tasks; a failed
-/// mtime fails the walk, while an unlistable directory keeps its record alone.
+/// Read one directory into a segment and hand back its children as tasks; a
+/// failed mtime fails the walk, while an unlistable directory keeps its record.
 fn read_task(task: Task, exclude: &[String], limits: &Limits) -> (Option<Seg>, Vec<Task>) {
     let Some(mtime_ns) = mtime_ns(&task.path) else {
         limits.failed.store(true, Ordering::Relaxed);
