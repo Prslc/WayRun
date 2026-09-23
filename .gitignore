@@ -3,4 +3,5 @@ target/
 .run/
 AGENTS.md
 AGENTS.md.bak
+NOTES.md
 scripts/
