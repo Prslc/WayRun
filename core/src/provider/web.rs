@@ -55,12 +55,6 @@ fn meta_of(engine: &Engine) -> Meta {
     }
 }
 
-/// The identity the registry lists for `web-search` without building the
-/// plugin, so a disabled entry still shows the configured engine.
-pub fn meta_for(engine: &str) -> Meta {
-    meta_of(resolve(engine))
-}
-
 pub struct WebSearch {
     engine: &'static Engine,
     meta: Meta,

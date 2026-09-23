@@ -74,14 +74,6 @@ fn build_entries(config: &Config) -> Vec<Entry> {
         if !p.enabled {
             continue;
         }
-        if p.id == "web-search" {
-            entries.push(Entry {
-                plugin: Box::new(crate::provider::web::WebSearch::new()),
-                keyword: p.keyword.clone(),
-                pending: None,
-            });
-            continue;
-        }
         if let Some(plugin) = map.remove(p.id.as_str()) {
             entries.push(Entry {
                 plugin,
@@ -267,7 +259,6 @@ pub async fn list_plugins() -> Vec<(String, String, String, String, bool)> {
             // Unknown ids without a host are ignored (per the config contract):
             // they are neither built-ins nor declared external plugins.
             p.command.is_some()
-                || p.id == "web-search"
                 || map.contains_key(p.id.as_str())
                 || reg.iter().any(|e| e.plugin.meta().id == p.id.as_str())
         })
@@ -275,15 +266,6 @@ pub async fn list_plugins() -> Vec<(String, String, String, String, bool)> {
             let keyword = p.keyword.clone();
             if let Some(entry) = reg.iter().find(|e| e.plugin.meta().id == p.id.as_str()) {
                 let m = entry.plugin.meta();
-                (
-                    p.id.clone(),
-                    m.name.clone(),
-                    m.icon.to_string(),
-                    keyword,
-                    p.enabled,
-                )
-            } else if p.id == "web-search" {
-                let m = crate::provider::web::meta_for(&crate::config::web_search_engine());
                 (
                     p.id.clone(),
                     m.name.clone(),
