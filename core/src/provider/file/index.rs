@@ -17,16 +17,17 @@ use crate::wire::ResultItem;
 
 /// The index cache's magic and format version; either mismatch rebuilds.
 const MAGIC: [u8; 4] = *b"WRFI";
-const FORMAT_VERSION: u32 = 2;
+const FORMAT_VERSION: u32 = 3;
 /// The header before the tables, all little-endian: magic, version, dir_count,
-/// file_count, names_len, home_len, paths_len.
-const HEADER: usize = 28;
+/// file_count, names_len, home_len, paths_len, exclude hash.
+const HEADER: usize = 36;
 const H_VERSION: usize = 4;
 const H_DIRS: usize = H_VERSION + 4;
 const H_FILES: usize = H_DIRS + 4;
 const H_NAMES: usize = H_FILES + 4;
 const H_HOME: usize = H_NAMES + 4;
 const H_PATHS: usize = H_HOME + 4;
+const H_EXCLUDE: usize = H_PATHS + 4;
 /// The directory record: parent slot, name offset, name length, depth (32-bit
 /// each), ns mtime (64-bit), lowercased path offset and length (32-bit each);
 /// `DirOut::bytes` writes it, `Index::dir` reads it.
@@ -69,6 +70,7 @@ struct Index<'a> {
     paths: usize,
     dir_count: u32,
     file_count: u32,
+    exclude_hash: u64,
 }
 
 struct DirRec<'a> {
@@ -121,6 +123,7 @@ impl<'a> Index<'a> {
             paths,
             dir_count,
             file_count,
+            exclude_hash: u64_at(bytes, H_EXCLUDE),
         })
     }
 
@@ -168,6 +171,10 @@ impl<'a> Index<'a> {
 
 fn u32_at(bytes: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+}
+
+fn u64_at(bytes: &[u8], offset: usize) -> u64 {
+    u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
 }
 
 /// `$HOME`, `$XDG_CACHE_HOME/wayrun/file-index.bin`.
@@ -245,6 +252,7 @@ fn header_bytes(
     names_len: u32,
     home_len: u32,
     paths_len: u32,
+    exclude_hash: u64,
 ) -> [u8; HEADER] {
     let mut head = [0; HEADER];
     head[0..4].copy_from_slice(&MAGIC);
@@ -254,12 +262,29 @@ fn header_bytes(
     head[H_NAMES..H_NAMES + 4].copy_from_slice(&names_len.to_le_bytes());
     head[H_HOME..H_HOME + 4].copy_from_slice(&home_len.to_le_bytes());
     head[H_PATHS..H_PATHS + 4].copy_from_slice(&paths_len.to_le_bytes());
+    head[H_EXCLUDE..H_EXCLUDE + 8].copy_from_slice(&exclude_hash.to_le_bytes());
     head
 }
 
-/// Walk `home` into the index image; `cap` bounds dirs and files together.
-/// `None` when a partial walk must not be persisted as an authoritative index.
-fn build(home: &Path, cap: usize) -> Option<Vec<u8>> {
+/// A stable hash of the excluded names, length-prefixed so `["ab"]` and
+/// `["a", "b"]` cannot hash alike; the index records it to rebuild on a change.
+fn exclude_hash(names: &[String]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for name in names {
+        hash ^= name.len() as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        for byte in name.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    hash
+}
+
+/// Walk `home` into the index image; `cap` bounds dirs and files together, and
+/// `exclude` holds the names the walk never enters. `None` when a partial walk
+/// must not be persisted as an authoritative index.
+fn build(home: &Path, cap: usize, exclude: &[String]) -> Option<Vec<u8>> {
     if !home.is_dir() {
         return None;
     }
@@ -291,7 +316,7 @@ fn build(home: &Path, cap: usize) -> Option<Vec<u8>> {
     let walker = WalkDir::new(home)
         .min_depth(1)
         .into_iter()
-        .filter_entry(|e| e.depth() == 0 || keep_name(e.file_name()));
+        .filter_entry(|e| e.depth() == 0 || keep_name(e.file_name(), exclude));
     for entry in walker {
         let entry = match entry {
             Ok(entry) => entry,
@@ -363,6 +388,7 @@ fn build(home: &Path, cap: usize) -> Option<Vec<u8>> {
         names.len() as u32,
         home_bytes.len() as u32,
         paths.len() as u32,
+        exclude_hash(exclude),
     ));
     out.extend_from_slice(home_bytes);
     for d in &dirs {
@@ -683,6 +709,13 @@ pub fn sync_enabled(enabled: bool) {
     }
 }
 
+/// Re-check the cache on the next `f`/`d` search, so an edited `exclude` list
+/// applies without waiting out [`REFRESH_TTL`]; the registry calls this on every
+/// config reload.
+pub fn settings_changed() {
+    lock().last_check = None;
+}
+
 /// Hand a mapped index to the queries; the idle clock starts now, so a map that
 /// is stored but never searched still gets unmapped.
 fn store(map: Mmap) {
@@ -787,9 +820,11 @@ fn refresh(home: &Path) {
     }
     let _guard = BuildGuard;
 
+    let exclude = crate::config::get().files.exclude;
     if let Some(map) = load() {
-        let usable =
-            Index::parse(&map[..], home).is_some_and(|index| layout_ok(&index) && fresh(&index));
+        let usable = Index::parse(&map[..], home).is_some_and(|index| {
+            layout_ok(&index) && fresh(&index) && index.exclude_hash == exclude_hash(&exclude)
+        });
         if usable {
             let dirs = u32_at(&map[..], 8);
             let files = u32_at(&map[..], 12);
@@ -803,7 +838,7 @@ fn refresh(home: &Path) {
     }
 
     let started = Instant::now();
-    let Some(bytes) = build(home, MAX_ENTRIES) else {
+    let Some(bytes) = build(home, MAX_ENTRIES, &exclude) else {
         eprintln!("wayrun: file index build skipped: the walk was not fully readable");
         return;
     };
@@ -855,8 +890,18 @@ mod tests {
         index
     }
 
+    /// The names a stock install skips: the shipped template's list, the one
+    /// place those defaults are written down.
+    fn shipped_exclude() -> Vec<String> {
+        toml::from_str::<crate::config::Config>(crate::config::DEFAULT_TEMPLATE)
+            .expect("the template parses")
+            .files
+            .exclude
+    }
+
+    /// A stock install's behaviour: the shipped `[files] exclude` list.
     fn build_ok(home: &Path, cap: usize) -> Vec<u8> {
-        build(home, cap).expect("a readable home builds")
+        build(home, cap, &shipped_exclude()).expect("a readable home builds")
     }
 
     fn summaries(items: &[ResultItem]) -> Vec<String> {
@@ -870,14 +915,15 @@ mod tests {
     /// or `F_*` offset must be a deliberate format change (`FORMAT_VERSION`).
     #[test]
     fn the_record_layouts_are_the_documented_bytes() {
-        let head = header_bytes(1, 2, 3, 4, 5);
+        let head = header_bytes(1, 2, 3, 4, 5, 6);
         assert_eq!(head.len(), HEADER);
-        assert_eq!(&head[0..8], b"WRFI\x02\0\0\0");
+        assert_eq!(&head[0..8], b"WRFI\x03\0\0\0");
         assert_eq!(u32_at(&head, H_DIRS), 1);
         assert_eq!(u32_at(&head, H_FILES), 2);
         assert_eq!(u32_at(&head, H_NAMES), 3);
         assert_eq!(u32_at(&head, H_HOME), 4);
         assert_eq!(u32_at(&head, H_PATHS), 5);
+        assert_eq!(u64_at(&head, H_EXCLUDE), 6);
 
         let dir = DirOut {
             parent: 1,
@@ -1117,6 +1163,33 @@ mod tests {
     }
 
     #[test]
+    fn a_configured_list_replaces_the_shipped_caches_and_is_recorded() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        write(&home.join("vendor/kept.txt"));
+        write(&home.join("node_modules/pruned.txt"));
+
+        let custom = ["vendor".to_string()];
+        let bytes = build(home, MAX_ENTRIES, &custom).unwrap();
+        let index = parsed(&bytes, home);
+
+        assert!(search_in(&index, "kept.txt", false, true).is_empty());
+        // the list is the whole rule: an unlisted build cache is walked again
+        assert_eq!(search_in(&index, "pruned.txt", false, true).len(), 1);
+        // the header pins the list, so a config edit rebuilds instead of reusing
+        assert_eq!(index.exclude_hash, exclude_hash(&custom));
+        assert_ne!(index.exclude_hash, exclude_hash(&shipped_exclude()));
+    }
+
+    #[test]
+    fn the_exclude_hash_needs_the_length_prefix_and_is_stable() {
+        let joined = exclude_hash(&["ab".to_string()]);
+        let split = exclude_hash(&["a".to_string(), "b".to_string()]);
+        assert_ne!(joined, split, "a length prefix keeps the two apart");
+        assert_eq!(joined, exclude_hash(&["ab".to_string()]));
+    }
+
+    #[test]
     fn a_changed_directory_makes_the_index_stale() {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path();
@@ -1164,7 +1237,7 @@ mod tests {
     #[test]
     fn an_unusable_home_is_never_written_out_as_empty() {
         assert!(
-            build(Path::new("/nonexistent-home-of-wayrun"), MAX_ENTRIES).is_none(),
+            build(Path::new("/nonexistent-home-of-wayrun"), MAX_ENTRIES, &[]).is_none(),
             "an unstatable root must not become an authoritative empty index"
         );
 
@@ -1172,7 +1245,7 @@ mod tests {
         let home = dir.path().join("not-a-dir");
         write(&home);
         assert!(
-            build(&home, MAX_ENTRIES).is_none(),
+            build(&home, MAX_ENTRIES, &[]).is_none(),
             "a root that is not a directory can never be walked"
         );
 
@@ -1187,7 +1260,7 @@ mod tests {
             chmod(0o755);
             return;
         }
-        let bytes = build(&home, MAX_ENTRIES);
+        let bytes = build(&home, MAX_ENTRIES, &[]);
         chmod(0o755);
         assert!(
             bytes.is_none(),

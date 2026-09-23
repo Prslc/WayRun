@@ -9,6 +9,7 @@ use anyhow::Result;
 use gio::prelude::{Cast, FileExt};
 use walkdir::WalkDir;
 
+use crate::config::Files;
 use crate::plugin::{Meta, Plugin};
 use crate::provider::push_lowered;
 use crate::system::fs::get_home;
@@ -252,19 +253,17 @@ pub(super) fn entry_item(path: &Path, is_dir: bool) -> ResultItem {
     }
 }
 
-/// Walk filter: hidden dirs and build caches never enter the index or a result.
-pub(super) fn keep_name(name: &OsStr) -> bool {
+/// Walk filter: hidden entries and the configured names never enter the index
+/// or a result.
+pub(super) fn keep_name(name: &OsStr, exclude: &[String]) -> bool {
     let name = name.as_bytes();
-    !name.starts_with(b".")
-        && name != b"node_modules"
-        && name != b"target"
-        && name != b"__pycache__"
+    !name.starts_with(b".") && !exclude.iter().any(|entry| entry.as_bytes() == name)
 }
 
 /// The quick walk's four roots: `Desktop`/`Documents`/`Downloads` are walked on
 /// their own, so skip them at depth 1 under `~` rather than twice.
-fn keep_entry(name: &str, depth: usize) -> bool {
-    keep_name(OsStr::new(name))
+fn keep_entry(name: &str, depth: usize, exclude: &[String]) -> bool {
+    keep_name(OsStr::new(name), exclude)
         && !(depth == 1 && matches!(name, "Desktop" | "Documents" | "Downloads"))
 }
 
@@ -306,18 +305,18 @@ fn do_search(query: &str, want_dir: bool, by_name: bool) -> Vec<ResultItem> {
         &query_lower,
         want_dir,
         by_name,
-        crate::config::get().files.depth,
+        &crate::config::get().files,
     )
 }
 
-/// The fallback when no index is available: the four roots, `max_depth` levels.
+/// The fallback when no index is available: the four roots, `depth` levels.
 fn quick_search(
     home: &Path,
     query: &str,
     query_lower: &str,
     want_dir: bool,
     by_name: bool,
-    max_depth: usize,
+    files: &Files,
 ) -> Vec<ResultItem> {
     let path_mode = query.starts_with('~') || query.contains('/');
     let name_only = by_name && !path_mode;
@@ -338,9 +337,11 @@ fn quick_search(
         }
 
         let walker = WalkDir::new(root)
-            .max_depth(max_depth)
+            .max_depth(files.depth)
             .into_iter()
-            .filter_entry(|e| keep_entry(&e.file_name().to_string_lossy(), e.depth()));
+            .filter_entry(|e| {
+                keep_entry(&e.file_name().to_string_lossy(), e.depth(), &files.exclude)
+            });
 
         for entry in walker.filter_map(Result::ok) {
             let ft = entry.file_type();
@@ -417,6 +418,15 @@ mod tests {
         Some(Action::Open {
             uri: uri.to_string(),
         })
+    }
+
+    /// The names a stock install skips: the shipped template's list, the one
+    /// place those defaults are written down.
+    fn shipped_exclude() -> Vec<String> {
+        toml::from_str::<crate::config::Config>(crate::config::DEFAULT_TEMPLATE)
+            .expect("the template parses")
+            .files
+            .exclude
     }
 
     #[test]
@@ -608,30 +618,39 @@ mod tests {
 
     #[test]
     fn the_home_roots_are_skipped_only_under_the_home_root() {
+        let exclude = shipped_exclude();
         // depth 1 under `~`: walked as its own root, so skip it here.
-        assert!(!keep_entry("Desktop", 1));
-        assert!(!keep_entry("Documents", 1));
-        assert!(!keep_entry("Downloads", 1));
+        assert!(!keep_entry("Desktop", 1, &exclude));
+        assert!(!keep_entry("Documents", 1, &exclude));
+        assert!(!keep_entry("Downloads", 1, &exclude));
         // a same-named dir deeper, or one directly inside a root, is kept.
-        assert!(keep_entry("Desktop", 2));
-        assert!(keep_entry("Desktop", 0));
-        assert!(keep_entry("Documents", 2));
+        assert!(keep_entry("Desktop", 2, &exclude));
+        assert!(keep_entry("Desktop", 0, &exclude));
+        assert!(keep_entry("Documents", 2, &exclude));
         // build caches and dotdirs are skipped anywhere.
-        assert!(!keep_entry(".config", 1));
-        assert!(!keep_entry("node_modules", 1));
-        assert!(!keep_entry("target", 3));
-        assert!(!keep_entry("__pycache__", 2));
-        assert!(keep_entry("notes.txt", 2));
+        assert!(!keep_entry(".config", 1, &exclude));
+        assert!(!keep_entry("node_modules", 1, &exclude));
+        assert!(!keep_entry("target", 3, &exclude));
+        assert!(!keep_entry("__pycache__", 2, &exclude));
+        assert!(keep_entry("notes.txt", 2, &exclude));
     }
 
     #[test]
-    fn the_index_prunes_only_dotdirs_and_build_caches() {
+    fn the_index_prunes_dotdirs_and_whatever_the_config_lists() {
+        let shipped = shipped_exclude();
         for name in [".config", ".git", "node_modules", "target", "__pycache__"] {
-            assert!(!keep_name(OsStr::new(name)), "{name}");
+            assert!(!keep_name(OsStr::new(name), &shipped), "{name}");
         }
         for name in ["Desktop", "Documents", "Downloads", "notes.txt", "src"] {
-            assert!(keep_name(OsStr::new(name)), "{name}");
+            assert!(keep_name(OsStr::new(name), &shipped), "{name}");
         }
+        // the dot rule holds with no list at all, and a listed name need not be
+        // hidden; the shipped caches are the template's list, not a walk rule
+        let custom = ["vendor".to_string()];
+        assert!(!keep_name(OsStr::new(".git"), &[]));
+        assert!(!keep_name(OsStr::new("vendor"), &custom));
+        assert!(keep_name(OsStr::new("target"), &[]));
+        assert!(keep_name(OsStr::new("notes.txt"), &custom));
     }
 
     #[test]
@@ -643,16 +662,28 @@ mod tests {
         std::fs::write(shallow.join("shallow.txt"), "x").unwrap();
         std::fs::write(deep.join("deep.txt"), "x").unwrap();
 
-        let found = quick_search(dir.path(), "shallow.txt", "shallow.txt", false, true, 3);
+        let files = Files::default();
+        let found = quick_search(
+            dir.path(),
+            "shallow.txt",
+            "shallow.txt",
+            false,
+            true,
+            &files,
+        );
         assert_eq!(found.len(), 1, "{found:?}");
         assert_eq!(found[0].title, "shallow.txt");
 
         assert!(
-            quick_search(dir.path(), "deep.txt", "deep.txt", false, true, 3).is_empty(),
+            quick_search(dir.path(), "deep.txt", "deep.txt", false, true, &files).is_empty(),
             "one level past the configured depth is out of reach"
         );
+        let deeper = Files {
+            depth: 4,
+            ..Files::default()
+        };
         assert_eq!(
-            quick_search(dir.path(), "deep.txt", "deep.txt", false, true, 4).len(),
+            quick_search(dir.path(), "deep.txt", "deep.txt", false, true, &deeper).len(),
             1,
             "raising the depth reaches it"
         );

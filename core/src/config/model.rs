@@ -54,6 +54,9 @@ pub struct Files {
     /// How many levels the search descends from each root when it is not indexed.
     #[serde(deserialize_with = "lenient_depth")]
     pub depth: usize,
+    /// Directory names the walk never enters and a match never shows (a hidden
+    /// entry, a leading `.`, is skipped anyway); empty unless a file lists some.
+    pub exclude: Vec<String>,
 }
 
 /// A blank text key means "follow the session/desktop", the same as absent.
@@ -86,6 +89,7 @@ impl Default for Files {
         Self {
             index: true,
             depth: 3,
+            exclude: Vec::new(),
         }
     }
 }
@@ -136,6 +140,7 @@ mod tests {
     #[test]
     fn a_key_of_the_wrong_type_rejects_the_file() {
         assert!(toml::from_str::<Config>("[files]\ndepth = \"deep\"").is_err());
+        assert!(toml::from_str::<Config>("[files]\nexclude = \"node_modules\"").is_err());
         assert!(toml::from_str::<Config>("[font]\nfamily = 5").is_err());
     }
 
@@ -194,6 +199,20 @@ mod tests {
     }
 
     #[test]
+    fn the_excluded_names_default_to_nothing() {
+        // nothing is hardcoded: the walk skips hidden names unless a list says
+        // otherwise, and the list the engine ships lives in the template below
+        assert!(parse("").files.exclude.is_empty());
+        assert_eq!(
+            parse("[files]\nexclude = [\"vendor\", \"dist\"]")
+                .files
+                .exclude,
+            ["vendor", "dist"]
+        );
+        assert!(parse("[files]\nexclude = []").files.exclude.is_empty());
+    }
+
+    #[test]
     fn a_locale_is_read_and_a_blank_one_is_absent() {
         assert_eq!(parse("[ui]\nlocale = \"zh_cn\"").ui.locale, "zh_cn");
         // a blank key follows the session locale instead of pinning English
@@ -201,16 +220,15 @@ mod tests {
     }
 
     #[test]
-    fn the_shipped_template_comments_out_every_key() {
-        for line in super::super::DEFAULT_TEMPLATE.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            assert!(line.starts_with('['), "uncommented key: {line}");
-        }
-
-        // commented keys are absent, so the whole file is the built-in defaults
-        assert_eq!(parse(super::super::DEFAULT_TEMPLATE), Config::default());
+    fn the_shipped_template_carries_the_exclusion_list_and_nothing_else() {
+        let mut shipped = parse(super::super::DEFAULT_TEMPLATE);
+        assert_eq!(
+            shipped.files.exclude,
+            ["node_modules", "target", "__pycache__"]
+        );
+        // the one key that is active is allowlisted here; any other key that
+        // stops being a comment changes the value and fails
+        shipped.files.exclude = Vec::new();
+        assert_eq!(shipped, Config::default());
     }
 }

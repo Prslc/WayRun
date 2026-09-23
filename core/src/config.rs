@@ -4,7 +4,7 @@ use std::sync::{OnceLock, RwLock};
 mod model;
 pub use model::{Config, Files, Font, Icon, WebSearch};
 
-const DEFAULT_TEMPLATE: &str = include_str!("../default-config.toml");
+pub(crate) const DEFAULT_TEMPLATE: &str = include_str!("../default-config.toml");
 
 /// `~/.config/wayrun`, the one config directory the shell and core share.
 pub fn dir() -> Option<PathBuf> {

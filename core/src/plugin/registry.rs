@@ -60,6 +60,7 @@ async fn apply(new_config: Config) {
     *CONFIG.write().await = new_config;
     *REGISTRY.write().await = entries;
     crate::provider::file::index::sync_enabled(index_enabled);
+    crate::provider::file::index::settings_changed();
     REGISTRY_READY.store(true, Ordering::Release);
 }
 
