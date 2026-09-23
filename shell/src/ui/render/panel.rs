@@ -8,7 +8,8 @@ use crate::ui::geom;
 use crate::ui::icons::IconCache;
 use crate::ui::text::TextEngine;
 
-use super::canvas::{Canvas, ENTER_GLYPH, Rect};
+use super::canvas::{Canvas, Rect};
+use super::{RowBody, draw_row};
 
 /// The action panel (Shift+Enter): the parent row's title as a header, then the
 /// row's secondary commands as list rows in the same fixed window.
@@ -61,88 +62,23 @@ pub(super) fn draw_actions(
         .skip(menu.first)
         .take(layout.max_rows)
     {
-        let y = top + (index - menu.first) as f32 * geom::ROW_H;
-        let rect = Rect {
-            x: left,
-            y,
-            w: width,
-            h: geom::ROW_H,
+        let body = RowBody {
+            rect: Rect {
+                x: left,
+                y: top + (index - menu.first) as f32 * geom::ROW_H,
+                w: width,
+                h: geom::ROW_H,
+            },
+            selected: index == menu.selected,
+            hovered: state.hovered == Some(Hover::Action(index)),
+            icon: action.icon.as_deref(),
+            icon_tint: Some(theme.fg),
+            title: &action.title,
+            bold: false,
+            summary: None,
+            badge: None,
+            default_marker: marked == Some(index),
         };
-
-        let selected = index == menu.selected;
-        let hovered = state.hovered == Some(Hover::Action(index));
-        super::draw_row_chrome(canvas, pixmap, rect, selected, hovered, state, now);
-
-        // A constant icon x, so the accent bar never shifts it.
-        let icon_x = rect.x + 11.0;
-        if let Some(path) = action.icon.as_deref() {
-            icons.draw_tinted(
-                pixmap,
-                path,
-                (
-                    canvas.px(icon_x),
-                    canvas.px(rect.center_y() - font.icon() / 2.0),
-                ),
-                (font.icon() * canvas.scale).round() as u32,
-                state.entrance(now),
-                theme.fg,
-            );
-        }
-
-        let labels_x = icon_x + font.icon() + 12.0;
-        let enter = selected.then(|| text.shape(ENTER_GLYPH, 13.0 * canvas.scale, Weight::NORMAL));
-        let enter_w = enter
-            .as_ref()
-            .map_or(0.0, |shaped| shaped.width / canvas.scale + 12.0);
-        // The default marker sits left of the Enter glyph; reserve its room.
-        let dotted = marked == Some(index);
-        let marker_w = if dotted { 12.0 } else { 0.0 };
-        let labels_max = (rect.right() - 10.0 - labels_x - enter_w - marker_w).max(0.0);
-        let title = text.fit(
-            &action.title,
-            font.title() * canvas.scale,
-            Weight::NORMAL,
-            labels_max * canvas.scale,
-        );
-        let title_h = title.height / canvas.scale;
-        let clip = [
-            canvas.px(labels_x),
-            canvas.px(rect.y),
-            canvas.px(labels_max),
-            canvas.px(rect.h),
-        ];
-
-        text.draw(
-            pixmap,
-            &title,
-            state.fade(theme.fg, 1.0, now),
-            canvas.px(labels_x),
-            canvas.px(rect.center_y() - title_h / 2.0),
-            Some(clip),
-        );
-        if let Some(check) = &enter {
-            text.draw(
-                pixmap,
-                check,
-                state.fade(theme.primary, state.muted_alpha(), now),
-                canvas.px(rect.right() - 10.0) - check.width,
-                canvas.px(rect.center_y()) - check.height / 2.0,
-                None,
-            );
-        }
-        if dotted {
-            let cx = rect.right() - 10.0 - enter_w - 6.0;
-            canvas.fill_round(
-                pixmap,
-                Rect {
-                    x: cx - 3.0,
-                    y: rect.center_y() - 3.0,
-                    w: 6.0,
-                    h: 6.0,
-                },
-                3.0,
-                state.fade(theme.primary, 1.0, now),
-            );
-        }
+        draw_row(canvas, pixmap, state, text, icons, now, &body);
     }
 }
