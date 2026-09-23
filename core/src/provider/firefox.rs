@@ -1,12 +1,14 @@
+use std::ffi::OsString;
 use std::fs;
 use std::future::Future;
+use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{LazyLock, Mutex};
 use std::time::SystemTime;
 
 use anyhow::{Context, Result};
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use tokio::task;
 
 use crate::plugin::{Meta, Plugin};
@@ -111,6 +113,22 @@ fn hash_path(path: &Path) -> u64 {
     hash
 }
 
+/// A snapshot's `file:` URI: `immutable=1` fits a copy that is never modified
+/// in place, and drops the locking, -shm and -wal machinery entirely.
+fn snapshot_uri(path: &Path) -> PathBuf {
+    let mut bytes = b"file:".to_vec();
+    for &byte in path.as_os_str().as_encoded_bytes() {
+        // escape everything outside the URI unreserved set, non-UTF-8 bytes included
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'.' | b'_' | b'~') {
+            bytes.push(byte);
+        } else {
+            bytes.extend_from_slice(format!("%{byte:02X}").as_bytes());
+        }
+    }
+    bytes.extend_from_slice(b"?immutable=1");
+    PathBuf::from(OsString::from_vec(bytes))
+}
+
 async fn do_search(mode: Mode, query: &str) -> Result<Vec<ResultItem>> {
     if query.is_empty() {
         return Ok(vec![]);
@@ -121,7 +139,12 @@ async fn do_search(mode: Mode, query: &str) -> Result<Vec<ResultItem>> {
         let db_path = find_db()?;
         let copy = cached_copy(&db_path)?;
 
-        let conn = Connection::open(&copy)?;
+        let conn = Connection::open_with_flags(
+            snapshot_uri(&copy),
+            OpenFlags::SQLITE_OPEN_READ_ONLY
+                | OpenFlags::SQLITE_OPEN_URI
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
 
         let sql = match mode {
             Mode::Bookmarks => {
@@ -272,5 +295,22 @@ mod tests {
         let b = Path::new("/home/x/.mozilla/firefox/bbb/places.sqlite");
         assert_eq!(hash_path(a), hash_path(a));
         assert_ne!(hash_path(a), hash_path(b));
+    }
+
+    /// SQLite percent-decodes the path in a `file:` URI, so a cache path holding
+    /// `%`, `?` or `#` must be escaped or it would name a different file.
+    #[test]
+    fn a_snapshot_uri_escapes_and_keeps_raw_bytes() {
+        let uri = snapshot_uri(Path::new("/home/a%b?c#d/.cache/x.sqlite"));
+        assert_eq!(
+            uri.to_str().unwrap(),
+            "file:/home/a%25b%3Fc%23d/.cache/x.sqlite?immutable=1"
+        );
+
+        let raw = PathBuf::from(OsString::from_vec(b"/home/\xff/x.sqlite".to_vec()));
+        assert_eq!(
+            snapshot_uri(&raw).as_os_str().as_encoded_bytes(),
+            b"file:/home/%FF/x.sqlite?immutable=1"
+        );
     }
 }
