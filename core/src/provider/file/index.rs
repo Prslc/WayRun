@@ -679,7 +679,13 @@ fn refresh(home: &Path) {
         let usable =
             Index::parse(&map[..], home).is_some_and(|index| layout_ok(&index) && fresh(&index));
         if usable {
+            let dirs = u32_at(&map[..], 8);
+            let files = u32_at(&map[..], 12);
+            let mb = map.len() / 1_000_000;
             store(map);
+            // queries answer from the walk until the index is mapped, so the
+            // load reports like the build and tools can wait on either line
+            eprintln!("wayrun: file index {dirs} dirs, {files} files, {mb}MB (loaded)");
             return;
         }
     }
