@@ -499,7 +499,7 @@ impl PointerHandler for Shell {
                     self.app.pointer_on_card = inside_card;
                 }
                 PointerEventKind::Leave { .. } => {
-                    self.app.cursor_left();
+                    self.app.pointer_left();
                     self.app.pointer_on_card = false;
                     redraw = true;
                 }
@@ -524,7 +524,7 @@ impl PointerHandler for Shell {
                             .app
                             .menu
                             .as_ref()
-                            .map(|menu| (menu.first, menu.actions.len()))
+                            .map(|menu| (menu.cursor.first, menu.actions.len()))
                             .unwrap_or_default();
                         if let Some(index) = self.app.appearance.layout.action_at(
                             self.app.surface,
@@ -534,7 +534,7 @@ impl PointerHandler for Shell {
                             event.position.1 as f32,
                         ) {
                             if let Some(menu) = &mut self.app.menu {
-                                menu.selected = index;
+                                menu.cursor.selected = index;
                             }
                             self.run_action(now);
                             return;
@@ -549,14 +549,14 @@ impl PointerHandler for Shell {
 
                     let row = self.app.appearance.layout.row_at(
                         self.app.surface,
-                        self.app.first,
+                        self.app.cursor.first,
                         self.app.rows.len(),
                         event.position.0 as f32,
                         event.position.1 as f32,
                     );
                     match row {
                         Some(row) => {
-                            self.app.selected = row;
+                            self.app.cursor.selected = row;
                             self.app.contain();
                             self.submit(now);
                             return;

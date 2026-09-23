@@ -118,7 +118,7 @@ fn effective_label(state: &State) -> Option<&str> {
         return None;
     }
     Some(
-        effective_action(state.rows.get(state.selected)?)?
+        effective_action(state.rows.get(state.cursor.selected)?)?
             .title
             .as_str(),
     )
@@ -137,7 +137,7 @@ pub(super) fn draw_footer(
     let no_match = empty && !state.query.is_empty();
     let has_actions = state
         .rows
-        .get(state.selected)
+        .get(state.cursor.selected)
         .is_some_and(|row| !row.actions.is_empty());
     // A highlighted panel action owned by a plugin can be made the default; the
     // row's own command can too, and picking it clears the remembered one.

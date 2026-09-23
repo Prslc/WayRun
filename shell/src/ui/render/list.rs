@@ -28,17 +28,17 @@ pub(super) fn draw_list(
         .rows
         .iter()
         .enumerate()
-        .skip(state.first)
+        .skip(state.cursor.first)
         .take(layout.max_rows)
     {
         let body = RowBody {
             rect: Rect {
                 x: left,
-                y: top + (index - state.first) as f32 * geom::ROW_H,
+                y: top + (index - state.cursor.first) as f32 * geom::ROW_H,
                 w: width,
                 h: geom::ROW_H,
             },
-            selected: index == state.selected,
+            selected: index == state.cursor.selected,
             hovered: state.hovered == Some(Hover::Row(index)),
             icon: row.icon.as_deref(),
             icon_tint: None,

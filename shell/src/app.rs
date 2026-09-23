@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
 use crate::config::{AppearanceConfig, Mode};
+use crate::ui::geom::Layout;
 use crate::ui::theme::{Surfaces, Theme};
 use wayrun_core::wire::{Action, ActionItem, PanelAction, ResultItem};
 
@@ -18,20 +19,57 @@ pub enum Hover {
     Clear,
 }
 
+/// The window a list moves through: the highlighted index and the top row of the
+/// fixed `max_rows` window. The result list and the action panel each own one
+/// and move theirs by the same rules.
+#[derive(Default)]
+pub struct Cursor {
+    pub selected: usize,
+    pub first: usize,
+}
+
+impl Cursor {
+    pub fn up(&mut self) {
+        self.selected = self.selected.saturating_sub(1);
+    }
+
+    pub fn down(&mut self, len: usize) {
+        if self.selected + 1 < len {
+            self.selected += 1;
+        }
+    }
+
+    pub fn page_up(&mut self, page: usize) {
+        self.selected = self.selected.saturating_sub(page);
+    }
+
+    pub fn page_down(&mut self, len: usize, page: usize) {
+        self.selected = (self.selected + page).min(len.saturating_sub(1));
+    }
+
+    /// Move by whole rows (the wheel).
+    pub fn scroll(&mut self, rows: i32, len: usize) {
+        let last = len.saturating_sub(1) as i32;
+        self.selected = (self.selected as i32 + rows).clamp(0, last) as usize;
+    }
+
+    pub fn contain(&mut self, len: usize, layout: Layout) {
+        self.first = layout.contain(self.selected, self.first, len);
+    }
+}
+
 /// The action panel (Wox-style) opened with Shift+Enter over the selected row. It
 /// replaces the result list; `parent` is the row it belongs to.
 pub struct Menu {
     pub parent: usize,
     pub actions: Vec<ActionItem>,
-    pub selected: usize,
-    /// The top visible action of the `max_rows` window.
-    pub first: usize,
+    pub cursor: Cursor,
 }
 
 impl Menu {
     /// The action the panel would run.
     pub fn selected_action(&self) -> Option<&ActionItem> {
-        self.actions.get(self.selected)
+        self.actions.get(self.cursor.selected)
     }
 }
 
@@ -142,9 +180,7 @@ pub struct State {
     /// The live IME preedit, drawn at the caret (never inserted into `query`).
     pub preedit: Option<String>,
     pub rows: Vec<ResultItem>,
-    pub selected: usize,
-    /// Index of the top visible row of the fixed `max_rows` window (`contain`).
-    pub first: usize,
+    pub cursor: Cursor,
     /// The open action panel, if any. It takes over the list and the keyboard.
     pub menu: Option<Menu>,
     /// The panel's row and entry, held across the re-emit a panel action sends,
@@ -179,7 +215,7 @@ pub struct State {
     pub hovered: Option<Hover>,
     /// The pointer's last position over the surface, so a moving list can
     /// re-derive the hover.
-    cursor: Option<(f32, f32)>,
+    pointer: Option<(f32, f32)>,
     pub pointer_on_card: bool,
     /// fcitx can deliver Enter while a preedit is live; Enter over composition
     /// must not launch a row.
@@ -213,8 +249,7 @@ impl State {
             anchor: None,
             preedit: None,
             rows: Vec::new(),
-            selected: 0,
-            first: 0,
+            cursor: Cursor::default(),
             menu: None,
             panel_resume: None,
             system_theme: theme,
@@ -229,7 +264,7 @@ impl State {
             reduced_env,
             reduce_motion,
             hovered: None,
-            cursor: None,
+            pointer: None,
             pointer_on_card: false,
             preedit_active: false,
             caret_visible: true,
@@ -369,7 +404,7 @@ impl State {
         self.anchor = None;
         self.preedit = None;
         self.preedit_active = false;
-        self.selected = 0;
+        self.cursor.selected = 0;
         self.menu = None;
         self.hovered = None;
         self.dismiss_at = None;
@@ -407,26 +442,22 @@ impl State {
 
     /// Keep the selection inside the `max_rows` window, minimally.
     pub fn contain(&mut self) {
-        self.first = self
-            .appearance
-            .layout
-            .contain(self.selected, self.first, self.rows.len());
+        self.cursor.contain(self.rows.len(), self.appearance.layout);
         self.resync_hover();
     }
 
     /// Open the selected row's action panel; whether it had one to open.
     pub fn open_actions(&mut self) -> bool {
-        let Some(row) = self.rows.get(self.selected) else {
+        let Some(row) = self.rows.get(self.cursor.selected) else {
             return false;
         };
         if row.actions.is_empty() {
             return false;
         }
         self.menu = Some(Menu {
-            parent: self.selected,
+            parent: self.cursor.selected,
             actions: row.actions.clone(),
-            selected: 0,
-            first: 0,
+            cursor: Cursor::default(),
         });
         true
     }
@@ -466,7 +497,7 @@ impl State {
         else {
             return;
         };
-        self.selected = index;
+        self.cursor.selected = index;
         let Some(row) = self.rows.get(index) else {
             return;
         };
@@ -481,8 +512,7 @@ impl State {
         self.menu = Some(Menu {
             parent: index,
             actions,
-            selected,
-            first: 0,
+            cursor: Cursor { selected, first: 0 },
         });
         self.menu_contain();
     }
@@ -528,36 +558,34 @@ impl State {
 
     pub fn menu_up(&mut self) {
         if let Some(menu) = &mut self.menu {
-            menu.selected = menu.selected.saturating_sub(1);
+            menu.cursor.up();
         }
         self.menu_contain();
     }
 
     pub fn menu_down(&mut self) {
-        if let Some(menu) = &mut self.menu
-            && menu.selected + 1 < menu.actions.len()
-        {
-            menu.selected += 1;
+        if let Some(menu) = &mut self.menu {
+            menu.cursor.down(menu.actions.len());
         }
         self.menu_contain();
     }
 
     /// The wheel moves the panel's selection, like the arrows.
     pub fn menu_scroll(&mut self, rows: i32) {
-        let last = match &self.menu {
-            Some(menu) if !menu.actions.is_empty() && rows != 0 => menu.actions.len() - 1,
-            _ => return,
+        let Some(menu) = &mut self.menu else {
+            return;
         };
-        if let Some(menu) = &mut self.menu {
-            menu.selected = (menu.selected as i32 + rows).clamp(0, last as i32) as usize;
+        if menu.actions.is_empty() || rows == 0 {
+            return;
         }
+        menu.cursor.scroll(rows, menu.actions.len());
         self.menu_contain();
     }
 
     pub fn menu_page_up(&mut self) {
         let page = self.appearance.layout.max_rows;
         if let Some(menu) = &mut self.menu {
-            menu.selected = menu.selected.saturating_sub(page);
+            menu.cursor.page_up(page);
         }
         self.menu_contain();
     }
@@ -565,7 +593,7 @@ impl State {
     pub fn menu_page_down(&mut self) {
         let page = self.appearance.layout.max_rows;
         if let Some(menu) = &mut self.menu {
-            menu.selected = (menu.selected + page).min(menu.actions.len().saturating_sub(1));
+            menu.cursor.page_down(menu.actions.len(), page);
         }
         self.menu_contain();
     }
@@ -573,7 +601,7 @@ impl State {
     fn menu_contain(&mut self) {
         let layout = self.appearance.layout;
         if let Some(menu) = &mut self.menu {
-            menu.first = layout.contain(menu.selected, menu.first, menu.actions.len());
+            menu.cursor.contain(menu.actions.len(), layout);
         }
         self.resync_hover();
     }
@@ -581,18 +609,18 @@ impl State {
     /// The pointer position and the hover it implies; returns whether the hover
     /// changed. The ✕ button sits outside the list and wins over a row.
     pub fn hover_at(&mut self, x: f32, y: f32) -> bool {
-        self.cursor = Some((x, y));
+        self.pointer = Some((x, y));
         let hover = if self.clear_hit(x, y) {
             Some(Hover::Clear)
         } else if let Some(menu) = &self.menu {
             self.appearance
                 .layout
-                .action_at(self.surface, menu.first, menu.actions.len(), x, y)
+                .action_at(self.surface, menu.cursor.first, menu.actions.len(), x, y)
                 .map(Hover::Action)
         } else {
             self.appearance
                 .layout
-                .row_at(self.surface, self.first, self.rows.len(), x, y)
+                .row_at(self.surface, self.cursor.first, self.rows.len(), x, y)
                 .map(Hover::Row)
         };
 
@@ -604,24 +632,24 @@ impl State {
     }
 
     /// The pointer left the surface.
-    pub fn cursor_left(&mut self) {
-        self.cursor = None;
+    pub fn pointer_left(&mut self) {
+        self.pointer = None;
         self.hovered = None;
     }
 
     /// Rows that move under a stationary pointer are different rows and fire no
     /// enter/exit, so re-derive the hover; `Hover::Clear` is left alone.
     fn resync_hover(&mut self) {
-        let hit = self.cursor.and_then(|(x, y)| {
+        let hit = self.pointer.and_then(|(x, y)| {
             if let Some(menu) = &self.menu {
                 self.appearance
                     .layout
-                    .action_at(self.surface, menu.first, menu.actions.len(), x, y)
+                    .action_at(self.surface, menu.cursor.first, menu.actions.len(), x, y)
                     .map(Hover::Action)
             } else {
                 self.appearance
                     .layout
-                    .row_at(self.surface, self.first, self.rows.len(), x, y)
+                    .row_at(self.surface, self.cursor.first, self.rows.len(), x, y)
                     .map(Hover::Row)
             }
         });
@@ -637,7 +665,7 @@ impl State {
 
     /// The selected row's launch fields.
     pub fn selected_row(&self) -> Option<Launch> {
-        let row = self.rows.get(self.selected)?;
+        let row = self.rows.get(self.cursor.selected)?;
         let target = row.on_click.clone()?;
         let effective = row
             .actions
@@ -856,7 +884,7 @@ impl State {
         };
 
         self.rows.remove(index);
-        self.selected = self.selected.min(self.rows.len().saturating_sub(1));
+        self.cursor.selected = self.cursor.selected.min(self.rows.len().saturating_sub(1));
         // The panel was about the list that just changed under it.
         self.menu = None;
         self.contain();
@@ -877,7 +905,7 @@ impl State {
 
         // A fresh payload starts at the top row, and any open panel is stale; a
         // local removal and an identical re-send keep the cursor.
-        self.selected = 0;
+        self.cursor.selected = 0;
         self.menu = None;
         if let Some((row_key, key)) = resume {
             self.resume_panel(&row_key, &key);
@@ -892,34 +920,28 @@ impl State {
         if self.rows.is_empty() || rows == 0 {
             return;
         }
-
-        let last = (self.rows.len() - 1) as i32;
-        self.selected = (self.selected as i32 + rows).clamp(0, last) as usize;
+        self.cursor.scroll(rows, self.rows.len());
         self.contain();
     }
 
     pub fn up(&mut self) {
-        self.selected = self.selected.saturating_sub(1);
+        self.cursor.up();
         self.contain();
     }
 
     pub fn down(&mut self) {
-        if self.selected + 1 < self.rows.len() {
-            self.selected += 1;
-        }
+        self.cursor.down(self.rows.len());
         self.contain();
     }
 
     pub fn page_up(&mut self) {
-        self.selected = self
-            .selected
-            .saturating_sub(self.appearance.layout.max_rows);
+        self.cursor.page_up(self.appearance.layout.max_rows);
         self.contain();
     }
 
     pub fn page_down(&mut self) {
-        self.selected = (self.selected + self.appearance.layout.max_rows)
-            .min(self.rows.len().saturating_sub(1));
+        self.cursor
+            .page_down(self.rows.len(), self.appearance.layout.max_rows);
         self.contain();
     }
 
@@ -1121,10 +1143,10 @@ mod tests {
         let now = std::time::Instant::now();
         state.apply_results(items.clone(), now);
 
-        state.selected = 1;
+        state.cursor.selected = 1;
         // an identical re-send must not reset the selection
         state.apply_results(items.clone(), now);
-        assert_eq!(state.selected, 1);
+        assert_eq!(state.cursor.selected, 1);
 
         let changed = vec![
             item("Files", None, None, None),
@@ -1138,7 +1160,7 @@ mod tests {
         state.apply_results(changed, now);
         // a genuinely new payload starts from the top row: what the cursor
         // pointed at has changed
-        assert_eq!(state.selected, 0);
+        assert_eq!(state.cursor.selected, 0);
         assert_eq!(state.rows[1].on_click.as_ref(), Some(&run("firefox")));
     }
 
@@ -1159,9 +1181,9 @@ mod tests {
 
         // a page turn draws different rows under the same pointer: the hover has
         // to follow the row now under it, which is one further down the list
-        state.selected = layout.max_rows;
+        state.cursor.selected = layout.max_rows;
         state.contain();
-        assert_eq!(state.first, 1);
+        assert_eq!(state.cursor.first, 1);
         assert_eq!(state.hovered, Some(Hover::Row(2)));
 
         // and the ✕ button's hover is not a row, so a page turn leaves it alone
@@ -1175,7 +1197,7 @@ mod tests {
         state.contain();
         assert_eq!(state.hovered, Some(Hover::Clear));
 
-        state.cursor_left();
+        state.pointer_left();
         assert_eq!(state.hovered, None);
     }
 
@@ -1327,7 +1349,7 @@ mod tests {
         ];
         let now = std::time::Instant::now();
         state.apply_results(items, now);
-        state.selected = 1;
+        state.cursor.selected = 1;
         assert_eq!(
             state.rows[1].on_click.as_ref(),
             Some(&Action::Launch {
@@ -1352,7 +1374,7 @@ mod tests {
         assert!(state.remove_row(&firefox, now));
         assert_eq!(state.rows.len(), 1);
         assert_eq!(state.rows[0].title, "Files");
-        assert_eq!(state.selected, 0);
+        assert_eq!(state.cursor.selected, 0);
     }
 
     #[test]
@@ -1460,7 +1482,7 @@ mod tests {
         assert!(state.open_actions());
 
         fn remember(state: &mut State, selected: usize) -> Option<(String, Option<String>)> {
-            state.menu.as_mut().unwrap().selected = selected;
+            state.menu.as_mut().unwrap().cursor.selected = selected;
             state
                 .selected_default()
                 .map(|(plugin, id)| (plugin.to_string(), id.map(str::to_string)))
@@ -1586,7 +1608,7 @@ mod tests {
             ],
             now,
         );
-        state.selected = 1;
+        state.cursor.selected = 1;
         state.rows[1].actions = vec![ActionItem {
             title: "Pin to top".to_string(),
             action: PanelAction::Pin {
@@ -1857,7 +1879,7 @@ mod tests {
             now,
         );
         assert!(state.open_actions());
-        state.menu.as_mut().unwrap().selected = 1;
+        state.menu.as_mut().unwrap().cursor.selected = 1;
 
         // Alt+Enter on "Open in terminal": the reply carries the dot and the
         // panel must land back on that entry, not on the top of the list.
@@ -1869,12 +1891,12 @@ mod tests {
         );
 
         let menu = state.menu.as_ref().expect("the panel comes back");
-        assert_eq!(menu.selected, 1);
+        assert_eq!(menu.cursor.selected, 1);
         assert!(
             menu.actions[1].default,
             "the highlighted entry is the marked one"
         );
-        assert_eq!(state.selected, 0, "the panel's row is the selection");
+        assert_eq!(state.cursor.selected, 0, "the panel's row is the selection");
     }
 
     #[test]
@@ -1890,7 +1912,7 @@ mod tests {
         state.apply_results(vec![file_row(uri, vec![pin_entry(uri, true)])], now);
 
         let menu = state.menu.as_ref().expect("the panel comes back");
-        assert_eq!(menu.actions[menu.selected].title, "Unpin");
+        assert_eq!(menu.actions[menu.cursor.selected].title, "Unpin");
     }
 
     #[test]
@@ -1954,10 +1976,10 @@ mod tests {
         state.menu_down();
         state.menu_down();
         state.menu_down();
-        assert_eq!(state.menu.as_ref().unwrap().selected, 5);
-        assert_eq!(state.menu.as_ref().unwrap().first, 5 - max + 1);
+        assert_eq!(state.menu.as_ref().unwrap().cursor.selected, 5);
+        assert_eq!(state.menu.as_ref().unwrap().cursor.first, 5 - max + 1);
 
         state.menu_page_up();
-        assert_eq!(state.menu.as_ref().unwrap().selected, 5 - max);
+        assert_eq!(state.menu.as_ref().unwrap().cursor.selected, 5 - max);
     }
 }

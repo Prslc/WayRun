@@ -59,17 +59,17 @@ pub(super) fn draw_actions(
         .actions
         .iter()
         .enumerate()
-        .skip(menu.first)
+        .skip(menu.cursor.first)
         .take(layout.max_rows)
     {
         let body = RowBody {
             rect: Rect {
                 x: left,
-                y: top + (index - menu.first) as f32 * geom::ROW_H,
+                y: top + (index - menu.cursor.first) as f32 * geom::ROW_H,
                 w: width,
                 h: geom::ROW_H,
             },
-            selected: index == menu.selected,
+            selected: index == menu.cursor.selected,
             hovered: state.hovered == Some(Hover::Action(index)),
             icon: action.icon.as_deref(),
             icon_tint: Some(theme.fg),
