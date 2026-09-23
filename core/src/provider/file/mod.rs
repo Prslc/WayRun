@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::ffi::OsStr;
 use std::future::Future;
 use std::os::unix::ffi::OsStrExt;
@@ -9,6 +10,7 @@ use gio::prelude::{Cast, FileExt};
 use walkdir::WalkDir;
 
 use crate::plugin::{Meta, Plugin};
+use crate::provider::push_lowered;
 use crate::system::fs::get_home;
 use crate::system::icon::{find_first_icon_path, resolve};
 use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
@@ -148,7 +150,7 @@ search_plugin!(
 
 /// `file-search` cares about the name only; shallower paths break ties.
 /// `query_lower` is already lowercased.
-pub(super) fn score_name(name: &str, _path_lower: &str, query_lower: &str, depth: usize) -> u32 {
+pub(super) fn score_name(name: &str, query_lower: &str, depth: usize) -> u32 {
     crate::provider::name_tier_ci(name, query_lower).saturating_sub(depth as u32)
 }
 
@@ -161,9 +163,46 @@ pub(super) fn score_path(name: &str, path_lower: &str, query_lower: &str, depth:
     {
         return 0;
     }
+    path_score(name, query_lower, depth)
+}
+
+/// [`score_path`] for a caller that holds the path as two lowercased halves:
+/// the directory (no trailing separator) and the leaf. The haystack tested is
+/// the same `dir_lower + "/" + name_lower`, without building it per entry.
+pub(super) fn score_split_path(
+    name: &str,
+    dir_lower: &str,
+    name_lower: &str,
+    query_lower: &str,
+    depth: usize,
+) -> u32 {
+    if !query_lower
+        .split_whitespace()
+        .all(|token| token_on_path(dir_lower, name_lower, token))
+    {
+        return 0;
+    }
+    path_score(name, query_lower, depth)
+}
+
+/// The path-mode score once a match is known: a name hit beats a
+/// parent-directory-only hit, and shallower paths break ties.
+fn path_score(name: &str, query_lower: &str, depth: usize) -> u32 {
     crate::provider::name_tier_ci(name, query_lower)
         .max(200)
         .saturating_sub(depth as u32)
+}
+
+/// Whether `token` occurs in `dir_lower + "/" + name_lower`: inside either
+/// half, or across the separator (so `sub/deep` still matches when `sub/` ends
+/// the directory and `deep` starts the name).
+fn token_on_path(dir_lower: &str, name_lower: &str, token: &str) -> bool {
+    if dir_lower.contains(token) || name_lower.contains(token) {
+        return true;
+    }
+    token
+        .match_indices('/')
+        .any(|(i, _)| dir_lower.ends_with(&token[..i]) && name_lower.starts_with(&token[i + 1..]))
 }
 
 /// The path a path-like query names, before it is checked against the disk:
@@ -235,8 +274,9 @@ fn keep_entry(name: &str, depth: usize) -> bool {
 }
 
 /// A walk may match thousands of entries; rank the first `MATCH_CAP` and show
-/// the best 50, so one keystroke cannot walk an unbounded tree.
+/// the best `SHOW_CAP`, so one keystroke cannot walk an unbounded tree.
 const MATCH_CAP: usize = 200;
+const SHOW_CAP: usize = 50;
 
 /// `want_dir` keeps `f` to files and `d` to directories, so the two providers
 /// stay complementary. `by_name` is `f`'s name-only match; a path query always
@@ -286,11 +326,7 @@ fn quick_search(
     max_depth: usize,
 ) -> Vec<ResultItem> {
     let path_mode = query.starts_with('~') || query.contains('/');
-    let scorer = if by_name && !path_mode {
-        score_name
-    } else {
-        score_path
-    };
+    let name_only = by_name && !path_mode;
 
     let roots = [
         home.join("Desktop"),
@@ -299,7 +335,8 @@ fn quick_search(
         home.to_path_buf(),
     ];
 
-    let mut scored: Vec<(u32, ResultItem)> = Vec::new();
+    let mut scored: Vec<(u32, PathBuf, bool)> = Vec::new();
+    let mut path_lower = String::new();
 
     for root in &roots {
         if !root.exists() {
@@ -318,15 +355,26 @@ fn quick_search(
                 continue;
             }
 
-            let path = entry.path();
-            let name = entry.file_name().to_string_lossy();
-            let path_lower = path.to_string_lossy().to_lowercase();
-            let score = scorer(&name, &path_lower, query_lower, entry.depth());
+            let depth = entry.depth();
+            let path = entry.into_path();
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy())
+                .unwrap_or_default();
+            // the name tier is all `f` needs; only a path query pays for the
+            // lowercased full path
+            let score = if name_only {
+                score_name(&name, query_lower, depth)
+            } else {
+                path_lower.clear();
+                push_lowered(&mut path_lower, &path.to_string_lossy());
+                score_path(&name, &path_lower, query_lower, depth)
+            };
             if score == 0 {
                 continue;
             }
 
-            scored.push((score, entry_item(path, is_dir)));
+            scored.push((score, path, is_dir));
 
             if scored.len() >= MATCH_CAP {
                 break;
@@ -338,7 +386,15 @@ fn quick_search(
         }
     }
 
-    crate::provider::rank_results(scored, false, 50)
+    // Rows only for the survivors: `entry_item` builds a gio URI and looks up a
+    // MIME icon, work the discarded rest of `MATCH_CAP` would waste.
+    scored.sort_by_key(|a| Reverse(a.0));
+    scored.truncate(SHOW_CAP);
+    let rows: Vec<(u32, ResultItem)> = scored
+        .into_iter()
+        .map(|(score, path, is_dir)| (score, entry_item(&path, is_dir)))
+        .collect();
+    crate::provider::rank_results(rows, false, SHOW_CAP)
 }
 
 /// A stat'd path as one row, or `None` when it is not the kind this provider
@@ -466,12 +522,12 @@ mod tests {
     #[test]
     fn an_exact_name_outranks_a_longer_prefix_match() {
         let query = "wayrun";
-        let exact = score_name("WayRun", "", query, 2);
-        let prefix = score_name("wayrun-x86_64-unknown-linux-gnu.zip", "", query, 1);
-        let contains = score_name("my-wayrun-notes.txt", "", query, 1);
+        let exact = score_name("WayRun", query, 2);
+        let prefix = score_name("wayrun-x86_64-unknown-linux-gnu.zip", query, 1);
+        let contains = score_name("my-wayrun-notes.txt", query, 1);
         assert!(exact > prefix, "{exact} > {prefix}");
         assert!(prefix > contains, "{prefix} > {contains}");
-        assert_eq!(score_name("unrelated.txt", "", query, 0), 0);
+        assert_eq!(score_name("unrelated.txt", query, 0), 0);
     }
 
     #[test]
@@ -484,9 +540,42 @@ mod tests {
     }
 
     #[test]
+    fn the_split_path_scores_the_same_as_the_joined_one() {
+        for (dir, name) in [
+            ("/home/u/project", "wayrun"),
+            ("/home/u/Project", "WayRun.zip"),
+            ("/home/u/报告", "笔记.txt"),
+            ("/home", "u"),
+        ] {
+            let joined = format!("{dir}/{name}").to_lowercase();
+            let dir_lower = dir.to_lowercase();
+            let name_lower = name.to_lowercase();
+            for query in [
+                "wayrun",
+                "u/wayrun",
+                "project/wayrun",
+                "u/pro",
+                "/wayrun",
+                "run",
+                "报告",
+                "/u",
+                "nope",
+                "u wayrun",
+                "u //wayrun",
+            ] {
+                assert_eq!(
+                    score_split_path(name, &dir_lower, &name_lower, query, 1),
+                    score_path(name, &joined, query, 1),
+                    "{query:?} on {joined:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn a_shallower_path_breaks_a_tier_tie() {
         let query = "wayrun";
-        assert!(score_name("wayrun", "", query, 1) > score_name("wayrun", "", query, 3));
+        assert!(score_name("wayrun", query, 1) > score_name("wayrun", query, 3));
     }
 
     #[test]

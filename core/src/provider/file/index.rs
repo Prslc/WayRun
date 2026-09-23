@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 use memmap2::Mmap;
 use walkdir::WalkDir;
 
-use super::{entry_item, keep_name, score_path};
+use super::{entry_item, keep_name, score_path, score_split_path};
 use crate::provider::{name_tier_ci, push_lowered};
 use crate::wire::ResultItem;
 
@@ -387,7 +387,7 @@ fn search_in(index: &Index, query_lower: &str, want_dir: bool, name_only: bool) 
         let mut dir_path = PathBuf::new();
         let mut chain = Vec::new();
         let mut dir_lower = String::new();
-        let mut lower = String::new();
+        let mut name_lower = String::new();
         let mut last = u32::MAX;
         for i in 0..index.file_count {
             let rec = index.file(i);
@@ -398,12 +398,11 @@ fn search_in(index: &Index, query_lower: &str, want_dir: bool, name_only: bool) 
                 last = rec.dir;
             }
             let name = String::from_utf8_lossy(rec.name);
-            lower.clear();
-            lower.push_str(&dir_lower);
-            lower.push('/');
-            push_lowered(&mut lower, &name);
+            name_lower.clear();
+            push_lowered(&mut name_lower, &name);
             let depth = index.dir(rec.dir).depth + 1;
-            let score = score_path(&name, &lower, query_lower, depth as usize);
+            let score =
+                score_split_path(&name, &dir_lower, &name_lower, query_lower, depth as usize);
             top.offer(score, i);
         }
     }
