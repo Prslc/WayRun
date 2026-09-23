@@ -49,6 +49,9 @@ const REFRESH_TTL: Duration = Duration::from_secs(300);
 const OWNERS: [&str; 2] = ["file-search", "path-search"];
 /// Rows kept per search, matching `rank_results`' show cap.
 const TOP: usize = 50;
+/// Entries a scan must hold before it is split across threads; below it a
+/// chunk's spawn costs more than the scan it would run.
+const PARALLEL_FLOOR: u32 = 8192;
 
 /// The index bytes as a parse view; nothing is copied. The directory table is
 /// DFS pre-order and the file table is sorted by `dir`, which queries rely on.
@@ -362,38 +365,98 @@ fn fresh(index: &Index) -> bool {
     true
 }
 
-/// The best `TOP` candidates by score, ties keeping the earlier scan position,
+/// The best [`TOP`] candidates by score, ties keeping the earlier position,
 /// with no row built until the scan is over.
+#[derive(Default)]
 struct Top {
-    heap: BinaryHeap<(Reverse<u32>, u32, u32)>,
-    scan: u32,
+    heap: BinaryHeap<(Reverse<u32>, u32)>,
 }
 
 impl Top {
-    fn offer(&mut self, score: u32, index: u32) {
+    fn offer(&mut self, score: u32, position: u32) {
         if score == 0 {
             return;
         }
         if self.heap.len() == TOP {
             // the worst kept row: the lowest score, and among equals the latest
-            // scan position, which a new offer can only lose to
+            // position, which a new offer can only lose to
             if score <= self.heap.peek().expect("full").0.0 {
                 return;
             }
             self.heap.pop();
         }
-        self.heap.push((Reverse(score), self.scan, index));
-        self.scan += 1;
+        self.heap.push((Reverse(score), position));
     }
+
+    /// The kept `(score, position)` pairs in heap order; the merge orders them.
+    fn into_candidates(self) -> Vec<(u32, u32)> {
+        self.heap
+            .into_vec()
+            .into_iter()
+            .map(|(Reverse(score), position)| (score, position))
+            .collect()
+    }
+}
+
+/// One chunk of a scan: `init` builds the thread's scratch, `scan` scores every
+/// entry of `start..end` into the chunk's [`Top`].
+fn scan_chunk<S>(
+    start: u32,
+    end: u32,
+    init: &impl Fn() -> S,
+    scan: &impl Fn(&mut S, u32, &mut Top),
+) -> Vec<(u32, u32)> {
+    let mut scratch = init();
+    let mut top = Top::default();
+    for i in start..end {
+        scan(&mut scratch, i, &mut top);
+    }
+    top.into_candidates()
+}
+
+/// Merges per-chunk candidates into the best [`TOP`] by (score, earlier
+/// position), the order `rank_results` keeps among equal scores.
+fn merge_chunks(chunks: impl IntoIterator<Item = Vec<(u32, u32)>>) -> Vec<(u32, u32)> {
+    let mut all: Vec<(u32, u32)> = chunks.into_iter().flatten().collect();
+    all.sort_by_key(|&(score, position)| (Reverse(score), position));
+    all.truncate(TOP);
+    all
+}
+
+/// The best [`TOP`] of `0..n` as scored by `scan`, in chunks on separate
+/// threads; merging per-chunk tops by (score, earlier position) keeps the
+/// answer independent of the thread and chunk count.
+fn scan_top<S>(
+    n: u32,
+    init: impl Fn() -> S + Sync,
+    scan: impl Fn(&mut S, u32, &mut Top) + Sync,
+) -> Vec<(u32, u32)> {
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |num| num.get() as u32)
+        .min(n.div_ceil(PARALLEL_FLOOR).max(1));
+    let chunk = n.div_ceil(threads);
+    let chunks = if threads == 1 {
+        vec![scan_chunk(0, n, &init, &scan)]
+    } else {
+        std::thread::scope(|scope| {
+            (0..threads)
+                .map(|t| {
+                    let (init, scan) = (&init, &scan);
+                    let start = t * chunk;
+                    scope.spawn(move || scan_chunk(start, (start + chunk).min(n), init, scan))
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|handle| handle.join().expect("a scan thread panicked"))
+                .collect()
+        })
+    };
+    merge_chunks(chunks)
 }
 
 /// Answer one query on an already-built index. `name_only` matches the name
 /// alone (`f` with a plain query); otherwise the whole path is matched.
 fn search_in(index: &Index, query_lower: &str, want_dir: bool, name_only: bool) -> Vec<ResultItem> {
-    let mut top = Top {
-        heap: BinaryHeap::new(),
-        scan: 0,
-    };
     let query_bytes = query_lower.as_bytes();
     let tier = |name: &[u8]| -> u32 {
         if name.is_ascii() {
@@ -403,78 +466,97 @@ fn search_in(index: &Index, query_lower: &str, want_dir: bool, name_only: bool) 
         }
     };
 
-    if want_dir && name_only {
-        for i in 0..index.dir_count {
-            let rec = index.dir(i);
-            top.offer(tier(rec.name).saturating_sub(rec.depth), i);
-        }
+    let candidates = if want_dir && name_only {
+        scan_top(
+            index.dir_count,
+            || (),
+            |_, i, top| {
+                let rec = index.dir(i);
+                top.offer(tier(rec.name).saturating_sub(rec.depth), i);
+            },
+        )
     } else if want_dir {
-        let mut stack: Vec<&[u8]> = Vec::new();
-        let mut path = String::new();
-        let mut lower = String::new();
-        for i in 0..index.dir_count {
-            let rec = index.dir(i);
-            let depth = rec.depth as usize;
-            if i == 0 {
-                stack.clear();
-            } else {
-                stack.truncate(depth.saturating_sub(1));
-                stack.push(rec.name);
-            }
-            path.clear();
-            // lossy only for the matching haystack; a query is UTF-8 and so
-            // can never carry the replaced bytes
-            path.push_str(&String::from_utf8_lossy(index.home));
-            for name in &stack {
-                path.push('/');
-                path.push_str(&String::from_utf8_lossy(name));
-            }
-            lower.clear();
-            push_lowered(&mut lower, &path);
-            let score = score_path(
-                &String::from_utf8_lossy(rec.name),
-                &lower,
-                query_lower,
-                rec.depth as usize,
-            );
-            top.offer(score, i);
-        }
+        scan_top(
+            index.dir_count,
+            || (Vec::new(), String::new(), String::new()),
+            |scratch, i, top| {
+                let (chain, path, lower) = scratch;
+                // lossy only for the matching haystack; a query is UTF-8 and so
+                // can never carry the replaced bytes
+                path.clear();
+                path.push_str(&String::from_utf8_lossy(index.home));
+                chain.clear();
+                let mut cur = i;
+                while cur != 0 && chain.len() < index.dir_count as usize {
+                    chain.push(cur);
+                    let parent = index.dir(cur).parent;
+                    if parent == u32::MAX {
+                        break;
+                    }
+                    cur = parent;
+                }
+                for &dir in chain.iter().rev() {
+                    path.push('/');
+                    path.push_str(&String::from_utf8_lossy(index.dir(dir).name));
+                }
+                lower.clear();
+                push_lowered(lower, path);
+                let rec = index.dir(i);
+                let score = score_path(
+                    &String::from_utf8_lossy(rec.name),
+                    lower,
+                    query_lower,
+                    rec.depth as usize,
+                );
+                top.offer(score, i);
+            },
+        )
     } else if name_only {
-        for i in 0..index.file_count {
-            let rec = index.file(i);
-            let depth = index.dir(rec.dir).depth + 1;
-            top.offer(tier(rec.name).saturating_sub(depth), i);
-        }
+        scan_top(
+            index.file_count,
+            || (),
+            |_, i, top| {
+                let rec = index.file(i);
+                let depth = index.dir(rec.dir).depth + 1;
+                top.offer(tier(rec.name).saturating_sub(depth), i);
+            },
+        )
     } else {
-        let mut dir_path = PathBuf::new();
-        let mut chain = Vec::new();
-        let mut dir_lower = String::new();
-        let mut name_lower = String::new();
-        let mut last = u32::MAX;
-        for i in 0..index.file_count {
-            let rec = index.file(i);
-            if rec.dir != last {
-                push_dir_path(index, rec.dir, &mut dir_path, &mut chain);
-                dir_lower.clear();
-                push_lowered(&mut dir_lower, &dir_path.to_string_lossy());
-                last = rec.dir;
-            }
-            let name = String::from_utf8_lossy(rec.name);
-            name_lower.clear();
-            push_lowered(&mut name_lower, &name);
-            let depth = index.dir(rec.dir).depth + 1;
-            let score =
-                score_split_path(&name, &dir_lower, &name_lower, query_lower, depth as usize);
-            top.offer(score, i);
-        }
-    }
+        scan_top(
+            index.file_count,
+            || {
+                (
+                    u32::MAX,
+                    PathBuf::new(),
+                    Vec::new(),
+                    String::new(),
+                    String::new(),
+                )
+            },
+            |scratch, i, top| {
+                let (last, dir_path, chain, dir_lower, name_lower) = scratch;
+                let rec = index.file(i);
+                if rec.dir != *last {
+                    push_dir_path(index, rec.dir, dir_path, chain);
+                    dir_lower.clear();
+                    push_lowered(dir_lower, &dir_path.to_string_lossy());
+                    *last = rec.dir;
+                }
+                let name = String::from_utf8_lossy(rec.name);
+                name_lower.clear();
+                push_lowered(name_lower, &name);
+                let depth = index.dir(rec.dir).depth + 1;
+                let score =
+                    score_split_path(&name, dir_lower, name_lower, query_lower, depth as usize);
+                top.offer(score, i);
+            },
+        )
+    };
 
-    let mut kept = top.heap.into_vec();
-    kept.sort_by_key(|&(_, scan, _)| scan);
     let mut path = PathBuf::new();
     let mut chain = Vec::new();
-    let mut scored = Vec::with_capacity(kept.len());
-    for (Reverse(score), _, slot) in kept {
+    let mut scored = Vec::with_capacity(candidates.len());
+    for (score, slot) in candidates {
         if want_dir {
             push_dir_path(index, slot, &mut path, &mut chain);
         } else {
@@ -850,6 +932,23 @@ mod tests {
             deep, 20,
             "all 30 shallow hits survive, 20 deep ones fill it"
         );
+    }
+
+    #[test]
+    fn a_chunked_scan_keeps_the_serial_top() {
+        // wide enough to be chunked wherever the test runs; ties and zero
+        // scores are what the merge can get wrong
+        let n = 3 * PARALLEL_FLOOR;
+        let score = |i: u32| (i * 37) % 130;
+        let mut serial = Top::default();
+        for i in 0..n {
+            serial.offer(score(i), i);
+        }
+        let mut expected = serial.into_candidates();
+        expected.sort_by_key(|&(score, position)| (Reverse(score), position));
+
+        let scanned = scan_top(n, || (), |_, i, top| top.offer(score(i), i));
+        assert_eq!(scanned, expected);
     }
 
     #[test]
