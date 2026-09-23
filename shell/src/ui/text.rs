@@ -17,8 +17,8 @@ pub struct Shaped {
     pub height: f32,
 }
 
-/// The shaped-line cache key: text, size (as bits — `f32` is not `Eq`) and weight.
-/// A redraw reshapes the same titles every frame, so a hit is the common case.
+/// The identity of a shaped line: text, size (as bits — `f32` is not `Eq`) and
+/// weight.
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct ShapeKey {
     text: String,
@@ -26,14 +26,40 @@ struct ShapeKey {
     weight: Weight,
 }
 
-/// Distinct lines kept before the cache is dropped wholesale; a show's live set is
-/// tiny and `clear_cache` frees everything on dismiss.
-const SHAPE_CACHE_MAX: usize = 256;
+impl ShapeKey {
+    fn new(text: &str, size: f32, weight: Weight) -> Self {
+        Self {
+            text: text.to_string(),
+            size: size.to_bits(),
+            weight,
+        }
+    }
+}
+
+/// The line cache key: a plain line by its identity, a fitted one also by the
+/// elided-to width the fit depends on.
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum LineKey {
+    Plain(ShapeKey),
+    Fitted(ShapeKey, u32),
+}
+
+/// A cached line and the tick it was last looked up on, for eviction.
+struct Line {
+    shaped: Rc<Shaped>,
+    used: u64,
+}
+
+/// Distinct lines kept before the least recently used one is evicted; a show's
+/// live set is tiny and `clear_cache` frees everything on dismiss.
+const LINE_CACHE_MAX: usize = 256;
 
 pub struct TextEngine {
     font_system: FontSystem,
     cache: SwashCache,
-    shapes: HashMap<ShapeKey, Rc<Shaped>>,
+    lines: HashMap<LineKey, Line>,
+    /// Bumped on every cache lookup, so `Line::used` orders the entries.
+    clock: u64,
     family: String,
 }
 
@@ -46,7 +72,8 @@ impl TextEngine {
         Self {
             font_system: FontSystem::new(),
             cache: SwashCache::new(),
-            shapes: HashMap::new(),
+            lines: HashMap::new(),
+            clock: 0,
             family,
         }
     }
@@ -55,28 +82,54 @@ impl TextEngine {
     /// lifetime, but a resident shell frees the caches on dismiss.
     pub fn clear_cache(&mut self) {
         self.cache = SwashCache::new();
-        self.shapes.clear();
+        self.lines.clear();
         release_font_pages(&self.font_system);
     }
 
     /// Shape one unwrapped line, cached by text/size/weight; every later frame
     /// that draws it is a hash lookup.
     pub fn shape(&mut self, text: &str, size: f32, weight: Weight) -> Rc<Shaped> {
-        let key = ShapeKey {
-            text: text.to_string(),
-            size: size.to_bits(),
-            weight,
-        };
-        if let Some(shaped) = self.shapes.get(&key) {
-            return Rc::clone(shaped);
+        let key = LineKey::Plain(ShapeKey::new(text, size, weight));
+        if let Some(shaped) = self.touch(&key) {
+            return shaped;
         }
 
         let shaped = Rc::new(self.shape_uncached(text, size, weight));
-        if self.shapes.len() >= SHAPE_CACHE_MAX {
-            self.shapes.clear();
-        }
-        self.shapes.insert(key, Rc::clone(&shaped));
+        self.store(key, Rc::clone(&shaped));
         shaped
+    }
+
+    /// A line from the cache, marked as the most recently used.
+    fn touch(&mut self, key: &LineKey) -> Option<Rc<Shaped>> {
+        self.clock += 1;
+        let clock = self.clock;
+        let line = self.lines.get_mut(key)?;
+        line.used = clock;
+        Some(Rc::clone(&line.shaped))
+    }
+
+    /// Cache a line, evicting the least recently used one at capacity: the
+    /// drawn set stays hot while the lines of earlier queries go.
+    fn store(&mut self, key: LineKey, shaped: Rc<Shaped>) {
+        if self.lines.len() >= LINE_CACHE_MAX {
+            let victim = self
+                .lines
+                .iter()
+                .min_by_key(|(_, line)| line.used)
+                .map(|(key, _)| key.clone());
+            if let Some(victim) = victim {
+                self.lines.remove(&victim);
+            }
+        }
+
+        self.clock += 1;
+        self.lines.insert(
+            key,
+            Line {
+                shaped,
+                used: self.clock,
+            },
+        );
     }
 
     fn shape_uncached(&mut self, text: &str, size: f32, weight: Weight) -> Shaped {
@@ -102,9 +155,27 @@ impl TextEngine {
         }
     }
 
-    /// Shape one line elided with `…` to fit `max_width`; a line that already
-    /// fits is shaped as-is, and only an overlong one pays the search.
+    /// Shape one line elided with `…` to fit `max_width`, keyed by all four
+    /// inputs so a redraw re-uses it; only an overlong line pays the search.
     pub fn fit(&mut self, text: &str, size: f32, weight: Weight, max_width: f32) -> Rc<Shaped> {
+        let key = LineKey::Fitted(ShapeKey::new(text, size, weight), max_width.to_bits());
+        if let Some(shaped) = self.touch(&key) {
+            return shaped;
+        }
+
+        let shaped = self.fit_uncached(text, size, weight, max_width);
+        self.store(key, Rc::clone(&shaped));
+        shaped
+    }
+
+    /// The fit that missed the cache.
+    fn fit_uncached(
+        &mut self,
+        text: &str,
+        size: f32,
+        weight: Weight,
+        max_width: f32,
+    ) -> Rc<Shaped> {
         let full = self.shape(text, size, weight);
         if full.width <= max_width {
             return full;
@@ -122,7 +193,10 @@ impl TextEngine {
         let (mut low, mut high) = (0, boundaries.len() - 1);
         while low < high {
             let mid = low + (high - low).div_ceil(2);
-            let width = self.shape(&text[..boundaries[mid]], size, weight).width;
+            // The probe is a throwaway width, never drawn, so it stays out of
+            // the cache.
+            let prefix = &text[..boundaries[mid]];
+            let width = self.shape_uncached(prefix, size, weight).width;
             if width + ellipsis.width <= max_width {
                 low = mid;
             } else {
@@ -306,11 +380,56 @@ mod tests {
     }
 
     #[test]
+    fn the_line_cache_evicts_only_the_oldest() {
+        let mut engine = TextEngine::with_family("Source Han Sans CN".to_string());
+        let lines: Vec<String> = (0..300).map(|index| format!("line {index}")).collect();
+        let first = engine.shape(&lines[0], 14.0, Weight::NORMAL);
+        for line in &lines[1..] {
+            engine.shape(line, 14.0, Weight::NORMAL);
+        }
+        let recent = engine.shape(&lines[299], 14.0, Weight::NORMAL);
+
+        // 300 distinct lines against the 256-line cap: eviction took the oldest
+        // one; a wholesale clear would have dropped the rest of the table too.
+        let again = engine.shape(&lines[0], 14.0, Weight::NORMAL);
+        assert!(!std::rc::Rc::ptr_eq(&first, &again), "the oldest is gone");
+        let hit = engine.shape(&lines[299], 14.0, Weight::NORMAL);
+        assert!(std::rc::Rc::ptr_eq(&recent, &hit), "the newest survived");
+    }
+
+    #[test]
     fn a_fitting_line_is_shaped_unchanged() {
         let mut engine = TextEngine::with_family("Source Han Sans CN".to_string());
         let full = engine.shape("Short", 14.0, Weight::NORMAL);
         let fitted = engine.fit("Short", 14.0, Weight::NORMAL, full.width + 1.0);
         assert_eq!(fitted.width, full.width);
+    }
+
+    #[test]
+    fn a_fit_is_re_used_across_redraws() {
+        let mut engine = TextEngine::with_family("Source Han Sans CN".to_string());
+        let long = "a title that is far too long to ever fit on one card row";
+        let full = engine.shape(long, 14.0, Weight::BOLD);
+        let max = full.width / 3.0;
+
+        let first = engine.fit(long, 14.0, Weight::BOLD, max);
+        let again = engine.fit(long, 14.0, Weight::BOLD, max);
+        assert!(std::rc::Rc::ptr_eq(&first, &again), "the elision is kept");
+        // a different limit is a different fit
+        let wider = engine.fit(long, 14.0, Weight::BOLD, max + 20.0);
+        assert!(!std::rc::Rc::ptr_eq(&first, &wider));
+
+        // a line that fits is remembered too
+        let fitting = engine.fit("Short", 14.0, Weight::NORMAL, 1000.0);
+        let fitting_again = engine.fit("Short", 14.0, Weight::NORMAL, 1000.0);
+        assert!(std::rc::Rc::ptr_eq(&fitting, &fitting_again));
+
+        engine.clear_cache();
+        let after = engine.fit(long, 14.0, Weight::BOLD, max);
+        assert!(
+            !std::rc::Rc::ptr_eq(&first, &after),
+            "a cleared cache re-fits"
+        );
     }
 
     #[test]
