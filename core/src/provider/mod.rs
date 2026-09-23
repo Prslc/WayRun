@@ -54,16 +54,7 @@ pub fn name_tier_ci(name: &str, query: &str) -> u32 {
     if !name.is_ascii() {
         return name_tier(&name.to_lowercase(), query);
     }
-    let (name, query) = (name.as_bytes(), query.as_bytes());
-    if name.eq_ignore_ascii_case(query) {
-        TIER_EXACT
-    } else if name.len() >= query.len() && name[..query.len()].eq_ignore_ascii_case(query) {
-        TIER_PREFIX
-    } else if contains_ci(name, query) {
-        TIER_CONTAINS
-    } else {
-        0
-    }
+    name_tier_bytes(name.as_bytes(), query.as_bytes())
 }
 
 fn contains_ci(haystack: &[u8], needle: &[u8]) -> bool {
