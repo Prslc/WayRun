@@ -299,6 +299,22 @@ fn push_dir_path(index: &Index, i: u32, out: &mut PathBuf, chain: &mut Vec<u32>)
     }
 }
 
+/// The layout the queries rely on: the root at slot 0, every other directory
+/// exactly one level below an earlier parent. A cache that breaks it cannot be
+/// walked safely — a huge `depth` would make the dir scans rebuild paths
+/// quadratically, `depth + 1` on a file record could overflow, and a parent
+/// cycle would make `fresh` walk the whole table for every directory.
+fn layout_ok(index: &Index) -> bool {
+    (0..index.dir_count).all(|i| {
+        let rec = index.dir(i);
+        if i == 0 {
+            rec.parent == u32::MAX && rec.depth == 0
+        } else {
+            rec.parent < i && index.dir(rec.parent).depth + 1 == rec.depth
+        }
+    })
+}
+
 /// A change inside a directory updates its mtime and a new directory its
 /// parent's, so one mtime per recorded directory covers all of them.
 fn fresh(index: &Index) -> bool {
@@ -604,7 +620,8 @@ fn refresh(home: &Path) {
     let _guard = BuildGuard;
 
     if let Some(map) = load() {
-        let usable = Index::parse(&map[..], home).is_some_and(|index| fresh(&index));
+        let usable =
+            Index::parse(&map[..], home).is_some_and(|index| layout_ok(&index) && fresh(&index));
         if usable {
             store(map);
             return;
@@ -627,7 +644,11 @@ fn refresh(home: &Path) {
         return;
     }
     if let Some(map) = load() {
-        store(map);
+        // the map only reaches the queries if the image it came from can be
+        // walked: `store` is the one gate for that
+        if Index::parse(&map[..], home).is_some_and(|index| layout_ok(&index)) {
+            store(map);
+        }
     }
 
     let dir_count = u32_at(&bytes, 8);
@@ -653,7 +674,9 @@ mod tests {
     }
 
     fn parsed<'a>(bytes: &'a [u8], home: &Path) -> Index<'a> {
-        Index::parse(bytes, home).expect("a freshly built index parses")
+        let index = Index::parse(bytes, home).expect("a freshly built index parses");
+        assert!(layout_ok(&index), "a freshly built index keeps the layout");
+        index
     }
 
     fn build_ok(home: &Path, cap: usize) -> Vec<u8> {
@@ -910,6 +933,29 @@ mod tests {
         assert!(
             bytes.is_none(),
             "an unlistable root must not become an authoritative empty index"
+        );
+    }
+
+    #[test]
+    fn an_index_whose_dir_layout_breaks_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        write(&home.join("a/b/x.txt"));
+        // dir 1 is `a`: its record sits past the header, the home and the root
+        let rec = HEADER + home.as_os_str().as_bytes().len() + DIR_REC;
+
+        let mut bytes = build_ok(home, MAX_ENTRIES);
+        bytes[rec + 12..rec + 16].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(
+            !layout_ok(&Index::parse(&bytes, home).unwrap()),
+            "a depth no path can sit under must be rejected"
+        );
+
+        let mut bytes = build_ok(home, MAX_ENTRIES);
+        bytes[rec..rec + 4].copy_from_slice(&1u32.to_le_bytes());
+        assert!(
+            !layout_ok(&Index::parse(&bytes, home).unwrap()),
+            "a parent that is not an earlier slot must be rejected"
         );
     }
 
