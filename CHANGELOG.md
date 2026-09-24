@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-24
+
+### Added
+
+- `f` and `d` search the whole home directory at any depth through a background
+  index (`$XDG_CACHE_HOME/wayrun/file-index.bin`): built on the first `f`/`d`
+  search, mapped only while in use and unmapped after two minutes idle, and
+  re-checked within a minute by a parallel sweep that re-reads just the
+  directories whose mtime moved — a patch of ~0.1 s against the walk of ~1.2 s
+  it replaces. Every row carries a bigram bloom (index format v4) that the scans
+  reject on before touching a name. `config.md`'s `[files]` holds `index`
+  (default `true`), `depth` (the unindexed fallback, `3`) and `exclude`.
+- `[files] exclude` names the directories the walk never enters. The shipped
+  `config.toml` lists `node_modules`, `target` and `__pycache__`; a name
+  starting with a dot is always hidden, and an edit to the list rebuilds on the
+  next `f`/`d` search.
+
+### Changed
+
+- **Breaking**: a plain query no longer stops at the first provider with
+  results. `calculator`, `system-commands` and `app-search` all answer, and
+  their rows are merged by each row's relevance — the match kind's weight scaled
+  by the surface it matched on — then by the row's usage count, then by
+  registry order, so a prefix command can no longer hide an exact app.
+- **Breaking**: the app list's metadata surfaces are visible in a plain query:
+  a keyword or `GenericName` matches by word and a `Comment` by prefix, and a
+  near spelling of a name answers too. A title match leads a description match
+  of comparable strength, while an exact keyword still beats a title the query
+  only sits inside of.
+- Every provider ranks by one match vocabulary: the file index, the path scans,
+  the runner, the window list and the app list share the same kinds, and
+  `nucleo` is gone with its transitive crates. A `f`/`d` build logs itself on
+  stderr (`file index … (patched)` / `(loaded)` / `(capped)`).
+
+### Fixed
+
+- A clipboard preview longer than 80 bytes is cut on a character boundary
+  instead of panicking on a multi-byte preview, which silently emptied the
+  whole list.
+- A keystroke burst no longer runs one search per key: the core coalesces
+  superseded queries and drops their payloads.
+- Firefox snapshots are opened read-only and immutable, so a `b`/`h` query takes
+  no locks on the private copy.
+- The plugin host cache (now under `$XDG_CACHE_HOME/wayrun`) and the built-in
+  glyphs are written atomically, so a crash mid-write cannot leave a torn file
+  behind.
+- The file index only serves a cache it can vouch for: an unreadable walk is
+  never persisted as an empty index, a directory layout that is not the walk's
+  own pre-order is rejected, a non-UTF-8 `$HOME` still indexes and serves, and
+  the first search after an idle unmap remaps instead of falling back to the
+  walk.
+- The index's own search no longer pays for work it discards: every indexed row
+  ran a `Loose` subsequence pass its caller threw away and then a second
+  substring pass. `f report` on this home's 555k-name index went ~12 ms -> ~3 ms
+  — confident-only classifiers, a `memchr2` candidate walk that fuses the word
+  and substring checks, and a per-row bloom the scans reject on before touching
+  a name.
+- An index build's peak memory fell 144 MB -> 96 MB on this home: the walk keeps
+  one length-prefixed names buffer per directory instead of one allocation per
+  name, and the image streams into the cache file instead of being materialised
+  beside the tables.
+
 ## [0.3.1] - 2026-09-22
 
 ### Added
@@ -255,7 +317,8 @@ and, with `--core`, the backend service.
 - Resident mode over `$XDG_RUNTIME_DIR/wayrun.sock` for zero cold-start
   (`wayrun toggle`).
 
-[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Prslc/WayRun/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/Prslc/WayRun/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Prslc/WayRun/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Prslc/WayRun/compare/v0.1.3...v0.2.0
