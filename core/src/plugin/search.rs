@@ -120,20 +120,27 @@ const DEFAULT_DEADLINE: Duration = Duration::from_millis(50);
 /// Order the default providers' rows: the strongest kind first, then the most
 /// picked row of that kind, then the registry order that otherwise ties them.
 fn merge_ranked(
-    mut rows: Vec<(Rank, u32, ResultItem)>,
+    rows: Vec<(Rank, u32, ResultItem)>,
     counts: &std::collections::HashMap<String, u32>,
 ) -> Vec<ResultItem> {
-    rows.sort_by_key(|(rank, provider, item)| {
-        let used = item
-            .on_click
-            .as_ref()
-            .and_then(|action| counts.get(&action.key()))
-            .copied()
-            .unwrap_or(0);
-        (Reverse(rank.key()), Reverse(used), *provider)
-    });
-    rows.into_iter()
-        .map(|(_, _, item)| item)
+    // Materialize the sort keys first: a `sort_by_key` closure runs on every
+    // comparison, and `Action::key` is a JSON serialization per call.
+    let mut keyed: Vec<((u8, u32), u32, u32, ResultItem)> = rows
+        .into_iter()
+        .map(|(rank, provider, item)| {
+            let used = item
+                .on_click
+                .as_ref()
+                .and_then(|action| counts.get(&action.key()))
+                .copied()
+                .unwrap_or(0);
+            (rank.key(), used, provider, item)
+        })
+        .collect();
+    keyed.sort_by_key(|(rank, used, provider, _)| (Reverse(*rank), Reverse(*used), *provider));
+    keyed
+        .into_iter()
+        .map(|(_, _, _, item)| item)
         .take(SHOW_CAP)
         .collect()
 }
