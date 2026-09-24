@@ -156,12 +156,15 @@ fn kind_weight(name: &str, query_lower: &str) -> u32 {
 }
 
 /// `path-search` matches when every token is somewhere on the path, but a name
-/// hit still outranks a parent-directory-only hit. Both strings are lowercased.
-pub(super) fn score_path(name: &str, path_lower: &str, query_lower: &str, depth: usize) -> u32 {
-    if !query_lower
-        .split_whitespace()
-        .all(|token| path_lower.contains(token))
-    {
+/// hit still outranks a parent-directory-only hit. All inputs are lowercased.
+pub(super) fn score_path(
+    name: &str,
+    path_lower: &str,
+    query_lower: &str,
+    tokens: &[&str],
+    depth: usize,
+) -> u32 {
+    if !tokens.iter().all(|token| path_lower.contains(*token)) {
         return 0;
     }
     path_score(name, query_lower, depth)
@@ -174,10 +177,11 @@ pub(super) fn score_split_path(
     dir_lower: &str,
     name_lower: &str,
     query_lower: &str,
+    tokens: &[&str],
     depth: usize,
 ) -> u32 {
-    if !query_lower
-        .split_whitespace()
+    if !tokens
+        .iter()
         .all(|token| token_on_path(dir_lower, name_lower, token))
     {
         return 0;
@@ -329,6 +333,7 @@ fn quick_search(
 
     let mut scored: Vec<(u32, PathBuf, bool)> = Vec::new();
     let mut path_lower = String::new();
+    let tokens: Vec<&str> = query_lower.split_whitespace().collect();
 
     for root in &roots {
         if !root.exists() {
@@ -361,7 +366,7 @@ fn quick_search(
             } else {
                 path_lower.clear();
                 push_lowered(&mut path_lower, &path.to_string_lossy());
-                score_path(&name, &path_lower, query_lower, depth)
+                score_path(&name, &path_lower, query_lower, &tokens, depth)
             };
             if score == 0 {
                 continue;
@@ -417,6 +422,10 @@ mod tests {
         Some(Action::Open {
             uri: uri.to_string(),
         })
+    }
+
+    fn tokens(query: &str) -> Vec<&str> {
+        query.split_whitespace().collect()
     }
 
     /// The names a stock install skips: the shipped template's list, the one
@@ -540,10 +549,19 @@ mod tests {
     #[test]
     fn a_path_only_hit_ranks_below_a_name_hit() {
         let query = "wayrun";
-        let named = score_path("WayRun", "/home/u/project/wayrun", query, 2);
-        let nested = score_path("core", "/home/u/project/wayrun/core", query, 3);
+        let named = score_path("WayRun", "/home/u/project/wayrun", query, &tokens(query), 2);
+        let nested = score_path(
+            "core",
+            "/home/u/project/wayrun/core",
+            query,
+            &tokens(query),
+            3,
+        );
         assert!(named > nested, "{named} > {nested}");
-        assert_eq!(score_path("core", "/home/u/other/core", query, 1), 0);
+        assert_eq!(
+            score_path("core", "/home/u/other/core", query, &tokens(query), 1),
+            0
+        );
     }
 
     #[test]
@@ -571,8 +589,8 @@ mod tests {
                 "u //wayrun",
             ] {
                 assert_eq!(
-                    score_split_path(name, &dir_lower, &name_lower, query, 1),
-                    score_path(name, &joined, query, 1),
+                    score_split_path(name, &dir_lower, &name_lower, query, &tokens(query), 1),
+                    score_path(name, &joined, query, &tokens(query), 1),
                     "{query:?} on {joined:?}"
                 );
             }

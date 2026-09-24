@@ -155,10 +155,8 @@ pub(super) fn search_in(
 
     // The bloom pre-filter: a row passes when its haystack can carry every bigram
     // the query (or each path token) has, which any real match can.
-    let name_mask = bloom64(query_bytes);
-    let (token_mask64, token_mask128) = path_masks(query_lower);
-
     let candidates = if want_dir && name_only {
+        let name_mask = bloom64(query_bytes);
         scan_top(
             index.dir_count,
             || (),
@@ -173,6 +171,8 @@ pub(super) fn search_in(
             },
         )
     } else if want_dir {
+        let (_, token_mask128) = path_masks(query_lower);
+        let tokens: Vec<&str> = query_lower.split_whitespace().collect();
         scan_top(
             index.dir_count,
             || (),
@@ -185,12 +185,14 @@ pub(super) fn search_in(
                     &String::from_utf8_lossy(rec.name),
                     rec.path_lower,
                     query_lower,
+                    &tokens,
                     rec.depth as usize,
                 );
                 top.offer(score, i);
             },
         )
     } else if name_only {
+        let name_mask = bloom64(query_bytes);
         scan_top(
             index.file_count,
             || (),
@@ -207,6 +209,8 @@ pub(super) fn search_in(
             },
         )
     } else {
+        let (token_mask64, _) = path_masks(query_lower);
+        let tokens: Vec<&str> = query_lower.split_whitespace().collect();
         scan_top(index.file_count, String::new, |name_lower, i, top| {
             let rec = index.file(i);
             let halves = index.file_bloom(i) | fold128(index.dir_bloom(rec.dir));
@@ -222,6 +226,7 @@ pub(super) fn search_in(
                 dir.path_lower,
                 name_lower,
                 query_lower,
+                &tokens,
                 dir.depth as usize + 1,
             );
             top.offer(score, i);
