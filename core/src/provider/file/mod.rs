@@ -6,14 +6,14 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
 use anyhow::Result;
-use gio::prelude::{Cast, FileExt};
+use gio::prelude::FileExt;
 use walkdir::WalkDir;
 
 use crate::config::Files;
 use crate::plugin::{Meta, Plugin};
 use crate::provider::push_lowered;
 use crate::system::fs::get_home;
-use crate::system::icon::{find_first_icon_path, resolve};
+use crate::system::icon::{content_type_icon, resolve};
 use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
 use rust_i18n::t;
 
@@ -21,14 +21,10 @@ use rust_i18n::t;
 // to keep its cache alive, so the crate may reach it.
 pub(crate) mod index;
 
-/// The icon the system MIME database assigns to `path`. Its themed-icon list is
-/// a priority order, so the first name the theme actually ships wins.
+/// The icon the system MIME database assigns to `path`.
 fn mime_icon(path: &Path) -> Option<String> {
     let (content_type, _) = gio::content_type_guess(Some(path), None);
-    let icon = gio::content_type_get_icon(&content_type);
-    let themed = icon.downcast::<gio::ThemedIcon>().ok()?;
-    let names = themed.names();
-    find_first_icon_path(names.iter().map(|name| name.as_str()))
+    content_type_icon(&content_type)
 }
 
 macro_rules! search_plugin {
@@ -517,6 +513,11 @@ mod tests {
             "{unknown}"
         );
         assert_ne!(script, unknown);
+        // the same type answers the same icon on a repeat lookup
+        assert_eq!(
+            mime_icon(Path::new("/tmp/build.sh")).as_ref(),
+            Some(&script)
+        );
     }
 
     #[test]
