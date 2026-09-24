@@ -361,7 +361,7 @@ fn action_score(name_lower: &str, query_lower: &str) -> Option<(Match, u32)> {
 /// The shared kind of a surface, refusing `Loose`: an app id or a description
 /// is long enough that a scattered hit means nothing.
 fn kind_of(surface_lower: &str, query_lower: &str) -> Option<Match> {
-    crate::plugin::classify(surface_lower, query_lower).filter(|kind| *kind != Match::Loose)
+    crate::plugin::classify_confident(surface_lower, query_lower)
 }
 
 /// Score one match surface: the shared kind, scaled by what the surface is

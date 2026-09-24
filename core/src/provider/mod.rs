@@ -122,7 +122,10 @@ pub fn plugin_map() -> HashMap<&'static str, Box<dyn Plugin>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugin::{Match, classify, classify_bytes, classify_ci};
+    use crate::plugin::{
+        Match, classify, classify_bytes_confident, classify_ci, classify_ci_confident,
+        classify_confident,
+    };
 
     fn row(on_click: Option<Action>) -> ResultItem {
         ResultItem {
@@ -183,24 +186,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_byte_classify_matches_the_text_one_for_ascii_names() {
-        for (name, query) in [
-            ("WayRun", "wayrun"),
-            ("NOTES.txt", "notes.txt"),
-            ("report", "report"),
-            ("x", "wayrun"),
-            ("abc", "报告"),
-            ("", ""),
-        ] {
-            assert_eq!(
-                classify_bytes(name.as_bytes(), query.as_bytes()),
-                classify(&name.to_lowercase(), query),
-                "{name} / {query}"
-            );
-        }
-    }
-
     /// The vocabulary's order is the contract: no provider may rank a weaker
     /// kind over a stronger one.
     #[test]
@@ -220,12 +205,24 @@ mod tests {
         assert!(Match::Substring > Match::Loose);
     }
 
-    /// A plain query stops at `Substring`: a scattered coincidence cannot shadow
-    /// every other provider.
+    /// A plain query stops at `Substring`: the confident classifiers refuse the
+    /// scattered hit the full one still reports for the fuzzy consumers.
     #[test]
-    fn only_a_confident_kind_answers_a_plain_query() {
-        assert!(Match::Exact.confident() && Match::Substring.confident());
-        assert!(!Match::Loose.confident());
+    fn a_confident_classifier_refuses_a_scattered_hit() {
+        assert_eq!(classify("chart", "cat"), Some(Match::Loose));
+        assert_eq!(classify_confident("chart", "cat"), None);
+        assert_eq!(classify_bytes_confident(b"chart", b"cat"), None);
+        assert_eq!(classify_ci_confident("chart", "cat"), None);
+        assert_eq!(
+            classify_confident("libreoffice", "office"),
+            Some(Match::Substring)
+        );
+        assert_eq!(
+            classify_ci_confident("Ünïcode", "nïc"),
+            Some(Match::Substring)
+        );
+        assert_eq!(classify_confident("x", ""), None);
+        assert_eq!(classify_bytes_confident(b"x", b""), None);
     }
 
     #[test]

@@ -156,10 +156,7 @@ pub(super) fn score_name(name: &str, query_lower: &str, depth: usize) -> u32 {
 
 /// The shared kind's weight for a plain query: a scattered hit is not a row.
 fn kind_weight(name: &str, query_lower: &str) -> u32 {
-    match crate::plugin::classify_ci(name, query_lower) {
-        Some(kind) if kind.confident() => kind.weight(),
-        _ => 0,
-    }
+    crate::plugin::classify_ci_confident(name, query_lower).map_or(0, crate::plugin::Match::weight)
 }
 
 /// `path-search` matches when every token is somewhere on the path, but a name

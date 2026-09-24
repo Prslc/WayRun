@@ -4,7 +4,7 @@ use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
-use crate::plugin::{classify_bytes, classify_ci};
+use crate::plugin::{Match, classify_bytes_confident, classify_ci_confident};
 use crate::provider::file::index::format::{Index, push_dir_path};
 use crate::provider::file::{entry_item, score_path, score_split_path};
 use crate::provider::{SHOW_CAP, push_lowered};
@@ -129,15 +129,11 @@ pub(super) fn search_in(
     let query_bytes = query_lower.as_bytes();
     let tier = |name: &[u8]| -> u32 {
         let kind = if name.is_ascii() {
-            classify_bytes(name, query_bytes)
+            classify_bytes_confident(name, query_bytes)
         } else {
-            classify_ci(&String::from_utf8_lossy(name), query_lower)
+            classify_ci_confident(&String::from_utf8_lossy(name), query_lower)
         };
-        // the index serves plain queries, so a scattered hit is not a row
-        match kind {
-            Some(kind) if kind.confident() => kind.weight(),
-            _ => 0,
-        }
+        kind.map_or(0, Match::weight)
     };
 
     let candidates = if want_dir && name_only {

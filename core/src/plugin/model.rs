@@ -60,16 +60,11 @@ impl Match {
             Match::Loose => 100,
         }
     }
-
-    /// Whether the match may answer a plain query: a plain query stops at
-    /// `Substring`, so a scattered coincidence cannot shadow other providers.
-    pub fn confident(self) -> bool {
-        self >= Match::Substring
-    }
 }
 
-/// The strongest way a lowercased `query` matches an already lowercased surface.
-pub fn classify(surface: &str, query: &str) -> Option<Match> {
+/// The strongest way a lowercased `query` matches an already lowercased
+/// surface, stopping at `Substring` for a caller a scattered hit cannot answer.
+pub fn classify_confident(surface: &str, query: &str) -> Option<Match> {
     if query.is_empty() {
         return None;
     }
@@ -82,10 +77,15 @@ pub fn classify(surface: &str, query: &str) -> Option<Match> {
     if at_word(surface, query) {
         return Some(Match::Word);
     }
-    if surface.contains(query) {
-        return Some(Match::Substring);
+    surface.contains(query).then_some(Match::Substring)
+}
+
+/// The strongest way a lowercased `query` matches an already lowercased surface.
+pub fn classify(surface: &str, query: &str) -> Option<Match> {
+    if query.is_empty() {
+        return None;
     }
-    scattered(surface, query).then_some(Match::Loose)
+    classify_confident(surface, query).or_else(|| scattered(surface, query).then_some(Match::Loose))
 }
 
 /// [`classify`] without a lowercased surface: an ASCII surface compares byte by
@@ -97,9 +97,17 @@ pub fn classify_ci(surface: &str, query: &str) -> Option<Match> {
     classify(&surface.to_lowercase(), query)
 }
 
-/// [`classify`] over raw bytes, for a surface and query the caller checked are
-/// ASCII: a byte compare is the same test without building a string.
-pub fn classify_bytes(surface: &[u8], query: &[u8]) -> Option<Match> {
+/// [`classify_confident`] without a lowercased surface.
+pub fn classify_ci_confident(surface: &str, query: &str) -> Option<Match> {
+    if surface.is_ascii() {
+        return classify_bytes_confident(surface.as_bytes(), query.as_bytes());
+    }
+    classify_confident(&surface.to_lowercase(), query)
+}
+
+/// [`classify_confident`] over raw bytes, for a surface and query the caller
+/// checked are ASCII: a byte compare is the same test without building a string.
+pub fn classify_bytes_confident(surface: &[u8], query: &[u8]) -> Option<Match> {
     if query.is_empty() {
         return None;
     }
@@ -112,10 +120,17 @@ pub fn classify_bytes(surface: &[u8], query: &[u8]) -> Option<Match> {
     if at_word_ci(surface, query) {
         return Some(Match::Word);
     }
-    if contains_ci(surface, query) {
-        return Some(Match::Substring);
+    contains_ci(surface, query).then_some(Match::Substring)
+}
+
+/// [`classify`] over raw bytes, for a surface and query the caller checked are
+/// ASCII: a byte compare is the same test without building a string.
+pub fn classify_bytes(surface: &[u8], query: &[u8]) -> Option<Match> {
+    if query.is_empty() {
+        return None;
     }
-    scattered_ci(surface, query).then_some(Match::Loose)
+    classify_bytes_confident(surface, query)
+        .or_else(|| scattered_ci(surface, query).then_some(Match::Loose))
 }
 
 fn contains_ci(haystack: &[u8], needle: &[u8]) -> bool {
@@ -270,6 +285,29 @@ impl HostCache {
         };
         if let Ok(text) = serde_json::to_string(self) {
             let _ = crate::system::fs::write_atomic(&path, text.as_bytes());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_byte_classify_matches_the_text_one_for_ascii_names() {
+        for (name, query) in [
+            ("WayRun", "wayrun"),
+            ("NOTES.txt", "notes.txt"),
+            ("report", "report"),
+            ("x", "wayrun"),
+            ("abc", "报告"),
+            ("", ""),
+        ] {
+            assert_eq!(
+                classify_bytes(name.as_bytes(), query.as_bytes()),
+                classify(&name.to_lowercase(), query),
+                "{name} / {query}"
+            );
         }
     }
 }

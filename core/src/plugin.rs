@@ -11,7 +11,10 @@ mod search;
 pub use actions::{decorate, forget_row};
 pub use model::Meta;
 /// The ranking vocabulary providers and the dispatcher share.
-pub use model::{Match, Rank, Ranked, classify, classify_bytes, classify_ci};
+pub use model::{
+    Match, Rank, Ranked, classify, classify_bytes_confident, classify_ci, classify_ci_confident,
+    classify_confident,
+};
 pub use registry::{list_plugins, print_list, reload, reload_if_changed};
 pub use search::dispatch;
 
