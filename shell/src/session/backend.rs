@@ -80,10 +80,10 @@ pub fn command(action: &Action) {
     );
 }
 
-/// Pin a row's snapshot to one exact query. A notification, not a request: the
-/// caller re-searches and the pin leads the reply.
-pub fn pin(scope: &str, item: &ResultItem) {
-    notify("pin", json!({ "scope": scope, "item": item }));
+/// Pin the row `on_click` names to one exact query. A notification, not a
+/// request: the caller re-searches and the pin leads the reply.
+pub fn pin(scope: &str, on_click: &Action) {
+    notify("pin", json!({ "scope": scope, "on_click": on_click }));
 }
 
 /// Drop one pin of an exact query.

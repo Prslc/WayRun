@@ -296,8 +296,10 @@ impl Shell {
                 backend::command(command);
                 self.schedule_dismiss(now);
             }
-            PanelAction::Pin { scope, item } => {
-                backend::pin(scope, item);
+            PanelAction::Pin { scope } => {
+                if let Some(command) = self.app.menu_parent_command() {
+                    backend::pin(scope, &command);
+                }
                 self.keep_panel(action);
             }
             PanelAction::Unpin { scope, on_click } => {

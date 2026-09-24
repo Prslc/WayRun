@@ -167,21 +167,16 @@ pub async fn handle(
             }
         }
         "pin" => {
-            let (Ok(scope), Some(Value::Object(map))) =
-                (string_param(params.as_ref(), "scope"), params.as_ref())
-            else {
+            let (Ok(scope), Ok(command)) = (
+                string_param(params.as_ref(), "scope"),
+                command_param(params.as_ref(), "on_click"),
+            ) else {
                 if has_id {
                     respond(tx, id, Err(INVALID_PARAMS)).await;
                 }
                 return;
             };
-            let Some(item) = map.get("item") else {
-                if has_id {
-                    respond(tx, id, Err(INVALID_PARAMS)).await;
-                }
-                return;
-            };
-            let pinned = crate::system::pins::pin(&scope, &item.to_string()).is_ok();
+            let pinned = crate::plugin::pin_row(&scope, &command);
             if has_id {
                 respond(tx, id, Ok(json!({ "pinned": pinned }))).await;
             }

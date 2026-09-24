@@ -6,8 +6,8 @@ use crate::wire::ResultItem;
 
 /// Pin one row to the top of one exact query (`""` is the empty-query history).
 /// The whole item is stored, re-emitted before its plugin runs.
-pub fn pin(scope: &str, item_json: &str) -> Result<()> {
-    with_db(|conn| pin_with(conn, scope, item_json))
+pub fn pin(scope: &str, item: &ResultItem) -> Result<()> {
+    with_db(|conn| pin_with(conn, scope, item))
 }
 
 /// Drop one pin by its command key, reporting whether one was really there.
@@ -20,10 +20,10 @@ pub fn get_pins(scope: &str) -> Result<Vec<ResultItem>> {
     with_db(|conn| get_pins_with(conn, scope))
 }
 
-fn pin_with(conn: &Connection, scope: &str, item_json: &str) -> Result<()> {
-    let item: ResultItem = serde_json::from_str(item_json)?;
-    let command = item.on_click.context("item missing on_click")?;
+fn pin_with(conn: &Connection, scope: &str, item: &ResultItem) -> Result<()> {
+    let command = item.on_click.as_ref().context("item missing on_click")?;
     let key = command.key();
+    let item_json = serde_json::to_string(item)?;
     // Delete-and-insert, not an upsert: a re-pin must get a fresh `id` so it
     // rises to the top of `id`-descending order.
     conn.prepare_cached("DELETE FROM pins WHERE scope = ?1 AND on_click = ?2")?
@@ -68,8 +68,9 @@ mod tests {
         conn
     }
 
-    fn item(title: &str, command: serde_json::Value) -> String {
-        serde_json::json!({ "title": title, "on_click": command }).to_string()
+    fn item(title: &str, command: serde_json::Value) -> ResultItem {
+        serde_json::from_value(serde_json::json!({ "title": title, "on_click": command }))
+            .expect("a test row")
     }
 
     fn key(command: serde_json::Value) -> String {
@@ -115,6 +116,7 @@ mod tests {
     #[test]
     fn a_pin_without_a_target_is_rejected() {
         let conn = test_conn();
-        assert!(pin_with(&conn, "gh", r#"{"title":"no target"}"#).is_err());
+        let row: ResultItem = serde_json::from_str(r#"{"title":"no target"}"#).unwrap();
+        assert!(pin_with(&conn, "gh", &row).is_err());
     }
 }

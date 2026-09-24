@@ -17,7 +17,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 | `top` | — | most-used items; sent as a notification, streams a `results` notification |
 | `select` | item object | `null` (records usage; `ephemeral` and `copy` rows are not) |
 | `command` | an [`Action`](#actions) object | `null` (runs one row or panel command) |
-| `pin` | `{"scope","item"}` | `{"pinned": bool}` (pins an item to an exact query) |
+| `pin` | `{"scope","on_click": Action}` | `{"pinned": bool}` (pins a row of that query's payload) |
 | `unpin` | `{"scope","on_click": Action}` | `{"unpinned": bool}` |
 | `default` | `{"scope","action_id"}` | `null` (remembers the default Enter action for a plugin; a null `action_id` clears it) |
 | `forget` | `{"on_click": Action}` | `{"forgotten": bool}` |
@@ -77,11 +77,14 @@ without an error, `false` otherwise. A host without a `forget` method answers
 `-32601`, which counts as "not mine" — the launcher keeps such a row in the list
 rather than claiming a deletion nobody made.
 
-`pin` stores an item under an exact query string (`scope` is the whole trimmed
-input; `""` is the empty-query history), keyed by its command; `unpin` removes
-it. A later `search` whose `text` trims to that same string prepends the pins,
-most recently pinned first, deduplicated against the fresh results, and decorates
-them with their `actions`; a bare keyword does not match.
+`pin` stores a row under an exact query string (`scope` is the whole trimmed
+input; `""` is the empty-query history), keyed by the command `on_click` names:
+the core looks the row up in the payload it last emitted for that scope, so a
+client never has to echo a row back, and a command that payload no longer holds
+answers `pinned: false`. `unpin` removes a pin by the same key. A later `search`
+whose `text` trims to that same string prepends the pins, most recently pinned
+first, deduplicated against the fresh results, and decorates them with their
+`actions`; a bare keyword does not match.
 
 ## Plugin metadata (`list_plugins`)
 
@@ -176,7 +179,7 @@ A `PanelAction` is one of:
 | `type` | Fields | Meaning |
 |--------|--------|---------|
 | `execute` | `command` | run that [`Action`](#actions) |
-| `pin` | `scope`, `item` | pin the item to an exact query |
+| `pin` | `scope` | pin the row's command to an exact query |
 | `unpin` | `scope`, `on_click` | unpin the command from an exact query |
 | `forget` | `on_click` | drop the command from usage history |
 

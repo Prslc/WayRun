@@ -1,3 +1,5 @@
+use std::sync::{Mutex, PoisonError};
+
 use super::model::Entry;
 use super::registry::{REGISTRY, ensure_loaded};
 use crate::system::icon::find_icon_path;
@@ -16,6 +18,54 @@ pub async fn forget_row(command: &Action) -> bool {
     owned
 }
 
+/// The rows of the payload last built for one scope: what a `pin` stores, held
+/// here so no payload has to carry a copy of itself. One scope is live at a time
+/// (the panel's), so only the newest payload is kept.
+static LAST_ROWS: Mutex<Option<(String, Vec<ResultItem>)>> = Mutex::new(None);
+
+/// The rows a `pin` may name: an ephemeral row is offered no pin entry, so it is
+/// not worth holding.
+fn pinnable(rows: &[ResultItem]) -> Vec<ResultItem> {
+    rows.iter()
+        .filter(|item| !item.ephemeral && item.on_click.is_some())
+        .cloned()
+        .collect()
+}
+
+fn find_row(rows: &[ResultItem], command: &Action) -> Option<ResultItem> {
+    rows.iter()
+        .find(|item| item.on_click.as_ref() == Some(command))
+        .cloned()
+}
+
+/// Hold the payload as the shell sees it, before the launcher's own entries are
+/// attached, so the row a pin stores is the row the user picked.
+fn remember(scope: &str, rows: &[ResultItem]) {
+    let kept = pinnable(rows);
+    let mut held = LAST_ROWS.lock().unwrap_or_else(PoisonError::into_inner);
+    *held = Some((scope.to_string(), kept));
+}
+
+/// The row `command` names in `scope`'s remembered payload, or `None` when that
+/// payload no longer holds it (a newer search, a restarted core).
+fn remembered_row(scope: &str, command: &Action) -> Option<ResultItem> {
+    let held = LAST_ROWS.lock().unwrap_or_else(PoisonError::into_inner);
+    let (rows_scope, rows) = held.as_ref()?;
+    if rows_scope != scope {
+        return None;
+    }
+    find_row(rows, command)
+}
+
+/// Pin the row `command` names in `scope`'s payload. `false` when the payload no
+/// longer holds it, so the panel comes back unchanged instead of a stale pin.
+pub fn pin_row(scope: &str, command: &Action) -> bool {
+    let Some(row) = remembered_row(scope, command) else {
+        return false;
+    };
+    crate::system::pins::pin(scope, &row).is_ok()
+}
+
 /// A pin's scope is the exact trimmed query, so a bare keyword never summons it;
 /// `?` is help, not a result set, so it has no pins.
 pub(super) fn pin_scope(input: &str) -> Option<&str> {
@@ -31,6 +81,8 @@ pub async fn decorate(items: Vec<ResultItem>, scope: &str, history: bool) -> Vec
     let (mut out, pinned) = merge_pins(pins, items);
     // One query for every plugin's remembered default, not one per row.
     let defaults = crate::system::defaults::all().unwrap_or_default();
+    // What the shell can name in a `pin`: the rows as they arrive here.
+    remember(scope, &out);
 
     // One registry read for the whole list; `Plugin::actions` is synchronous,
     // so the guard never spans an await.
@@ -99,10 +151,6 @@ fn attach_actions(
         item.badge = find_icon_path("builtin:pin");
     }
 
-    // The pin stores the row as it arrived: its host actions, and none of the
-    // launcher's own entries, so a pinned row never embeds the action storing it.
-    let pin_snapshot = (!is_pinned && !item.ephemeral).then(|| Box::new(item.clone()));
-
     let mut actions: Vec<ActionItem> = Vec::new();
     actions.append(&mut plugin_actions);
     actions.append(&mut item.actions);
@@ -140,12 +188,11 @@ fn attach_actions(
             plugin: None,
             default: false,
         });
-    } else if let Some(pinned_row) = pin_snapshot {
+    } else if !item.ephemeral {
         actions.push(ActionItem {
             title: t!("action.pin"),
             action: PanelAction::Pin {
                 scope: scope.to_string(),
-                item: pinned_row,
             },
             icon: Some("builtin:pin".to_string()),
             id: None,
@@ -258,10 +305,9 @@ mod tests {
             .collect();
         assert_eq!(titles, [t!("action.open"), t!("action.pin")]);
         match &row.actions[1].action {
-            PanelAction::Pin { scope, item } => {
-                assert_eq!(scope, "b");
-                assert_eq!(item.title, "Firefox");
-            }
+            // the entry names the row's scope only: `pin` looks the row up in the
+            // payload the core emitted rather than having it echoed back
+            PanelAction::Pin { scope } => assert_eq!(scope, "b"),
             other => panic!("expected a pin, got {other:?}"),
         }
         assert!(row.badge.is_none(), "an unpinned row carries no badge");
@@ -315,15 +361,17 @@ mod tests {
         assert!(row.badge.is_some(), "a pinned row carries the pin badge");
     }
 
+    /// A `pin` stores the row as the payload carried it: host actions included,
+    /// launcher entries never attached, and an unpinnable row not held at all.
     #[test]
-    fn the_pin_snapshot_keeps_host_actions_but_not_launcher_ones() {
-        let mut row = item(
+    fn a_pins_row_comes_from_the_remembered_payload() {
+        let mut host_row = item(
             "Firefox",
             Action::Launch {
                 desktop_id: "firefox.desktop".to_string(),
             },
         );
-        row.actions = vec![ActionItem {
+        host_row.actions = vec![ActionItem {
             title: "Host".to_string(),
             action: PanelAction::Execute {
                 command: run("host"),
@@ -333,27 +381,17 @@ mod tests {
             plugin: None,
             default: false,
         }];
-        attach_actions(
-            &mut row,
-            "b",
-            &[],
-            false,
-            &HashMap::new(),
-            (None, Vec::new()),
-        );
+        let mut one_shot = item("window", run("wctl activate 1"));
+        one_shot.ephemeral = true;
 
-        // The snapshot is the host's row, not the decorated one: the pin action
-        // must not embed itself, and the host action must survive the round trip.
-        let pinned = row
-            .actions
-            .iter()
-            .find_map(|action| match &action.action {
-                PanelAction::Pin { item, .. } => Some(item),
-                _ => None,
-            })
-            .expect("the row offers a pin");
-        assert_eq!(pinned.actions.len(), 1);
-        assert_eq!(pinned.actions[0].title, "Host");
+        let held = pinnable(&[host_row.clone(), one_shot]);
+        assert_eq!(held.len(), 1, "an ephemeral row is never a pin target");
+
+        let command = host_row.on_click.clone().expect("clickable");
+        let found = find_row(&held, &command).expect("the payload holds the row");
+        assert_eq!(found.actions, host_row.actions, "host actions survive");
+        // a command the payload does not hold is a miss, so the pin is refused
+        assert!(find_row(&held, &run("nope")).is_none());
     }
 
     #[test]

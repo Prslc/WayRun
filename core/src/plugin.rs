@@ -8,7 +8,7 @@ mod model;
 mod registry;
 mod search;
 
-pub use actions::{decorate, forget_row};
+pub use actions::{decorate, forget_row, pin_row};
 pub use model::Meta;
 /// The ranking vocabulary providers and the dispatcher share.
 pub use model::{

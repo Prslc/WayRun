@@ -15,7 +15,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 | `top` | — | 最常用项；不带 `id` 时同样推送 `results` 通知 |
 | `select` | 结果项对象 | `null`（记录使用；`ephemeral` 与 `copy` 行不记录） |
 | `command` | 一个 [`Action`](#动作) 对象 | `null`（执行一条行或面板命令） |
-| `pin` | `{"scope","item"}` | `{"pinned": bool}`（把结果项置顶到某条精确查询） |
+| `pin` | `{"scope","on_click": Action}` | `{"pinned": bool}`（把该查询载荷中的一行置顶） |
 | `unpin` | `{"scope","on_click": Action}` | `{"unpinned": bool}` |
 | `default` | `{"scope","action_id"}` | `null`（记录某插件的默认 Enter 动作；`action_id` 为 null 则清除） |
 | `forget` | `{"on_click": Action}` | `{"forgotten": bool}` |
@@ -69,9 +69,10 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 “不是我的行”——启动器会把这类行留在列表里，不会谎称删除成功。
 
 `pin` 以**精确查询字符串**为范围（`scope` 是整段去掉首尾空白的输入；`""` 表示空查询历史），
-按命令为键保存结果项，`unpin` 删除。之后某次 `search` 的 `text` 去掉首尾空白后与该字符串
-相等时，才会把这些置顶项按最近置顶优先排在最前，与新鲜结果去重，并补上各自的 `actions`；
-只输入关键词不会命中。
+以 `on_click` 指名的命令为键保存：后端在它最近为该 scope 发出的载荷里查找这一行，客户端不必
+把结果项回传；载荷中已没有该命令时返回 `pinned: false`。`unpin` 用同样的键删除。之后某次
+`search` 的 `text` 去掉首尾空白后与该字符串相等时，才会把这些置顶项按最近置顶优先排在最前，
+与新鲜结果去重，并补上各自的 `actions`；只输入关键词不会命中。
 
 ## 插件元数据（`list_plugins`）
 
@@ -154,7 +155,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 | `type` | 字段 | 含义 |
 |--------|------|------|
 | `execute` | `command` | 执行该 [`Action`](#动作) |
-| `pin` | `scope`、`item` | 把结果项置顶到某条精确查询 |
+| `pin` | `scope` | 把该行的命令置顶到某条精确查询 |
 | `unpin` | `scope`、`on_click` | 从某条精确查询取消置顶该命令 |
 | `forget` | `on_click` | 把该命令从使用历史中移除 |
 

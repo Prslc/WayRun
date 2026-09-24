@@ -556,6 +556,13 @@ impl State {
         self.rows.get(menu.parent).map(|row| row.title.as_str())
     }
 
+    /// The command of the row the open panel belongs to, which is what a panel
+    /// `pin` names it by.
+    pub fn menu_parent_command(&self) -> Option<Action> {
+        let menu = self.menu.as_ref()?;
+        self.rows.get(menu.parent)?.on_click.clone()
+    }
+
     pub fn menu_up(&mut self) {
         if let Some(menu) = &mut self.menu {
             menu.cursor.up();
@@ -1470,7 +1477,6 @@ mod tests {
                 title: "Pin to top".to_string(),
                 action: PanelAction::Pin {
                     scope: String::new(),
-                    item: Box::new(item("a.txt", None, None, None)),
                 },
                 icon: None,
                 id: None,
@@ -1612,7 +1618,6 @@ mod tests {
             title: "Pin to top".to_string(),
             action: PanelAction::Pin {
                 scope: String::new(),
-                item: Box::new(item("Firefox", None, None, None)),
             },
             icon: None,
             id: None,
@@ -1736,7 +1741,6 @@ mod tests {
         } else {
             PanelAction::Pin {
                 scope: "f a".to_string(),
-                item: Box::new(file_row(uri, Vec::new())),
             }
         };
         ActionItem {
