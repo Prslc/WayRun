@@ -6,7 +6,6 @@ mod surface;
 use std::time::{Duration, Instant};
 
 use calloop::LoopHandle;
-use calloop::channel::Sender;
 use calloop::timer::{TimeoutAction, Timer};
 use smithay_client_toolkit::background_effect::{BackgroundEffectHandler, BackgroundEffectState};
 use smithay_client_toolkit::compositor::CompositorState;
@@ -154,9 +153,9 @@ pub struct Shell {
     viewport_destination: Option<(u32, u32)>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     pointer: Option<wl_pointer::WlPointer>,
-    /// Where a worker thread hands back a clipboard read, stamped with the show
-    /// it was requested for.
-    paste_tx: Sender<(u64, Option<String>)>,
+    /// Where the clipboard worker takes a show's read request, and where the
+    /// decoded text comes back stamped with that show.
+    paste_jobs: std::sync::mpsc::Sender<u64>,
     /// Bumped on every `open`: a paste that outlived its show is dropped.
     paste_generation: u64,
     modifiers: Modifiers,
@@ -220,7 +219,7 @@ impl Shell {
         qh: &QueueHandle<Shell>,
         handle: &LoopHandle<'static, Shell>,
         globals: &GlobalList,
-        paste_tx: Sender<(u64, Option<String>)>,
+        paste_jobs: std::sync::mpsc::Sender<u64>,
         icon_jobs: std::sync::mpsc::Sender<(u64, IconKey)>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let compositor = CompositorState::bind(globals, qh)?;
@@ -250,7 +249,7 @@ impl Shell {
             viewport_destination: None,
             keyboard: None,
             pointer: None,
-            paste_tx,
+            paste_jobs,
             paste_generation: 0,
             modifiers: Modifiers::default(),
             keyboard_focus: false,

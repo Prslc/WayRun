@@ -110,7 +110,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     WaylandSource::new(conn.clone(), event_queue).insert(loop_handle.clone())?;
 
     let icon_jobs = ui::icons::spawn_worker(icon_tx);
-    let mut shell = Shell::new(&conn, &qh, &loop_handle, &globals, paste_tx, icon_jobs)?;
+    let paste_jobs = session::clipboard::spawn(paste_tx);
+    let mut shell = Shell::new(&conn, &qh, &loop_handle, &globals, paste_jobs, icon_jobs)?;
     shell.on_appearance(config::AppearanceConfig::load(), Instant::now());
     // Held for the process's life: dropping it stops live config updates.
     let _appearance_watcher = config::watch(appearance_tx);

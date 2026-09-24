@@ -30,7 +30,7 @@ impl Shell {
                 Keysym::v => {
                     // The read is blocking, so it happens on a worker thread and
                     // comes back through `on_paste`.
-                    clipboard::read(self.paste_tx.clone(), self.paste_generation);
+                    clipboard::read(&self.paste_jobs, self.paste_generation);
                     return;
                 }
                 Keysym::a => {
