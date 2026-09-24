@@ -105,7 +105,13 @@ pub async fn serve() -> Result<()> {
 /// The empty query: the full, uncapped history so deleting a row converges,
 /// with the scope's pins leading and every row's action panel attached.
 pub async fn history_items() -> Vec<ResultItem> {
-    let items = system::usage::get_top(i32::MAX).unwrap_or_default();
+    // The history is uncapped, so this is a read plus a JSON parse per row: real
+    // work, and it runs on the blocking pool rather than a runtime worker.
+    let items = tokio::task::spawn_blocking(|| system::usage::get_top(i32::MAX))
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default();
     plugin::decorate(items, "", true).await
 }
 

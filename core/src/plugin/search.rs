@@ -105,12 +105,27 @@ async fn search(input: &str) -> Vec<ResultItem> {
             }));
         }
     }
-    let keys: Vec<String> = rows
-        .iter()
-        .filter_map(|(_, _, item)| item.on_click.as_ref())
-        .map(Action::key)
-        .collect();
-    merge_ranked(rows, &crate::system::usage::counts(&keys))
+    // The query touches the shared connection, so it runs off the runtime's
+    // workers; the keys go with it and come back, so they are built once.
+    let keys = usage_keys(&rows);
+    let Ok((counts, keys)) = tokio::task::spawn_blocking(move || {
+        let counts = crate::system::usage::counts(&keys);
+        (counts, keys)
+    })
+    .await
+    else {
+        return Vec::new();
+    };
+    merge_ranked(rows, &keys, &counts)
+}
+
+/// Each row's usage key, aligned with `rows`, so the counts query and the merge
+/// share one pass; a row with no command carries an empty key, which matches
+/// nothing.
+fn usage_keys(rows: &[(Rank, u32, ResultItem)]) -> Vec<String> {
+    rows.iter()
+        .map(|(_, _, item)| item.on_click.as_ref().map(Action::key).unwrap_or_default())
+        .collect()
 }
 
 /// How long the default chain waits for a keyword-less external host before
@@ -119,21 +134,19 @@ const DEFAULT_DEADLINE: Duration = Duration::from_millis(50);
 
 /// Order the default providers' rows: the strongest kind first, then the most
 /// picked row of that kind, then the registry order that otherwise ties them.
+/// `keys` is each row's usage key, aligned with `rows`.
 fn merge_ranked(
     rows: Vec<(Rank, u32, ResultItem)>,
+    keys: &[String],
     counts: &std::collections::HashMap<String, u32>,
 ) -> Vec<ResultItem> {
     // Materialize the sort keys first: a `sort_by_key` closure runs on every
-    // comparison, and `Action::key` is a JSON serialization per call.
+    // comparison, and the usage lookup is a hash per call.
     let mut keyed: Vec<((u8, u32), u32, u32, ResultItem)> = rows
         .into_iter()
-        .map(|(rank, provider, item)| {
-            let used = item
-                .on_click
-                .as_ref()
-                .and_then(|action| counts.get(&action.key()))
-                .copied()
-                .unwrap_or(0);
+        .zip(keys)
+        .map(|((rank, provider, item), key)| {
+            let used = counts.get(key).copied().unwrap_or(0);
             (rank.key(), used, provider, item)
         })
         .collect();
@@ -251,6 +264,12 @@ mod tests {
         )
     }
 
+    /// `merge_ranked` with the keys the caller derives for these rows.
+    fn merge(rows: Vec<(Rank, u32, ResultItem)>, counts: &HashMap<String, u32>) -> Vec<ResultItem> {
+        let keys = usage_keys(&rows);
+        merge_ranked(rows, &keys, counts)
+    }
+
     /// A prefix command may no longer hide an exact app, whatever the registry
     /// order says.
     #[test]
@@ -259,7 +278,7 @@ mod tests {
             ranked(Match::Prefix, 1, "command"),
             ranked(Match::Exact, 2, "the app"),
         ];
-        let merged = merge_ranked(rows, &HashMap::default());
+        let merged = merge(rows, &HashMap::default());
         assert_eq!(merged[0].title, "the app");
     }
 
@@ -274,13 +293,13 @@ mod tests {
         // the usage table is keyed by the canonical action, not the command
         let key = rows[1].2.on_click.as_ref().expect("clickable").key();
         let counts = HashMap::from([(key, 3)]);
-        assert_eq!(merge_ranked(rows, &counts)[0].title, "second");
+        assert_eq!(merge(rows, &counts)[0].title, "second");
 
         let rows = vec![
             ranked(Match::Exact, 1, "first"),
             ranked(Match::Exact, 2, "second"),
         ];
-        assert_eq!(merge_ranked(rows, &HashMap::default())[0].title, "first");
+        assert_eq!(merge(rows, &HashMap::default())[0].title, "first");
     }
 
     /// A provider that only lists sits below every scored row and keeps its own
@@ -292,7 +311,7 @@ mod tests {
             (Rank::title(Match::Loose), 1, row("scored", "b")),
             (Rank::Listed(1), 0, row("second", "c")),
         ];
-        let merged = merge_ranked(rows, &HashMap::default());
+        let merged = merge(rows, &HashMap::default());
         let titles: Vec<&str> = merged.iter().map(|item| item.title.as_str()).collect();
         assert_eq!(titles, ["scored", "first", "second"]);
     }
@@ -309,7 +328,7 @@ mod tests {
             (Rank::title(Match::Word), 0, row("title word", "c")),
             (Rank::Scored(5000), 0, row("summary exact", "d")),
         ];
-        let merged = merge_ranked(rows, &HashMap::default());
+        let merged = merge(rows, &HashMap::default());
         let titles: Vec<&str> = merged.iter().map(|item| item.title.as_str()).collect();
         assert_eq!(
             titles,
@@ -327,6 +346,6 @@ mod tests {
         let rows: Vec<_> = (0..SHOW_CAP as u32 + 10)
             .map(|at| ranked(Match::Exact, 0, &format!("row {at}")))
             .collect();
-        assert_eq!(merge_ranked(rows, &HashMap::default()).len(), SHOW_CAP);
+        assert_eq!(merge(rows, &HashMap::default()).len(), SHOW_CAP);
     }
 }
