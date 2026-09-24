@@ -371,6 +371,12 @@ mod tests {
     use super::*;
     use tiny_skia::Color;
 
+    /// A cache whose queue nobody drains: these frames draw no icons.
+    fn idle_icons() -> IconCache {
+        let (jobs, _queued) = std::sync::mpsc::channel();
+        IconCache::new(jobs)
+    }
+
     #[test]
     fn the_base_fill_is_the_dim_with_no_clear_under_it() {
         let mut state = State::new();
@@ -380,7 +386,7 @@ mod tests {
 
         let mut pixmap = Pixmap::new(64, 64).unwrap();
         let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
-        let mut icons = IconCache::new();
+        let mut icons = idle_icons();
         draw(
             &mut pixmap,
             &state,
@@ -404,7 +410,7 @@ mod tests {
         state.reduce_motion = true;
 
         let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
-        let mut icons = IconCache::new();
+        let mut icons = idle_icons();
         let mut pixmap = Pixmap::new(1600, 1080).unwrap();
         // A sentinel everywhere: a region repaint must leave the backdrop alone.
         pixmap.fill(Color::from_rgba8(255, 0, 255, 255));
@@ -444,7 +450,7 @@ mod tests {
         state.last_card_bottom = state.appearance.layout.card_top(state.surface) + card_h + 200.0;
 
         let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
-        let mut icons = IconCache::new();
+        let mut icons = idle_icons();
         let mut pixmap = Pixmap::new(1600, 1080).unwrap();
         pixmap.fill(Color::from_rgba8(255, 0, 255, 255));
 

@@ -79,6 +79,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (backend_tx, backend_channel) = calloop::channel::channel();
     let (ipc_tx, ipc_channel) = calloop::channel::channel();
     let (paste_tx, paste_channel) = calloop::channel::channel();
+    let (icon_tx, icon_channel) = calloop::channel::channel();
     let (appearance_tx, appearance_channel) = calloop::channel::channel();
 
     loop_handle.insert_source(backend_channel, |event, _, state: &mut Shell| {
@@ -96,6 +97,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             state.on_paste(generation, text);
         }
     })?;
+    loop_handle.insert_source(icon_channel, |event, _, state: &mut Shell| {
+        if let ChannelEvent::Msg((generation, key, icon)) = event {
+            state.on_icon(generation, key, icon);
+        }
+    })?;
     loop_handle.insert_source(appearance_channel, |event, _, state: &mut Shell| {
         if let ChannelEvent::Msg(config) = event {
             state.on_appearance(config, Instant::now());
@@ -103,7 +109,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     })?;
     WaylandSource::new(conn.clone(), event_queue).insert(loop_handle.clone())?;
 
-    let mut shell = Shell::new(&conn, &qh, &loop_handle, &globals, paste_tx)?;
+    let icon_jobs = ui::icons::spawn_worker(icon_tx);
+    let mut shell = Shell::new(&conn, &qh, &loop_handle, &globals, paste_tx, icon_jobs)?;
     shell.on_appearance(config::AppearanceConfig::load(), Instant::now());
     // Held for the process's life: dropping it stops live config updates.
     let _appearance_watcher = config::watch(appearance_tx);

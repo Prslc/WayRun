@@ -1,6 +1,22 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::mpsc::Sender;
 
 use tiny_skia::{FilterQuality, Pixmap, PixmapPaint, PixmapRef, PremultipliedColorU8, Transform};
+
+/// One decode a frame asked for: what the worker renders and the key it lands
+/// under, so a repeat ask is told apart from a first one.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum IconKey {
+    Plain {
+        path: String,
+        size: u32,
+    },
+    Tinted {
+        path: String,
+        size: u32,
+        color: [u8; 3],
+    },
+}
 
 pub struct IconCache {
     /// path → (box size → premultiplied RGBA). The key is a `String` so a
@@ -9,38 +25,77 @@ pub struct IconCache {
     /// The same bitmap recoloured to the theme foreground, keyed by colour too,
     /// so a live theme change does not show the old tint.
     tinted: HashMap<(String, u32, [u8; 3]), Option<Pixmap>>,
+    /// Keys asked for but not yet delivered, so a frame never queues a decode
+    /// the worker is already on.
+    pending: HashSet<IconKey>,
+    /// Bumped by [`IconCache::clear`], so a result a dismissed show asked for
+    /// cannot land in the next one.
+    generation: u64,
+    /// The decode worker's queue.
+    jobs: Sender<(u64, IconKey)>,
 }
 
 impl IconCache {
-    pub fn new() -> Self {
+    pub fn new(jobs: Sender<(u64, IconKey)>) -> Self {
         Self {
             entries: HashMap::new(),
             tinted: HashMap::new(),
+            pending: HashSet::new(),
+            generation: 0,
+            jobs,
         }
     }
 
-    /// Drop every decoded icon: the pixmaps are the cache's bulk, and a hidden
-    /// resident launcher has no business holding them.
+    /// Drop every decoded icon and orphan the results the worker still owes, so
+    /// a hidden resident launcher holds neither.
     pub fn clear(&mut self) {
         self.entries.clear();
         self.tinted.clear();
+        self.pending.clear();
+        self.generation = self.generation.wrapping_add(1);
     }
 
-    /// Rasterise `path` now, so a later draw cannot land the cost on an animated
-    /// frame; called when a payload arrives, while the launcher is still hidden.
+    /// Ask the worker for `path`, unless it is cached or already asked for; a
+    /// payload that arrives while the launcher is hidden lands before it shows.
     pub fn warm(&mut self, path: &str, size: u32) {
-        self.entries
-            .entry(path.to_string())
-            .or_default()
-            .entry(size)
-            .or_insert_with(|| render(path, size));
+        if self
+            .entries
+            .get(path)
+            .is_none_or(|by_size| !by_size.contains_key(&size))
+        {
+            self.request(IconKey::Plain {
+                path: path.to_string(),
+                size,
+            });
+        }
     }
 
     /// Like [`IconCache::warm`], for a glyph drawn through [`IconCache::draw_tinted`].
     pub fn warm_tinted(&mut self, path: &str, size: u32, color: [u8; 3]) {
-        self.tinted
-            .entry((path.to_string(), size, color))
-            .or_insert_with(|| render_glyph(path, size, color));
+        if !self.tinted.contains_key(&(path.to_string(), size, color)) {
+            self.request(IconKey::Tinted {
+                path: path.to_string(),
+                size,
+                color,
+            });
+        }
+    }
+
+    /// Store a decoded icon the worker delivered; a result asked for before a
+    /// [`IconCache::clear`] is dropped instead of painted into the next show.
+    pub fn insert(&mut self, generation: u64, key: IconKey, icon: Option<Pixmap>) {
+        if generation != self.generation {
+            return;
+        }
+        self.pending.remove(&key);
+        match key {
+            IconKey::Plain { path, size } => {
+                self.entries.entry(path).or_default().insert(size, icon);
+            }
+            IconKey::Tinted { path, size, color } => {
+                self.tinted.insert((path, size, color), icon);
+            }
+        }
     }
 
     /// Draw `path` tinted to `color` when it is a monochrome silhouette; a
@@ -54,11 +109,20 @@ impl IconCache {
         opacity: f32,
         color: [u8; 3],
     ) {
-        let icon = self
-            .tinted
-            .entry((path.to_string(), size, color))
-            .or_insert_with(|| render_glyph(path, size, color));
-        let Some(icon) = icon else { return };
+        let key = (path.to_string(), size, color);
+        if !self.tinted.contains_key(&key) {
+            self.request(IconKey::Tinted {
+                path: key.0,
+                size,
+                color,
+            });
+            return;
+        }
+        // the key is known here, so a `None` inside is a cached unreadable file
+        let Some(Some(icon)) = self.tinted.get(&key) else {
+            return;
+        };
+
         target.draw_pixmap(
             pos.0.round() as i32,
             pos.1.round() as i32,
@@ -73,7 +137,8 @@ impl IconCache {
     }
 
     /// Draw the icon contained in a `size`×`size` box at `(x, y)`, at `opacity`;
-    /// `size` is in the target's pixels.
+    /// `size` is in the target's pixels. A missing file is asked for, never
+    /// rasterised here, so no frame pays for a decode.
     pub fn draw(
         &mut self,
         target: &mut Pixmap,
@@ -83,19 +148,27 @@ impl IconCache {
         size: u32,
         opacity: f32,
     ) {
-        // `get_mut` on the outer map borrows the path as `&str`, so a cache hit
-        // (every row, every frame) allocates nothing.
-        if !self.entries.contains_key(path) {
-            self.entries.insert(path.to_string(), HashMap::new());
-        }
-        let icon = self
+        // `get` borrows the path as `&str`, so a cache hit allocates nothing.
+        if self
             .entries
-            .get_mut(path)
-            .expect("just inserted")
-            .entry(size)
-            .or_insert_with(|| render(path, size));
+            .get(path)
+            .is_none_or(|by_size| !by_size.contains_key(&size))
+        {
+            self.request(IconKey::Plain {
+                path: path.to_string(),
+                size,
+            });
+            return;
+        }
+        // the key is known here, so a `None` inside is a cached unreadable file
+        let Some(Some(icon)) = self
+            .entries
+            .get(path)
+            .and_then(|by_size| by_size.get(&size))
+        else {
+            return;
+        };
 
-        let Some(icon) = icon else { return };
         target.draw_pixmap(
             x.round() as i32,
             y.round() as i32,
@@ -108,6 +181,33 @@ impl IconCache {
             None,
         );
     }
+
+    /// Queue `key` unless the worker is already on it.
+    fn request(&mut self, key: IconKey) {
+        if self.pending.insert(key.clone()) {
+            let _ = self.jobs.send((self.generation, key));
+        }
+    }
+}
+
+/// Decode requests on one thread so the UI thread never rasterises; every result
+/// comes back through `done` under the generation it was asked for.
+pub fn spawn_worker(
+    done: calloop::channel::Sender<(u64, IconKey, Option<Pixmap>)>,
+) -> Sender<(u64, IconKey)> {
+    let (jobs, queue) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        while let Ok((generation, key)) = queue.recv() {
+            let icon = match &key {
+                IconKey::Plain { path, size } => render(path, *size),
+                IconKey::Tinted { path, size, color } => render_glyph(path, *size, *color),
+            };
+            if done.send((generation, key, icon)).is_err() {
+                break;
+            }
+        }
+    });
+    jobs
 }
 
 /// Contain-fit `path` into a `size`×`size` box, transparent around it.
@@ -348,12 +448,40 @@ mod tests {
         path
     }
 
+    /// The cache plus the queue the worker would drain.
+    fn test_cache() -> (IconCache, std::sync::mpsc::Receiver<(u64, IconKey)>) {
+        let (jobs, queued) = std::sync::mpsc::channel();
+        (IconCache::new(jobs), queued)
+    }
+
+    /// Store what the worker would deliver for a plain icon.
+    fn deliver(cache: &mut IconCache, path: &str, size: u32) {
+        let key = IconKey::Plain {
+            path: path.to_string(),
+            size,
+        };
+        let generation = cache.generation;
+        cache.insert(generation, key, render(path, size));
+    }
+
+    /// Store what the worker would deliver for a tinted glyph.
+    fn deliver_tinted(cache: &mut IconCache, path: &str, size: u32, color: [u8; 3]) {
+        let key = IconKey::Tinted {
+            path: path.to_string(),
+            size,
+            color,
+        };
+        let generation = cache.generation;
+        cache.insert(generation, key, render_glyph(path, size, color));
+    }
+
     #[test]
     fn a_png_icon_is_decoded_and_drawn_inside_its_box() {
         let path = red_png("wayrun-icon-test.png");
-        let mut cache = IconCache::new();
+        let (mut cache, _queued) = test_cache();
         let mut target = Pixmap::new(34, 34).unwrap();
 
+        deliver(&mut cache, path.to_str().unwrap(), 30);
         cache.draw(&mut target, path.to_str().unwrap(), 2.0, 2.0, 30, 1.0);
 
         let centre = target.pixel(17, 17).unwrap();
@@ -380,8 +508,9 @@ mod tests {
         let path = std::env::temp_dir().join("wayrun-icon-test.svg");
         std::fs::write(&path, svg).unwrap();
 
-        let mut cache = IconCache::new();
+        let (mut cache, _queued) = test_cache();
         let mut target = Pixmap::new(34, 34).unwrap();
+        deliver(&mut cache, path.to_str().unwrap(), 30);
         cache.draw(&mut target, path.to_str().unwrap(), 2.0, 2.0, 30, 1.0);
 
         let centre = target.pixel(17, 17).unwrap();
@@ -398,8 +527,9 @@ mod tests {
         let path = std::env::temp_dir().join("wayrun-icon-tint.svg");
         std::fs::write(&path, svg).unwrap();
 
-        let mut cache = IconCache::new();
+        let (mut cache, _queued) = test_cache();
         let mut target = Pixmap::new(34, 34).unwrap();
+        deliver_tinted(&mut cache, path.to_str().unwrap(), 30, [241, 223, 218]);
         cache.draw_tinted(
             &mut target,
             path.to_str().unwrap(),
@@ -424,8 +554,9 @@ mod tests {
         let path = std::env::temp_dir().join("wayrun-icon-notint.svg");
         std::fs::write(&path, svg).unwrap();
 
-        let mut cache = IconCache::new();
+        let (mut cache, _queued) = test_cache();
         let mut target = Pixmap::new(34, 34).unwrap();
+        deliver_tinted(&mut cache, path.to_str().unwrap(), 30, [241, 223, 218]);
         cache.draw_tinted(
             &mut target,
             path.to_str().unwrap(),
@@ -445,16 +576,76 @@ mod tests {
 
     #[test]
     fn an_unreadable_icon_draws_nothing_rather_than_failing() {
-        let mut cache = IconCache::new();
+        let (mut cache, queued) = test_cache();
         let mut target = Pixmap::new(30, 30).unwrap();
+        deliver(&mut cache, "/nonexistent/icon.png", 30);
+
         cache.draw(&mut target, "/nonexistent/icon.png", 0.0, 0.0, 30, 1.0);
         assert!(target.pixels().iter().all(|p| p.alpha() == 0));
+        assert!(
+            queued.try_recv().is_err(),
+            "a cached miss is never asked for again"
+        );
+    }
+
+    #[test]
+    fn a_missing_icon_is_asked_for_once_and_drawn_when_it_arrives() {
+        let path = red_png("wayrun-icon-late.png");
+        let path = path.to_str().unwrap().to_string();
+        let (mut cache, queued) = test_cache();
+        let mut target = Pixmap::new(34, 34).unwrap();
+
+        cache.draw(&mut target, &path, 2.0, 2.0, 30, 1.0);
+        assert!(
+            target.pixels().iter().all(|p| p.alpha() == 0),
+            "nothing yet"
+        );
+        let (generation, key) = queued.try_recv().expect("the frame asks the worker");
+        assert_eq!(
+            key,
+            IconKey::Plain {
+                path: path.clone(),
+                size: 30
+            }
+        );
+
+        // the same miss must not queue the decode twice
+        cache.draw(&mut target, &path, 2.0, 2.0, 30, 1.0);
+        assert!(queued.try_recv().is_err());
+
+        cache.insert(generation, key, render(&path, 30));
+        cache.draw(&mut target, &path, 2.0, 2.0, 30, 1.0);
+        assert_eq!(target.pixel(17, 17).unwrap().alpha(), 255);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_result_from_a_cleared_generation_is_dropped() {
+        let path = red_png("wayrun-icon-cleared.png");
+        let path = path.to_str().unwrap().to_string();
+        let (mut cache, queued) = test_cache();
+        let mut target = Pixmap::new(34, 34).unwrap();
+
+        cache.draw(&mut target, &path, 2.0, 2.0, 30, 1.0);
+        let (generation, key) = queued.try_recv().unwrap();
+        cache.clear();
+        cache.insert(generation, key, render(&path, 30));
+
+        cache.draw(&mut target, &path, 2.0, 2.0, 30, 1.0);
+        assert!(
+            target.pixels().iter().all(|p| p.alpha() == 0),
+            "a dismissed show's icon stays out"
+        );
+        assert!(queued.try_recv().is_ok(), "the cleared miss asks again");
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn every_bundled_glyph_renders() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/assets/icons");
-        let mut cache = IconCache::new();
+        let (mut cache, _queued) = test_cache();
         let mut checked = 0;
         for entry in std::fs::read_dir(&dir).unwrap().flatten() {
             let path = entry.path();
@@ -462,6 +653,7 @@ mod tests {
                 continue;
             }
             let mut target = Pixmap::new(64, 64).unwrap();
+            deliver(&mut cache, path.to_str().unwrap(), 64);
             cache.draw(&mut target, path.to_str().unwrap(), 0.0, 0.0, 64, 1.0);
             assert!(
                 target.pixels().iter().any(|p| p.alpha() > 0),

@@ -34,7 +34,7 @@ use crate::app::{self, State as Launcher};
 use crate::config::{AppearanceConfig, Mode};
 use crate::session::backend::BackendEvent;
 use crate::session::ipc;
-use crate::ui::icons::IconCache;
+use crate::ui::icons::{IconCache, IconKey};
 use crate::ui::text::TextEngine;
 use crate::ui::theme;
 use crate::wayland::ime::Pending;
@@ -221,6 +221,7 @@ impl Shell {
         handle: &LoopHandle<'static, Shell>,
         globals: &GlobalList,
         paste_tx: Sender<(u64, Option<String>)>,
+        icon_jobs: std::sync::mpsc::Sender<(u64, IconKey)>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let compositor = CompositorState::bind(globals, qh)?;
         let shm = Shm::bind(globals, qh)?;
@@ -271,7 +272,7 @@ impl Shell {
             ime_cursor_sent: None,
             wheel_accum: 0.0,
             pending: Pending::default(),
-            icons: IconCache::new(),
+            icons: IconCache::new(icon_jobs),
             text: TextEngine::new(),
             app: Launcher::new(),
             resident: std::env::var_os("WAYRUN_RESIDENT").is_some(),
@@ -307,8 +308,8 @@ impl Shell {
                 let primary = self.app.theme.primary;
                 let layout = self.app.appearance.layout;
                 let first = self.app.cursor.first;
-                // Warm only what an animated frame can draw: the visible
-                // window. A row scrolled in later decodes on a settled frame.
+                // Ask for what the visible window draws; a row scrolled in
+                // later asks when the frame draws it.
                 for row in self.app.rows.iter().skip(first).take(layout.max_rows) {
                     // Each warm mirrors how the frame draws it: the row icon plain,
                     // the badge and action glyphs tinted to their theme colours.
@@ -334,6 +335,13 @@ impl Shell {
             }
             BackendEvent::CoreExited => self.exit = true,
         }
+        self.redraw();
+    }
+
+    /// A decoded icon came back from the worker: store it and repaint, so a row
+    /// that asked for it stops drawing blank.
+    pub fn on_icon(&mut self, generation: u64, key: IconKey, icon: Option<Pixmap>) {
+        self.icons.insert(generation, key, icon);
         self.redraw();
     }
 
