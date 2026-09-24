@@ -92,11 +92,7 @@ pub async fn serve() -> Result<()> {
 /// The empty query: the full, uncapped history so deleting a row converges,
 /// with the scope's pins leading and every row's action panel attached.
 pub async fn history_items() -> Vec<ResultItem> {
-    let items: Vec<ResultItem> = system::usage::get_top(i32::MAX)
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|value| serde_json::from_value(value).ok())
-        .collect();
+    let items = system::usage::get_top(i32::MAX).unwrap_or_default();
     plugin::decorate(items, "", true).await
 }
 

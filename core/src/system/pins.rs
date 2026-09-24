@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use rusqlite::Connection;
 
 use crate::system::db::with_db;
-use crate::wire::Action;
+use crate::wire::ResultItem;
 
 /// Pin one row to the top of one exact query (`""` is the empty-query history).
 /// The whole item is stored, re-emitted before its plugin runs.
@@ -16,14 +16,13 @@ pub fn unpin(scope: &str, key: &str) -> Result<bool> {
 }
 
 /// Every pin of one scope, most recently pinned first.
-pub fn get_pins(scope: &str) -> Result<Vec<serde_json::Value>> {
+pub fn get_pins(scope: &str) -> Result<Vec<ResultItem>> {
     with_db(|conn| get_pins_with(conn, scope))
 }
 
 fn pin_with(conn: &Connection, scope: &str, item_json: &str) -> Result<()> {
-    let item: serde_json::Value = serde_json::from_str(item_json)?;
-    let command: Action =
-        serde_json::from_value(item["on_click"].clone()).context("item missing on_click")?;
+    let item: ResultItem = serde_json::from_str(item_json)?;
+    let command = item.on_click.context("item missing on_click")?;
     let key = command.key();
     // Delete-and-insert, not an upsert: a re-pin must get a fresh `id` so it
     // rises to the top of `id`-descending order.
@@ -44,7 +43,7 @@ fn unpin_with(conn: &Connection, scope: &str, key: &str) -> Result<bool> {
     Ok(deleted > 0)
 }
 
-fn get_pins_with(conn: &Connection, scope: &str) -> Result<Vec<serde_json::Value>> {
+fn get_pins_with(conn: &Connection, scope: &str) -> Result<Vec<ResultItem>> {
     let mut stmt = conn.prepare_cached(
         "SELECT item_json FROM pins WHERE scope = ?1
          ORDER BY id DESC",
@@ -54,14 +53,14 @@ fn get_pins_with(conn: &Connection, scope: &str) -> Result<Vec<serde_json::Value
     // a null that would make the shell reject the whole payload.
     Ok(rows
         .filter_map(Result::ok)
-        .filter_map(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
-        .filter(|value| value.get("title").and_then(|t| t.as_str()).is_some())
+        .filter_map(|json| serde_json::from_str::<ResultItem>(&json).ok())
         .collect())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wire::Action;
 
     fn test_conn() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
@@ -90,7 +89,7 @@ mod tests {
         // a scope sees only its own pins, most recent first
         let items = get_pins_with(&conn, "b firefox").unwrap();
         assert_eq!(items.len(), 2);
-        assert_eq!(items[0]["title"], "Docs");
+        assert_eq!(items[0].title, "Docs");
         assert_eq!(get_pins_with(&conn, "").unwrap().len(), 1);
 
         assert!(unpin_with(&conn, "b firefox", &key(github.clone())).unwrap());
@@ -109,8 +108,8 @@ mod tests {
 
         let items = get_pins_with(&conn, "gh").unwrap();
         assert_eq!(items.len(), 2);
-        assert_eq!(items[0]["title"], "A v2", "the re-pin wins and surfaces");
-        assert_eq!(items[1]["title"], "B");
+        assert_eq!(items[0].title, "A v2", "the re-pin wins and surfaces");
+        assert_eq!(items[1].title, "B");
     }
 
     #[test]

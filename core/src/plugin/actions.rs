@@ -27,11 +27,7 @@ pub(super) fn pin_scope(input: &str) -> Option<&str> {
 /// re-emitted from storage, so its fresh copy is dropped as a duplicate.
 pub async fn decorate(items: Vec<ResultItem>, scope: &str, history: bool) -> Vec<ResultItem> {
     ensure_loaded().await;
-    let pins: Vec<ResultItem> = crate::system::pins::get_pins(scope)
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|value| serde_json::from_value(value).ok())
-        .collect();
+    let pins: Vec<ResultItem> = crate::system::pins::get_pins(scope).unwrap_or_default();
     let (mut out, pinned) = merge_pins(pins, items);
     // One query for every plugin's remembered default, not one per row.
     let defaults = crate::system::defaults::all().unwrap_or_default();

@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use rusqlite::Connection;
 
 use crate::system::db::with_db;
-use crate::wire::Action;
+use crate::wire::{Action, ResultItem};
 
 pub fn record(item_json: &str) -> Result<()> {
     with_db(|conn| record_with(conn, item_json))
@@ -13,7 +13,7 @@ pub fn forget(key: &str) -> Result<bool> {
     with_db(|conn| forget_with(conn, key))
 }
 
-pub fn get_top(limit: i32) -> Result<Vec<serde_json::Value>> {
+pub fn get_top(limit: i32) -> Result<Vec<ResultItem>> {
     with_db(|conn| get_top_with(conn, limit))
 }
 
@@ -51,25 +51,18 @@ pub(crate) fn is_recordable(ephemeral: bool, command: Option<&Action>) -> bool {
 }
 
 fn record_with(conn: &Connection, item_json: &str) -> Result<()> {
-    let item: serde_json::Value = serde_json::from_str(item_json)?;
-    let command: Option<Action> = item
-        .get("on_click")
-        .and_then(|value| serde_json::from_value(value.clone()).ok());
-    if !is_recordable(
-        item["ephemeral"].as_bool().unwrap_or(false),
-        command.as_ref(),
-    ) {
+    let item: ResultItem = serde_json::from_str(item_json)?;
+    if !is_recordable(item.ephemeral, item.on_click.as_ref()) {
         return Ok(());
     }
-    let key = command.context("item missing on_click")?.key();
+    let key = item.on_click.context("item missing on_click")?.key();
 
     // Key by display title so alternate launch actions for one app merge
     // into a single entry; empty titles fall back to the command key.
-    let title = item["title"].as_str().context("item missing title")?;
-    let key_column = if title.is_empty() {
+    let key_column = if item.title.is_empty() {
         key.clone()
     } else {
-        title.to_string()
+        item.title.clone()
     };
 
     conn.prepare_cached(
@@ -98,7 +91,7 @@ fn forget_with(conn: &Connection, key: &str) -> Result<bool> {
     Ok(deleted > 0)
 }
 
-fn get_top_with(conn: &Connection, limit: i32) -> Result<Vec<serde_json::Value>> {
+fn get_top_with(conn: &Connection, limit: i32) -> Result<Vec<ResultItem>> {
     let mut stmt = conn.prepare_cached(
         "SELECT item_json FROM usage ORDER BY count DESC, last_used_at DESC LIMIT ?1",
     )?;
@@ -108,8 +101,7 @@ fn get_top_with(conn: &Connection, limit: i32) -> Result<Vec<serde_json::Value>>
     // `null`: `title` is required on the wire, and one bad entry rejects all.
     Ok(rows
         .filter_map(Result::ok)
-        .filter_map(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
-        .filter(|value| value.get("title").and_then(|t| t.as_str()).is_some())
+        .filter_map(|json| serde_json::from_str::<ResultItem>(&json).ok())
         .collect())
 }
 
@@ -141,7 +133,7 @@ mod tests {
 
         let items = get_top_with(&conn, 10).unwrap();
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0]["title"], "Firefox");
+        assert_eq!(items[0].title, "Firefox");
     }
 
     #[test]
@@ -161,7 +153,7 @@ mod tests {
 
         let items = get_top_with(&conn, 10).unwrap();
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0]["title"], "Good");
+        assert_eq!(items[0].title, "Good");
     }
 
     #[test]
@@ -190,8 +182,8 @@ mod tests {
         record_with(&conn, &item("B", run("b"))).unwrap();
 
         let items = get_top_with(&conn, 10).unwrap();
-        assert_eq!(items[0]["title"], "B");
-        assert_eq!(items[1]["title"], "A");
+        assert_eq!(items[0].title, "B");
+        assert_eq!(items[1].title, "A");
     }
 
     #[test]
@@ -220,9 +212,9 @@ mod tests {
 
         let items = get_top_with(&conn, 10).unwrap();
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0]["title"], "Telegram");
+        assert_eq!(items[0].title, "Telegram");
         // the merged entry keeps the most recently used command
-        assert_eq!(items[0]["on_click"]["type"], "launch");
+        assert!(matches!(items[0].on_click, Some(Action::Launch { .. })));
     }
 
     #[test]
@@ -297,7 +289,7 @@ mod tests {
         let mut titles: Vec<String> = get_top_with(&conn, 10)
             .unwrap()
             .iter()
-            .filter_map(|item| item["title"].as_str().map(str::to_owned))
+            .map(|item| item.title.clone())
             .collect();
         titles.sort();
         assert_eq!(titles, ["Firefox", "New Window", "Prslc/WayRun", "btop"]);
