@@ -22,6 +22,27 @@ async fn respond(tx: &mpsc::Sender<String>, id: Value, result: Result<Value, (i6
     protocol::emit(tx, &payload).await;
 }
 
+/// The successful reply to a request whose result is a typed payload: it is
+/// serialized straight from the value, with no `Value` tree in between.
+#[derive(serde::Serialize)]
+struct OkReply<'a, T> {
+    jsonrpc: &'static str,
+    result: &'a T,
+    id: Value,
+}
+
+async fn respond_ok<T: serde::Serialize>(tx: &mpsc::Sender<String>, id: Value, result: &T) {
+    protocol::emit(
+        tx,
+        &OkReply {
+            jsonrpc: "2.0",
+            result,
+            id,
+        },
+    )
+    .await;
+}
+
 fn search_text(params: Option<&Value>) -> Result<String, ()> {
     match params {
         None | Some(Value::Null) => Ok(String::new()),
@@ -99,7 +120,7 @@ pub async fn handle(
                 Ok(text) if !text.is_empty() => {
                     if has_id {
                         let results = crate::plugin::dispatch(&text).await;
-                        respond(tx, id, Ok(json!(results))).await;
+                        respond_ok(tx, id, &results).await;
                     } else {
                         search.request(&text);
                     }
@@ -115,7 +136,8 @@ pub async fn handle(
         "top" => {
             if has_id {
                 search.cancel();
-                respond(tx, id, Ok(json!(protocol::history_items().await))).await;
+                let items = protocol::history_items().await;
+                respond_ok(tx, id, &items).await;
             } else {
                 search.request_top();
             }
@@ -248,9 +270,8 @@ pub async fn handle(
         }
         "theme" => {
             let theme = crate::system::theme::load_theme();
-            let value = serde_json::to_value(&theme).unwrap_or(Value::Null);
             if has_id {
-                respond(tx, id, Ok(value)).await;
+                respond_ok(tx, id, &theme).await;
             }
         }
         "ping" => {

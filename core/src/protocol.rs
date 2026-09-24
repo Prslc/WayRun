@@ -5,28 +5,41 @@ use tokio::io::{self, AsyncBufReadExt, BufReader};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
-use crate::wire::ResultItem;
+use crate::wire::{ResultItem, ThemeConfig};
 use crate::{plugin, rpc, system, watchers};
 
 /// Serialize `payload` onto the stdout stream owned by [`spawn_writer`].
-pub async fn emit(tx: &mpsc::Sender<String>, payload: &serde_json::Value) {
+pub async fn emit(tx: &mpsc::Sender<String>, payload: &impl serde::Serialize) {
     if let Ok(json) = serde_json::to_string(payload) {
         let _ = tx.send(json).await;
     }
 }
 
+/// A core-to-UI notification: no `id`, so no reply is expected. `params` is
+/// serialized straight from the typed value, with no `Value` tree in between.
+#[derive(serde::Serialize)]
+pub struct Notification<T> {
+    jsonrpc: &'static str,
+    method: &'static str,
+    params: T,
+}
+
 /// The `theme` notification, shared with the file watcher's live re-emit.
-pub fn theme_notification() -> serde_json::Value {
-    serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "theme",
-        "params": system::theme::load_theme(),
-    })
+pub fn theme_notification() -> Notification<ThemeConfig> {
+    Notification {
+        jsonrpc: "2.0",
+        method: "theme",
+        params: system::theme::load_theme(),
+    }
 }
 
 /// The `results` notification for one search payload.
-pub fn results_notification(items: &[ResultItem]) -> serde_json::Value {
-    serde_json::json!({ "jsonrpc": "2.0", "method": "results", "params": items })
+pub fn results_notification(items: &[ResultItem]) -> Notification<&[ResultItem]> {
+    Notification {
+        jsonrpc: "2.0",
+        method: "results",
+        params: items,
+    }
 }
 
 /// Drain sentinel: the writer flushes and returns. The watchers hold sender
