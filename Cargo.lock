@@ -2068,6 +2068,7 @@ dependencies = [
  "freedesktop-desktop-entry",
  "gio",
  "libc",
+ "memchr",
  "memmap2",
  "minreq",
  "notify",

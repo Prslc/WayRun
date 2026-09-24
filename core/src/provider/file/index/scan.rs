@@ -166,8 +166,11 @@ pub(super) fn search_in(
             || (),
             |_, i, top| {
                 let rec = index.file(i);
-                let depth = index.dir(rec.dir).depth + 1;
-                top.offer(tier(rec.name).saturating_sub(depth), i);
+                // a zero score is dropped, so only a hit pays for the depth lookup
+                let score = tier(rec.name);
+                if score > 0 {
+                    top.offer(score.saturating_sub(index.dir(rec.dir).depth + 1), i);
+                }
             },
         )
     } else {

@@ -1,3 +1,5 @@
+use memchr::memchr2;
+
 use crate::wire::ResultItem;
 
 /// One provider's rows, each with how the query matched it.
@@ -117,10 +119,29 @@ pub fn classify_bytes_confident(surface: &[u8], query: &[u8]) -> Option<Match> {
     if surface.len() >= query.len() && surface[..query.len()].eq_ignore_ascii_case(query) {
         return Some(Match::Prefix);
     }
-    if at_word_ci(surface, query) {
-        return Some(Match::Word);
+    // One walk answers both kinds: `memchr2` skips positions the query's first
+    // byte cannot start at, and a word-start hit outranks a plain one.
+    let lower = query[0].to_ascii_lowercase();
+    let upper = query[0].to_ascii_uppercase();
+    let mut hit = false;
+    let mut from = 1; // a match at 0 returned `Prefix` above
+    while from + query.len() <= surface.len() {
+        let Some(offset) = memchr2(lower, upper, &surface[from..]) else {
+            break;
+        };
+        let at = from + offset;
+        if at + query.len() > surface.len() {
+            break;
+        }
+        if surface[at..at + query.len()].eq_ignore_ascii_case(query) {
+            if !surface[at - 1].is_ascii_alphanumeric() {
+                return Some(Match::Word);
+            }
+            hit = true;
+        }
+        from = at + 1;
     }
-    contains_ci(surface, query).then_some(Match::Substring)
+    hit.then_some(Match::Substring)
 }
 
 /// [`classify`] over raw bytes, for a surface and query the caller checked are
@@ -133,13 +154,6 @@ pub fn classify_bytes(surface: &[u8], query: &[u8]) -> Option<Match> {
         .or_else(|| scattered_ci(surface, query).then_some(Match::Loose))
 }
 
-fn contains_ci(haystack: &[u8], needle: &[u8]) -> bool {
-    !needle.is_empty()
-        && haystack
-            .windows(needle.len())
-            .any(|w| w.eq_ignore_ascii_case(needle))
-}
-
 /// Whether `query` occurs in `surface` at the start of a word.
 fn at_word(surface: &str, query: &str) -> bool {
     surface.match_indices(query).any(|(at, _)| {
@@ -148,12 +162,6 @@ fn at_word(surface: &str, query: &str) -> bool {
                 .chars()
                 .next_back()
                 .is_some_and(char::is_alphanumeric)
-    })
-}
-
-fn at_word_ci(surface: &[u8], query: &[u8]) -> bool {
-    surface.windows(query.len()).enumerate().any(|(at, w)| {
-        at > 0 && !surface[at - 1].is_ascii_alphanumeric() && w.eq_ignore_ascii_case(query)
     })
 }
 
@@ -299,6 +307,10 @@ mod tests {
             ("WayRun", "wayrun"),
             ("NOTES.txt", "notes.txt"),
             ("report", "report"),
+            ("xreport-report.txt", "report"),
+            ("xreport.txt", "report"),
+            ("xreport", "report"),
+            ("abcr", "report"),
             ("x", "wayrun"),
             ("abc", "报告"),
             ("", ""),
