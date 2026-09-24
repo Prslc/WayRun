@@ -46,6 +46,12 @@ resident instance owns; `status` prints `visible` or `hidden`. Without
 revert, `systemctl --user disable --now wayrun-launcher` and restore the
 spawn-per-hotkey binding.
 
+Apps you launch run in their own transient systemd scope
+(`systemd-run --user --scope`), so the unit's memory and CPU stay the launcher's
+own, a restart never touches a running app, and `systemd-oomd` can pick a single
+app instead of the whole launcher. Without `systemd-run` or a reachable user
+manager, launches fall back to plain detached processes.
+
 ## Proxy
 
 The launcher's only outbound request is the web-search suggestion fetch, so a

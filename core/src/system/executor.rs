@@ -1,6 +1,83 @@
 use gio::prelude::{AppInfoExt, FileExt};
 use std::path::{Path, PathBuf};
 use std::process;
+use std::sync::OnceLock;
+
+/// Shared by every scoped spawn and the probe, so an option an older
+/// `systemd-run` rejects fails the probe; `${VAR}` in an argument stays literal.
+const SCOPE_ARGS: [&str; 7] = [
+    "--user",
+    "--scope",
+    "--collect",
+    "--quiet",
+    "--expand-environment=no",
+    "--slice=app.slice",
+    "--",
+];
+
+/// Whether a transient systemd scope can be made: `systemd-run` on `PATH` and a
+/// reachable user manager. Probed once, since the probe itself spawns.
+fn scope_available() -> bool {
+    static AVAILABLE: OnceLock<bool> = OnceLock::new();
+    *AVAILABLE.get_or_init(|| {
+        program_on_path("systemd-run")
+            && process::Command::new("systemd-run")
+                .args(SCOPE_ARGS)
+                .arg("true")
+                .stdin(process::Stdio::null())
+                .stdout(process::Stdio::null())
+                .stderr(process::Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+    })
+}
+
+/// A command for `program` and `args`: wrapped in a transient systemd scope when
+/// `scope`, so a launched app stays out of the launcher unit's cgroup, else direct.
+fn scoped_command(scope: bool, program: &str, args: &[String]) -> process::Command {
+    let mut command = if scope {
+        let mut command = process::Command::new("systemd-run");
+        command.args(SCOPE_ARGS).arg(program);
+        command
+    } else {
+        process::Command::new(program)
+    };
+    command.args(args);
+    command
+}
+
+/// [`scoped_command`] with the probe's verdict.
+fn scoped(program: &str, args: &[String]) -> process::Command {
+    scoped_command(scope_available(), program, args)
+}
+
+/// Spawn detached; a task waits the child, so the runtime reaps it — dropping
+/// the handle alone would leave a finished app as a zombie.
+fn spawn_detached(command: process::Command) {
+    if let Ok(mut child) = tokio::process::Command::from(command).spawn() {
+        tokio::spawn(async move {
+            let _ = child.wait().await;
+        });
+    }
+}
+
+/// The scoped `gio <verb> <arg>` line, or `None` without transient scopes or the
+/// gio CLI — the caller then keeps its in-process gio call, which would fork the
+/// app into the launcher's own cgroup.
+fn gio_line(scope: bool, gio: bool, verb: &str, arg: &str) -> Option<process::Command> {
+    (scope && gio).then(|| scoped_command(true, "gio", &[verb.to_string(), arg.to_string()]))
+}
+
+/// [`gio_line`] with the probes' verdicts; spawns the lookup when it can.
+fn spawn_gio_scoped(verb: &str, arg: &str) -> bool {
+    match gio_line(scope_available(), program_on_path("gio"), verb, arg) {
+        Some(command) => {
+            spawn_detached(command);
+            true
+        }
+        None => false,
+    }
+}
 
 /// Run a shell command detached from the backend (system commands, …). Shell
 /// is intended here: `%u`/`%f` leftovers are stripped before execution.
@@ -11,11 +88,14 @@ pub fn execute_command(cmd: &str) {
         .replace("%f", "")
         .replace("%F", "");
 
-    process::Command::new("sh")
-        .arg("-c")
-        .arg(format!("setsid {clean_cmd} >/dev/null 2>&1 &"))
-        .spawn()
-        .ok();
+    let args = vec![
+        "-c".to_string(),
+        format!("setsid {clean_cmd} >/dev/null 2>&1 &"),
+    ];
+    let mut command = scoped("sh", &args);
+    // `sh` inherits the JSON-RPC pipe otherwise; its errors belong on the journal.
+    command.stdout(process::Stdio::null());
+    spawn_detached(command);
 }
 
 /// Join an argv into a `sh` command line, quoting tokens that need it: the `run:`
@@ -47,23 +127,26 @@ fn shell_quote(token: &str) -> String {
 /// Run an argv detached, no shell: a `.desktop` `Exec=` already is argv, and
 /// `sh -c` would make a `;` or `$` inside an argument syntax again.
 pub fn execute_argv(argv: &[String]) {
-    let Some((program, args)) = argv.split_first() else {
+    if argv.is_empty() {
         return;
-    };
+    }
 
-    process::Command::new("setsid")
-        .arg(program)
-        .args(args)
+    let mut command = scoped("setsid", argv);
+    command
         .stdin(process::Stdio::null())
         .stdout(process::Stdio::null())
-        .stderr(process::Stdio::null())
-        .spawn()
-        .ok();
+        .stderr(process::Stdio::null());
+    spawn_detached(command);
 }
 
 /// Launch an app by desktop id via GLib's `GAppInfo`, honoring Exec quoting,
 /// field codes, env and `DBusActivatable`; a no-op when the id is unknown.
 pub fn launch_app(desktop_id: &str) {
+    if let Some(path) = crate::system::desktop_action::find(desktop_id)
+        && spawn_gio_scoped("launch", &path.to_string_lossy())
+    {
+        return;
+    }
     for app in gio::AppInfo::all() {
         if app.id().as_deref() == Some(desktop_id) {
             let _ = app.launch(&[], None::<&gio::AppLaunchContext>);
@@ -75,6 +158,9 @@ pub fn launch_app(desktop_id: &str) {
 /// Open a URI with the default handler via `GLib`. `xdg-open` would drop
 /// `Terminal=true` outside a Flatpak/Snap sandbox.
 pub fn open_uri(uri: &str) {
+    if spawn_gio_scoped("open", uri) {
+        return;
+    }
     let _ = gio::AppInfo::launch_default_for_uri(uri, None::<&gio::AppLaunchContext>);
 }
 
@@ -144,20 +230,18 @@ pub fn run_in_terminal(cmd: &str) {
 
 /// Spawn an argv detached in its own session, stdio discarded.
 fn spawn_argv(argv: &[String], dir: Option<&Path>) {
-    let Some((program, args)) = argv.split_first() else {
+    if argv.is_empty() {
         return;
-    };
-    let mut command = process::Command::new("setsid");
+    }
+    let mut command = scoped("setsid", argv);
     command
-        .arg(program)
-        .args(args)
         .stdin(process::Stdio::null())
         .stdout(process::Stdio::null())
         .stderr(process::Stdio::null());
     if let Some(dir) = dir {
         command.current_dir(dir);
     }
-    command.spawn().ok();
+    spawn_detached(command);
 }
 
 /// The terminal argv that runs `cmd`: the emulator, its command separator and
@@ -439,6 +523,86 @@ mod tests {
         assert_eq!(
             terminal_run_argv(Some("/usr/bin/gnome-terminal"), "nvim"),
             Some(argv(&["/usr/bin/gnome-terminal", "--", "sh", "-c", "nvim"]))
+        );
+    }
+
+    #[test]
+    fn a_scoped_command_runs_systemd_run_before_the_program() {
+        let command = scoped_command(true, "sh", &argv(&["-c", "echo hi"]));
+        assert_eq!(command.get_program().to_string_lossy(), "systemd-run");
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args,
+            [
+                "--user",
+                "--scope",
+                "--collect",
+                "--quiet",
+                "--expand-environment=no",
+                "--slice=app.slice",
+                "--",
+                "sh",
+                "-c",
+                "echo hi"
+            ]
+        );
+    }
+
+    #[test]
+    fn an_unscoped_command_is_the_program_itself() {
+        let command = scoped_command(false, "sh", &argv(&["-c", "echo hi"]));
+        assert_eq!(command.get_program().to_string_lossy(), "sh");
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args, ["-c", "echo hi"]);
+    }
+
+    #[test]
+    fn a_scoped_gio_lookup_wraps_the_cli_call() {
+        let command = gio_line(true, true, "launch", "/tmp/app.desktop").expect("wrapped");
+        assert_eq!(command.get_program().to_string_lossy(), "systemd-run");
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args,
+            [
+                "--user",
+                "--scope",
+                "--collect",
+                "--quiet",
+                "--expand-environment=no",
+                "--slice=app.slice",
+                "--",
+                "gio",
+                "launch",
+                "/tmp/app.desktop"
+            ]
+        );
+        // without a scope or the CLI the caller keeps its in-process call
+        assert!(gio_line(false, true, "open", "x").is_none());
+        assert!(gio_line(true, false, "open", "x").is_none());
+    }
+
+    #[test]
+    fn a_hostile_argument_stays_one_argv_element() {
+        let uri = "https://x/a b?q=${HOME}&r=%20";
+        let command = gio_line(true, true, "open", uri).expect("wrapped");
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args.last().map(String::as_str), Some(uri));
+        assert_eq!(
+            args.len(),
+            SCOPE_ARGS.len() + 3,
+            "no splitting, no extra words"
         );
     }
 }

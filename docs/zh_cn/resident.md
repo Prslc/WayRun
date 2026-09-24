@@ -42,6 +42,11 @@ systemctl --user enable --now wayrun-launcher
 `status` 打印 `visible` 或 `hidden`。不带 `WAYRUN_RESIDENT=1` 时，直接 `wayrun` 启动即弹出、
 关闭即退出。恢复：`systemctl --user disable --now wayrun-launcher` 并还原绑定的启动方式。
 
+启动器打开的应用各自运行在自己的瞬时 systemd scope 中（`systemd-run --user --scope`）：
+单元的 memory/CPU 只统计启动器自身，重启不会波及正在运行的应用，
+`systemd-oomd` 也能只挑某个应用而不是整个启动器。环境里没有 `systemd-run`
+或可用的 user manager 时，回退为直接拉起的独立进程。
+
 ## 代理
 
 启动器对外只有一个请求：拉取网页搜索建议。所以只有搜索引擎（默认 `s`）没法直连时，
