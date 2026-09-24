@@ -100,31 +100,38 @@ pub async fn history_items() -> Vec<ResultItem> {
     plugin::decorate(items, "", true).await
 }
 
-/// Emit the empty-query history as a `results` notification.
-pub async fn emit_history(tx: &mpsc::Sender<String>) {
-    emit(tx, &results_notification(&history_items().await)).await;
-}
-
-/// The streaming search's one worker: a new query supersedes the pending one,
+/// The streaming search's one worker: a new request supersedes the pending one,
 /// and a superseded payload is dropped instead of emitted.
 pub struct Search {
-    query: watch::Sender<Option<String>>,
+    request: watch::Sender<Option<Request>>,
+}
+
+/// What the worker answers: a query, or the empty-query history.
+#[derive(Clone)]
+enum Request {
+    Query(String),
+    Top,
 }
 
 impl Search {
     /// Start the session's worker; it exits when the returned `Search` drops.
     pub fn spawn(tx: mpsc::Sender<String>) -> Self {
-        let (query, mut rx) = watch::channel(None::<String>);
+        let (request, mut rx) = watch::channel(None::<Request>);
         tokio::spawn(async move {
             while rx.changed().await.is_ok() {
-                let Some(query) = rx.borrow_and_update().clone() else {
+                let Some(request) = rx.borrow_and_update().clone() else {
                     continue;
                 };
-                // Each query gets its own task: a panicking provider must not
-                // silence the worker that answers every later search.
-                let Ok(results) = tokio::spawn(async move { plugin::dispatch(&query).await }).await
-                else {
-                    continue;
+                let results = match request {
+                    // Each query gets its own task: a panicking provider must not
+                    // silence the worker that answers every later search.
+                    Request::Query(query) => {
+                        match tokio::spawn(async move { plugin::dispatch(&query).await }).await {
+                            Ok(results) => results,
+                            Err(_) => continue,
+                        }
+                    }
+                    Request::Top => history_items().await,
                 };
                 // A newer request, or a cancel, supersedes this payload.
                 if !rx.has_changed().unwrap_or(true) {
@@ -132,17 +139,23 @@ impl Search {
                 }
             }
         });
-        Self { query }
+        Self { request }
     }
 
     /// Queue a query, superseding anything pending.
     pub fn request(&self, query: &str) {
-        self.query.send_replace(Some(query.to_string()));
+        self.request
+            .send_replace(Some(Request::Query(query.to_string())));
     }
 
-    /// Drop the pending query, so a payload still in flight is not emitted and
+    /// Queue the empty-query history, superseding anything pending.
+    pub fn request_top(&self) {
+        self.request.send_replace(Some(Request::Top));
+    }
+
+    /// Drop the pending request, so a payload still in flight is not emitted and
     /// the history it superseded stays the last one.
     pub fn cancel(&self) {
-        self.query.send_replace(None);
+        self.request.send_replace(None);
     }
 }

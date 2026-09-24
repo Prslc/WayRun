@@ -113,11 +113,11 @@ pub async fn handle(
             }
         }
         "top" => {
-            search.cancel();
             if has_id {
+                search.cancel();
                 respond(tx, id, Ok(json!(protocol::history_items().await))).await;
             } else {
-                protocol::emit_history(tx).await;
+                search.request_top();
             }
         }
         "select" => {
@@ -306,6 +306,28 @@ mod tests {
     async fn a_search_notification_queues_the_query_without_a_reply() {
         let msgs = run(r#"{"jsonrpc":"2.0","method":"search","params":{"text":"x"}}"#).await;
         assert!(msgs.is_empty(), "the worker streams the payload later");
+    }
+
+    #[tokio::test]
+    async fn a_top_notification_streams_the_history() {
+        let (tx, mut rx) = mpsc::channel::<String>(32);
+        let search = protocol::Search::spawn(tx.clone());
+        let mut forgets = Vec::new();
+        handle(
+            r#"{"jsonrpc":"2.0","method":"top"}"#,
+            &tx,
+            &search,
+            &mut forgets,
+        )
+        .await;
+
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("the worker answers a top request")
+            .expect("the worker keeps the sender open");
+        let v: Value = serde_json::from_str(&msg).unwrap();
+        assert_eq!(v["method"], "results");
+        assert!(v["params"].is_array());
     }
 
     #[tokio::test]
