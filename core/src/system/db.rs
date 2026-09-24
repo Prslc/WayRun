@@ -18,6 +18,7 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS usage (
         last_used_at TEXT NOT NULL DEFAULT (datetime('now')),
         item_json TEXT NOT NULL
     );
+    CREATE INDEX IF NOT EXISTS usage_on_click ON usage(on_click, key);
     CREATE TABLE IF NOT EXISTS pins (
         id INTEGER PRIMARY KEY,
         scope TEXT NOT NULL,
@@ -39,6 +40,11 @@ fn db_path() -> Result<PathBuf> {
 
 fn open_conn() -> Result<Connection> {
     let conn = Connection::open(db_path()?)?;
+    // WAL keeps a commit off the fsync path in front of the launch line; a
+    // refusal (exotic filesystem) must not empty the history, so it is not propagated.
+    let _ =
+        conn.pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get::<_, String>(0));
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
     prepare(&conn)?;
     Ok(conn)
 }
@@ -107,8 +113,9 @@ mod tests {
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
-        // the current pins shape was rebuilt
+        // the schema is rebuilt with the version: the pins shape, the action-key index
         assert!(column_exists(&conn, "pins", "id"));
+        assert!(index_exists(&conn, "usage", "usage_on_click"));
     }
 
     #[test]
@@ -136,5 +143,13 @@ mod tests {
             .unwrap();
         let mut names = stmt.query_map([], |r| r.get::<_, String>(1)).unwrap();
         names.any(|name| name.is_ok_and(|name| name == column))
+    }
+
+    fn index_exists(conn: &Connection, table: &str, index: &str) -> bool {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA index_list({table})"))
+            .unwrap();
+        let mut names = stmt.query_map([], |r| r.get::<_, String>(1)).unwrap();
+        names.any(|name| name.is_ok_and(|name| name == index))
     }
 }

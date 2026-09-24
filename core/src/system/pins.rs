@@ -27,28 +27,25 @@ fn pin_with(conn: &Connection, scope: &str, item_json: &str) -> Result<()> {
     let key = command.key();
     // Delete-and-insert, not an upsert: a re-pin must get a fresh `id` so it
     // rises to the top of `id`-descending order.
-    conn.execute(
-        "DELETE FROM pins WHERE scope = ?1 AND on_click = ?2",
-        rusqlite::params![scope, key],
-    )?;
-    conn.execute(
+    conn.prepare_cached("DELETE FROM pins WHERE scope = ?1 AND on_click = ?2")?
+        .execute(rusqlite::params![scope, key])?;
+    conn.prepare_cached(
         "INSERT INTO pins (scope, on_click, item_json, created_at)
          VALUES (?1, ?2, ?3, datetime('now'))",
-        rusqlite::params![scope, key, item_json],
-    )?;
+    )?
+    .execute(rusqlite::params![scope, key, item_json])?;
     Ok(())
 }
 
 fn unpin_with(conn: &Connection, scope: &str, key: &str) -> Result<bool> {
-    let deleted = conn.execute(
-        "DELETE FROM pins WHERE scope = ?1 AND on_click = ?2",
-        rusqlite::params![scope, key],
-    )?;
+    let deleted = conn
+        .prepare_cached("DELETE FROM pins WHERE scope = ?1 AND on_click = ?2")?
+        .execute(rusqlite::params![scope, key])?;
     Ok(deleted > 0)
 }
 
 fn get_pins_with(conn: &Connection, scope: &str) -> Result<Vec<serde_json::Value>> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         "SELECT item_json FROM pins WHERE scope = ?1
          ORDER BY id DESC",
     )?;

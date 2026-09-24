@@ -72,7 +72,7 @@ fn record_with(conn: &Connection, item_json: &str) -> Result<()> {
         title.to_string()
     };
 
-    conn.execute(
+    conn.prepare_cached(
         "INSERT INTO usage (key, on_click, count, last_used_at, item_json)
          VALUES (?1, ?2, 1, datetime('now'), ?3)
          ON CONFLICT(key) DO UPDATE SET
@@ -80,8 +80,8 @@ fn record_with(conn: &Connection, item_json: &str) -> Result<()> {
              last_used_at = datetime('now'),
              on_click = ?2,
              item_json = ?3",
-        rusqlite::params![key_column, key, item_json],
-    )?;
+    )?
+    .execute(rusqlite::params![key_column, key, item_json])?;
     Ok(())
 }
 
@@ -89,22 +89,19 @@ fn record_with(conn: &Connection, item_json: &str) -> Result<()> {
 /// a merged row (same title, several actions) is removed whole. `true` if deleted.
 fn forget_with(conn: &Connection, key: &str) -> Result<bool> {
     let title: Option<String> = conn
-        .query_row(
-            "SELECT key FROM usage WHERE on_click = ?1 LIMIT 1",
-            [key],
-            |r| r.get(0),
-        )
+        .prepare_cached("SELECT key FROM usage WHERE on_click = ?1 LIMIT 1")?
+        .query_row([key], |r| r.get(0))
         .ok();
-    let deleted = match title {
-        Some(t) => conn.execute("DELETE FROM usage WHERE key = ?1", [t])?,
-        None => conn.execute("DELETE FROM usage WHERE key = ?1", [key])?,
-    };
+    let deleted = conn
+        .prepare_cached("DELETE FROM usage WHERE key = ?1")?
+        .execute([title.as_deref().unwrap_or(key)])?;
     Ok(deleted > 0)
 }
 
 fn get_top_with(conn: &Connection, limit: i32) -> Result<Vec<serde_json::Value>> {
-    let mut stmt = conn
-        .prepare("SELECT item_json FROM usage ORDER BY count DESC, last_used_at DESC LIMIT ?1")?;
+    let mut stmt = conn.prepare_cached(
+        "SELECT item_json FROM usage ORDER BY count DESC, last_used_at DESC LIMIT ?1",
+    )?;
     let rows = stmt.query_map([limit], |row| row.get::<_, String>(0))?;
 
     // A corrupt row, or one with no `title`, is skipped rather than emitted as

@@ -21,21 +21,22 @@ pub fn all() -> Result<HashMap<String, String>> {
 }
 
 fn set_with(conn: &Connection, scope: &str, action_id: &str) -> Result<()> {
-    conn.execute(
+    conn.prepare_cached(
         "INSERT INTO defaults (scope, action_id) VALUES (?1, ?2)
          ON CONFLICT(scope) DO UPDATE SET action_id = ?2",
-        rusqlite::params![scope, action_id],
-    )?;
+    )?
+    .execute(rusqlite::params![scope, action_id])?;
     Ok(())
 }
 
 fn clear_with(conn: &Connection, scope: &str) -> Result<()> {
-    conn.execute("DELETE FROM defaults WHERE scope = ?1", [scope])?;
+    conn.prepare_cached("DELETE FROM defaults WHERE scope = ?1")?
+        .execute([scope])?;
     Ok(())
 }
 
 fn all_with(conn: &Connection) -> Result<HashMap<String, String>> {
-    let mut stmt = conn.prepare("SELECT scope, action_id FROM defaults")?;
+    let mut stmt = conn.prepare_cached("SELECT scope, action_id FROM defaults")?;
     let rows = stmt.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     })?;
