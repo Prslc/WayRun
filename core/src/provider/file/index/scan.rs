@@ -4,6 +4,8 @@ use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
+
 use crate::plugin::{Match, classify_bytes_confident, classify_ci_confident};
 use crate::provider::file::index::format::{Index, bloom64, bloom128, fold128, push_dir_path};
 use crate::provider::file::{entry_item, score_path, score_split_path};
@@ -22,8 +24,8 @@ pub(super) fn threads_for(n: u32) -> u32 {
         .min(n.div_ceil(PARALLEL_FLOOR).max(1))
 }
 
-/// Run `chunk(start, end)` for each of `threads` disjoint ranges of `0..n` on
-/// its own thread, and collect the results in range order.
+/// Run `chunk(start, end)` for each of `threads` disjoint ranges of `0..n`, and
+/// collect the results in range order.
 pub(super) fn par_chunks<T: Send>(
     n: u32,
     threads: u32,
@@ -33,18 +35,15 @@ pub(super) fn par_chunks<T: Send>(
         return vec![chunk(0, n)];
     }
     let len = n.div_ceil(threads);
-    std::thread::scope(|scope| {
-        (0..threads)
-            .map(|t| {
-                let chunk = &chunk;
-                let start = t * len;
-                scope.spawn(move || chunk(start, (start + len).min(n)))
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(|handle| handle.join().expect("a scan thread panicked"))
-            .collect()
-    })
+    // rayon's pool is built once and its workers park between searches; a
+    // thread per chunk paid a spawn and a join on every search.
+    (0..threads)
+        .into_par_iter()
+        .map(|t| {
+            let start = t * len;
+            chunk(start, (start + len).min(n))
+        })
+        .collect()
 }
 
 /// The best [`SHOW_CAP`] candidates by score, ties keeping the earlier position,
