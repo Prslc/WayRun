@@ -43,9 +43,17 @@ impl Plugin for WindowPlugin {
     ) -> Pin<Box<dyn Future<Output = Result<Vec<ResultItem>>> + Send + '_>> {
         let input = query.to_string();
         Box::pin(async move {
-            Ok(tokio::task::spawn_blocking(move || do_search(&input))
-                .await
-                .unwrap_or_default())
+            if input.is_empty() {
+                return Ok(Vec::new());
+            }
+            let Some(windows) = cached_windows().await else {
+                return Ok(Vec::new());
+            };
+            Ok(
+                tokio::task::spawn_blocking(move || do_search(&input, &windows))
+                    .await
+                    .unwrap_or_default(),
+            )
         })
     }
 }
@@ -74,31 +82,27 @@ impl CachedWindow {
 /// msg` round trip serves the whole burst.
 static WINDOWS: LazyLock<FreshCache<CachedWindow>> = LazyLock::new(FreshCache::new);
 
-fn cached_windows(compositor: &dyn Compositor) -> Option<Arc<Vec<CachedWindow>>> {
-    WINDOWS.get(|| {
-        let windows = compositor.windows().ok()?;
-        Some(windows.into_iter().map(CachedWindow::new).collect())
-    })
+async fn cached_windows() -> Option<Arc<Vec<CachedWindow>>> {
+    WINDOWS
+        .get(|| {
+            let compositor = compositor::detect()?;
+            let windows = compositor.windows().ok()?;
+            Some(windows.into_iter().map(CachedWindow::new).collect())
+        })
+        .await
 }
 
 /// Fuzzy-match the query against every open window's title/app_id and emit a
 /// `run:` row that focuses the winner; empty without a compositor backend.
-fn do_search(query: &str) -> Vec<ResultItem> {
-    if query.is_empty() {
-        return Vec::new();
-    }
-
+fn do_search(query: &str, windows: &[CachedWindow]) -> Vec<ResultItem> {
     let Some(compositor) = compositor::detect() else {
-        return Vec::new();
-    };
-    let Some(windows) = cached_windows(compositor) else {
         return Vec::new();
     };
 
     let query = query.to_lowercase();
     let mut results: Vec<(u32, ResultItem)> = Vec::new();
 
-    for cached in windows.iter() {
+    for cached in windows {
         let score = score_window(cached, &query);
         if score > 0 {
             results.push((score, row(compositor, &cached.window)));
@@ -181,21 +185,29 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_typing_burst_shells_out_once() {
-        let fake = Counting {
+    #[tokio::test]
+    async fn a_typing_burst_shells_out_once() {
+        let fake = Arc::new(Counting {
             calls: AtomicUsize::new(0),
-        };
+        });
         let cache: FreshCache<Window> = FreshCache::new();
-        let first = cache.get(|| fake.windows().ok()).unwrap();
-        let second = cache.get(|| fake.windows().ok()).unwrap();
+        let fetch = {
+            let fake = Arc::clone(&fake);
+            move || fake.windows().ok()
+        };
+        let first = cache.get(fetch).await.unwrap();
+        let second = cache
+            .get(|| panic!("a burst shares one shell out"))
+            .await
+            .unwrap();
         assert!(Arc::ptr_eq(&first, &second));
         assert_eq!(fake.calls.load(Ordering::SeqCst), 1);
     }
 
-    #[test]
-    fn empty_query_matches_nothing() {
-        assert!(do_search("").is_empty());
+    #[tokio::test]
+    async fn empty_query_matches_nothing() {
+        let plugin = WindowPlugin::new();
+        assert!(plugin.search("", "").await.unwrap().is_empty());
     }
 
     #[test]

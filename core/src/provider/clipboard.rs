@@ -39,9 +39,18 @@ impl Plugin for Clipboard {
     ) -> Pin<Box<dyn Future<Output = Result<Vec<ResultItem>>> + Send + '_>> {
         let query = query.to_lowercase();
         Box::pin(async move {
-            Ok(tokio::task::spawn_blocking(move || do_search(&query))
-                .await
-                .unwrap_or_default())
+            if query.is_empty() {
+                return Ok(vec![]);
+            }
+            let Some(entries) = cached_entries().await else {
+                return Ok(vec![]);
+            };
+            Ok(tokio::task::spawn_blocking(move || {
+                let icon = resolve("builtin:clipboard");
+                matching_rows(&entries, &query, &icon)
+            })
+            .await
+            .unwrap_or_default())
         })
     }
 }
@@ -77,24 +86,13 @@ impl Entry {
 /// serves the whole burst.
 static LIST: LazyLock<FreshCache<Entry>> = LazyLock::new(FreshCache::new);
 
-fn cached_entries() -> Option<Arc<Vec<Entry>>> {
+async fn cached_entries() -> Option<Arc<Vec<Entry>>> {
     LIST.get(|| {
         let output = Command::new("cliphist").arg("list").output().ok()?;
         let text = String::from_utf8_lossy(&output.stdout);
         Some(parse_entries(&text))
     })
-}
-
-fn do_search(query: &str) -> Vec<ResultItem> {
-    if query.is_empty() {
-        return vec![];
-    }
-
-    let Some(entries) = cached_entries() else {
-        return vec![];
-    };
-    let icon = resolve("builtin:clipboard");
-    matching_rows(&entries, query, &icon)
+    .await
 }
 
 /// The rows whose preview contains `query_lower`, capped to [`MAX_RESULTS`].
@@ -171,12 +169,12 @@ mod tests {
         assert_eq!(matching_rows(&entries, "xyz", &None).len(), 0);
     }
 
-    #[test]
-    fn a_fresh_cache_is_reused() {
+    #[tokio::test]
+    async fn a_fresh_cache_is_reused() {
         let cache: FreshCache<Entry> = FreshCache::new();
         let fetch = || Some(parse_entries("1\ttext/plain\thello"));
-        let first = cache.get(fetch).unwrap();
-        let second = cache.get(fetch).unwrap();
+        let first = cache.get(fetch).await.unwrap();
+        let second = cache.get(fetch).await.unwrap();
         assert!(Arc::ptr_eq(&first, &second), "the second call reuses it");
     }
 
