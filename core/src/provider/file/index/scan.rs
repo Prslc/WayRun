@@ -3,8 +3,7 @@ use std::collections::BinaryHeap;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
-
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use std::sync::{Mutex, PoisonError};
 
 use crate::plugin::{Match, classify_bytes_confident, classify_ci_confident};
 use crate::provider::file::index::format::{Index, bloom64, bloom128, fold128, push_dir_path};
@@ -35,13 +34,25 @@ pub(super) fn par_chunks<T: Send>(
         return vec![chunk(0, n)];
     }
     let len = n.div_ceil(threads);
-    // rayon's pool is built once and its workers park between searches; a
-    // thread per chunk paid a spawn and a join on every search.
-    (0..threads)
-        .into_par_iter()
-        .map(|t| {
-            let start = t * len;
-            chunk(start, (start + len).min(n))
+    // rayon's scope rides the global parked pool and the machinery the walk
+    // already links; the indexed par-iter bridge would add ~29 KB of plumbing.
+    let slots: Vec<Mutex<Option<T>>> = (0..threads).map(|_| Mutex::new(None)).collect();
+    let chunk = &chunk;
+    rayon::scope(|scope| {
+        for (at, slot) in slots.iter().enumerate() {
+            scope.spawn(move |_| {
+                let start = at as u32 * len;
+                *slot.lock().unwrap_or_else(PoisonError::into_inner) =
+                    Some(chunk(start, (start + len).min(n)));
+            });
+        }
+    });
+    slots
+        .into_iter()
+        .map(|slot| {
+            slot.into_inner()
+                .unwrap_or_else(PoisonError::into_inner)
+                .expect("a chunk ran")
         })
         .collect()
 }
