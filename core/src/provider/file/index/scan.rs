@@ -34,8 +34,8 @@ pub(super) fn par_chunks<T: Send>(
         return vec![chunk(0, n)];
     }
     let len = n.div_ceil(threads);
-    // rayon's scope rides the global parked pool and the machinery the walk
-    // already links; the indexed par-iter bridge would add ~29 KB of plumbing.
+    // rayon's scope rides the global parked pool the walk already links; the
+    // indexed par-iter bridge would bring its own monomorphized plumbing.
     let slots: Vec<Mutex<Option<T>>> = (0..threads).map(|_| Mutex::new(None)).collect();
     let chunk = &chunk;
     rayon::scope(|scope| {

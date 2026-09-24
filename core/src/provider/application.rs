@@ -13,17 +13,13 @@ use crate::system::icon::resolve;
 use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
 use rust_i18n::t;
 
-// What a match surface is worth, in tenths of the shared kind's weight: a title
-// hit leads an action's own label, then the metadata tails. The merge orders by
-// the product, so a title match beats a description match of comparable
-// strength, while an exact keyword still beats a title hit the query only sits
-// inside of -- neither the surface nor the kind alone gives that.
+// A surface's share of the kind's weight, in tenths: the merge orders by the
+// product, so a title hit leads an action label, and both lead the metadata.
 const TITLE: u32 = 10;
 const ACTION: u32 = 8;
 const SUMMARY: u32 = 5;
 const KEYWORD: u32 = 3;
 const GENERIC: u32 = 2;
-/// The desktop id is the last resort: its middle spells anything.
 const ID: u32 = 1;
 
 /// The typo tier's weight, under a real title kind but over the metadata tails:

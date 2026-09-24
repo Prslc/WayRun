@@ -24,7 +24,8 @@ pub struct IconCache {
     entries: HashMap<String, HashMap<u32, Option<Pixmap>>>,
     /// The same bitmap recoloured to the theme foreground, keyed by colour too,
     /// so a live theme change does not show the old tint.
-    tinted: HashMap<(String, u32, [u8; 3]), Option<Pixmap>>,
+    #[allow(clippy::type_complexity)] // two levels, so a lookup borrows the path
+    tinted: HashMap<String, HashMap<(u32, [u8; 3]), Option<Pixmap>>>,
     /// Keys asked for but not yet delivered, so a frame never queues a decode
     /// the worker is already on.
     pending: HashSet<IconKey>,
@@ -72,7 +73,11 @@ impl IconCache {
 
     /// Like [`IconCache::warm`], for a glyph drawn through [`IconCache::draw_tinted`].
     pub fn warm_tinted(&mut self, path: &str, size: u32, color: [u8; 3]) {
-        if !self.tinted.contains_key(&(path.to_string(), size, color)) {
+        if self
+            .tinted
+            .get(path)
+            .is_none_or(|by_color| !by_color.contains_key(&(size, color)))
+        {
             self.request(IconKey::Tinted {
                 path: path.to_string(),
                 size,
@@ -93,7 +98,10 @@ impl IconCache {
                 self.entries.entry(path).or_default().insert(size, icon);
             }
             IconKey::Tinted { path, size, color } => {
-                self.tinted.insert((path, size, color), icon);
+                self.tinted
+                    .entry(path)
+                    .or_default()
+                    .insert((size, color), icon);
             }
         }
     }
@@ -109,17 +117,25 @@ impl IconCache {
         opacity: f32,
         color: [u8; 3],
     ) {
-        let key = (path.to_string(), size, color);
-        if !self.tinted.contains_key(&key) {
+        let key = (size, color);
+        if self
+            .tinted
+            .get(path)
+            .is_none_or(|by_color| !by_color.contains_key(&key))
+        {
             self.request(IconKey::Tinted {
-                path: key.0,
+                path: path.to_string(),
                 size,
                 color,
             });
             return;
         }
         // the key is known here, so a `None` inside is a cached unreadable file
-        let Some(Some(icon)) = self.tinted.get(&key) else {
+        let Some(Some(icon)) = self
+            .tinted
+            .get(path)
+            .and_then(|by_color| by_color.get(&key))
+        else {
             return;
         };
 
