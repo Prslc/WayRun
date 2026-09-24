@@ -5,7 +5,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use crate::provider::file::index::format::{
-    DIR_REC, DirOut, FILE_REC, FileOut, HEADER, exclude_hash, header_bytes, push_name,
+    DIR_BLOOM, DIR_REC, DirOut, FILE_BLOOM, FILE_REC, FileOut, HEADER, bloom64, bloom128,
+    exclude_hash, header_bytes, name_haystack, push_name,
 };
 use crate::provider::file::index::mtime_ns;
 use crate::provider::file::keep_name;
@@ -30,8 +31,9 @@ impl Tables {
         }
     }
 
-    /// The image bytes: header, home, both tables, then the blobs. The one place
-    /// an image is written, so the walk and the update cannot drift apart.
+    /// The image bytes: header, home, both tables and their blooms, then the
+    /// blobs. The one place an image is written, so the walk and the update
+    /// cannot drift apart.
     pub(super) fn assemble(mut self, home: &Path, exclude: &[String]) -> Vec<u8> {
         self.files.sort_by_key(|rec| rec.dir);
         let home_bytes = home.as_os_str().as_bytes();
@@ -40,6 +42,8 @@ impl Tables {
                 + home_bytes.len()
                 + self.dirs.len() * DIR_REC
                 + self.files.len() * FILE_REC
+                + self.files.len() * FILE_BLOOM
+                + self.dirs.len() * DIR_BLOOM
                 + self.names.len()
                 + self.paths.len(),
         );
@@ -57,6 +61,12 @@ impl Tables {
         }
         for f in &self.files {
             out.extend_from_slice(&f.bytes());
+        }
+        for f in &self.files {
+            out.extend_from_slice(&f.name_bloom.to_le_bytes());
+        }
+        for d in &self.dirs {
+            out.extend_from_slice(&d.path_bloom.to_le_bytes());
         }
         out.extend_from_slice(&self.names);
         out.extend_from_slice(&self.paths);
@@ -183,16 +193,19 @@ pub(super) fn walk_into(
         mtime_ns: mtime_ns(root)?,
         path_off,
         path_len,
+        path_bloom: bloom128(root_lower.as_bytes()),
     });
     let root_slot = tables.dirs.len() as u32 - 1;
 
     let entries = read_dir_entries(root, exclude)?;
     for name in &entries.files {
-        let (name_off, name_len) = push_name(&mut tables.names, name.as_os_str().as_bytes());
+        let bytes = name.as_os_str().as_bytes();
+        let (name_off, name_len) = push_name(&mut tables.names, bytes);
         tables.files.push(FileOut {
             dir: root_slot,
             name_off,
             name_len,
+            name_bloom: bloom64(&name_haystack(bytes)),
         });
     }
     let limits = Limits {
@@ -331,6 +344,7 @@ fn merge(tables: &mut Tables, root_slot: u32, depth: u32, cap: usize, segs: Vec<
             mtime_ns: seg.mtime_ns,
             path_off,
             path_len,
+            path_bloom: bloom128(seg.lower.as_bytes()),
         });
         stack.push(slot);
         for file in seg.files {
@@ -342,6 +356,7 @@ fn merge(tables: &mut Tables, root_slot: u32, depth: u32, cap: usize, segs: Vec<
                 dir: slot,
                 name_off,
                 name_len,
+                name_bloom: bloom64(&name_haystack(&file)),
             });
         }
     }

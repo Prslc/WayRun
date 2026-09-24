@@ -6,7 +6,7 @@ use crate::provider::file::index::build::{
     Root, Tables, read_dir_entries, walk_into, walk_threads,
 };
 use crate::provider::file::index::format::{
-    DirOut, DirRec, FileOut, Index, push_dir_path, push_name,
+    DirOut, DirRec, FileOut, Index, bloom64, bloom128, name_haystack, push_dir_path, push_name,
 };
 use crate::provider::file::index::mtime_ns;
 use crate::provider::file::index::scan::{par_chunks, threads_for};
@@ -135,6 +135,7 @@ impl<'a> Patcher<'a> {
                 dir: new_slot,
                 name_off,
                 name_len,
+                name_bloom: bloom64(&name_haystack(rec.name)),
             });
         }
         let mut child = self.tree.first[slot as usize];
@@ -156,12 +157,13 @@ impl<'a> Patcher<'a> {
         let entries = read_dir_entries(&path, self.exclude)?;
         let new_slot = self.push_dir(rec, parent, mtime_ns)?;
         for name in &entries.files {
-            let (name_off, name_len) =
-                push_name(&mut self.tables.names, name.as_os_str().as_bytes());
+            let bytes = name.as_os_str().as_bytes();
+            let (name_off, name_len) = push_name(&mut self.tables.names, bytes);
             self.tables.files.push(FileOut {
                 dir: new_slot,
                 name_off,
                 name_len,
+                name_bloom: bloom64(&name_haystack(bytes)),
             });
         }
         let mut known = Vec::new();
@@ -210,6 +212,7 @@ impl<'a> Patcher<'a> {
             mtime_ns,
             path_off,
             path_len,
+            path_bloom: bloom128(rec.path_lower.as_bytes()),
         });
         Some(slot)
     }
@@ -259,24 +262,31 @@ mod tests {
     use crate::provider::file::index::test_support::{parsed, write};
     use std::path::Path;
 
-    /// The image's tables as text, in slot order: what a patch and a walk of
-    /// the same state must agree on. The blobs' byte order is each writer's own.
+    /// The image's tables as text, in slot order, blooms included: what a patch
+    /// and a walk of the same state must agree on. The blobs' byte order is each
+    /// writer's own.
     fn tables_of(bytes: &[u8], home: &Path) -> Vec<String> {
         let index = parsed(bytes, home);
         let dirs = (0..index.dir_count).map(|i| {
             let d = index.dir(i);
             format!(
-                "d {} {} {} {} {}",
+                "d {} {} {} {} {} {:032x}",
                 d.parent,
                 d.depth,
                 d.mtime_ns,
                 String::from_utf8_lossy(d.name),
-                d.path_lower
+                d.path_lower,
+                index.dir_bloom(i)
             )
         });
         let files = (0..index.file_count).map(|i| {
             let f = index.file(i);
-            format!("f {} {}", f.dir, String::from_utf8_lossy(f.name))
+            format!(
+                "f {} {} {:016x}",
+                f.dir,
+                String::from_utf8_lossy(f.name),
+                index.file_bloom(i)
+            )
         });
         dirs.chain(files).collect()
     }
@@ -336,6 +346,7 @@ mod tests {
                 mtime_ns: 0,
                 path_off,
                 path_len,
+                path_bloom: bloom128(name),
             });
         }
         let mut bytes = Vec::new();
@@ -350,6 +361,9 @@ mod tests {
         bytes.extend_from_slice(home);
         for dir in &dirs {
             bytes.extend_from_slice(&dir.bytes());
+        }
+        for dir in &dirs {
+            bytes.extend_from_slice(&dir.path_bloom.to_le_bytes());
         }
         bytes.extend_from_slice(&names);
         bytes.extend_from_slice(&paths);

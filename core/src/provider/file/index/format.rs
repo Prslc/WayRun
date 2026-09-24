@@ -1,10 +1,11 @@
+use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 /// The index cache's magic and format version; either mismatch rebuilds.
 pub(super) const MAGIC: [u8; 4] = *b"WRFI";
-pub(super) const FORMAT_VERSION: u32 = 3;
+pub(super) const FORMAT_VERSION: u32 = 4;
 /// The header before the tables, all little-endian: magic, version, dir_count,
 /// file_count, names_len, home_len, paths_len, exclude hash.
 pub(super) const HEADER: usize = 36;
@@ -31,6 +32,12 @@ pub(super) const F_DIR: usize = 0;
 pub(super) const F_NAME_OFF: usize = F_DIR + 4;
 pub(super) const F_NAME_LEN: usize = F_NAME_OFF + 4;
 
+/// A file row's bigram bloom: 64 bits, one section for the whole file table.
+pub(super) const FILE_BLOOM: usize = 8;
+/// A directory row's bigram bloom: 128 bits, because a stored path carries far
+/// more bigrams than a name and a 64-bit set would saturate.
+pub(super) const DIR_BLOOM: usize = 16;
+
 /// The index bytes as a parse view; nothing is copied. The directory table is
 /// DFS pre-order and the file table is sorted by `dir`, which queries rely on.
 #[derive(Clone, Copy)]
@@ -40,6 +47,8 @@ pub(super) struct Index<'a> {
     pub(super) home: &'a [u8],
     dirs: usize,
     files: usize,
+    file_blooms: usize,
+    dir_blooms: usize,
     names: usize,
     paths: usize,
     pub(super) dir_count: u32,
@@ -85,7 +94,9 @@ impl<'a> Index<'a> {
         }
         let dirs = home_end;
         let files = dirs.checked_add((dir_count as usize).checked_mul(DIR_REC)?)?;
-        let names = files.checked_add((file_count as usize).checked_mul(FILE_REC)?)?;
+        let file_blooms = files.checked_add((file_count as usize).checked_mul(FILE_REC)?)?;
+        let dir_blooms = file_blooms.checked_add((file_count as usize).checked_mul(FILE_BLOOM)?)?;
+        let names = dir_blooms.checked_add((dir_count as usize).checked_mul(DIR_BLOOM)?)?;
         let paths = names.checked_add(names_len as usize)?;
         if paths.checked_add(paths_len)? != bytes.len() {
             return None;
@@ -95,6 +106,8 @@ impl<'a> Index<'a> {
             home: home_bytes,
             dirs,
             files,
+            file_blooms,
+            dir_blooms,
             names,
             paths,
             dir_count,
@@ -142,6 +155,58 @@ impl<'a> Index<'a> {
         let start = self.paths.saturating_add(off as usize);
         let end = start.saturating_add(len as usize);
         std::str::from_utf8(self.bytes.get(start..end).unwrap_or_default()).unwrap_or_default()
+    }
+
+    /// A file row's bloom, zero for a corrupt slot (which then filters out, as
+    /// its empty name would not match anyway).
+    pub(super) fn file_bloom(&self, i: u32) -> u64 {
+        let bytes = self.rec(self.file_blooms, i, FILE_BLOOM);
+        bytes.try_into().map(u64::from_le_bytes).unwrap_or(0)
+    }
+
+    /// A directory row's bloom, zero for a corrupt slot.
+    pub(super) fn dir_bloom(&self, i: u32) -> u128 {
+        let bytes = self.rec(self.dir_blooms, i, DIR_BLOOM);
+        bytes.try_into().map(u128::from_le_bytes).unwrap_or(0)
+    }
+}
+
+/// A bigram's bit index, 7 bits wide; ASCII letters fold first, so `Re` and
+/// `re` land on one bit.
+fn bloom_bit(lo: u8, hi: u8) -> u32 {
+    (lo.to_ascii_lowercase() as u32 * 31 + hi.to_ascii_lowercase() as u32) & 0x7f
+}
+
+/// The bigram bloom of a haystack in 64 bits: every bigram's index folds to its
+/// low 6 bits, so [`fold128`] maps a 128-bit bloom into the same space.
+pub(super) fn bloom64(haystack: &[u8]) -> u64 {
+    haystack.windows(2).fold(0, |mask, pair| {
+        mask | 1u64 << (bloom_bit(pair[0], pair[1]) & 63)
+    })
+}
+
+/// The bigram bloom of a haystack in 128 bits: the query's bits can only all be
+/// present when it (or every path token) occurs in the haystack.
+pub(super) fn bloom128(haystack: &[u8]) -> u128 {
+    haystack
+        .windows(2)
+        .fold(0, |mask, pair| mask | 1u128 << bloom_bit(pair[0], pair[1]))
+}
+
+/// A 128-bit bloom folded into the 64-bit space: bit `k` means a bigram whose
+/// index is `k` or `k + 64` occurs, so one mask can test a file bloom and a
+/// path bloom together.
+pub(super) fn fold128(bloom: u128) -> u64 {
+    (bloom | bloom >> 64) as u64
+}
+
+/// The bytes the name match scans: an ASCII name as-is, else the lossy
+/// lowercase that turns a `KELVIN SIGN` into the `k` a query can carry.
+pub(super) fn name_haystack(name: &[u8]) -> Cow<'_, [u8]> {
+    if name.is_ascii() {
+        Cow::Borrowed(name)
+    } else {
+        Cow::Owned(String::from_utf8_lossy(name).to_lowercase().into_bytes())
     }
 }
 
@@ -197,6 +262,7 @@ pub(super) struct DirOut {
     pub(super) mtime_ns: i64,
     pub(super) path_off: u32,
     pub(super) path_len: u32,
+    pub(super) path_bloom: u128,
 }
 
 impl DirOut {
@@ -218,6 +284,7 @@ pub(super) struct FileOut {
     pub(super) dir: u32,
     pub(super) name_off: u32,
     pub(super) name_len: u32,
+    pub(super) name_bloom: u64,
 }
 
 impl FileOut {
@@ -285,7 +352,7 @@ mod tests {
     fn the_record_layouts_are_the_documented_bytes() {
         let head = header_bytes(1, 2, 3, 4, 5, 6);
         assert_eq!(head.len(), HEADER);
-        assert_eq!(&head[0..8], b"WRFI\x03\0\0\0");
+        assert_eq!(&head[0..8], b"WRFI\x04\0\0\0");
         assert_eq!(u32_at(&head, H_DIRS), 1);
         assert_eq!(u32_at(&head, H_FILES), 2);
         assert_eq!(u32_at(&head, H_NAMES), 3);
@@ -301,6 +368,7 @@ mod tests {
             mtime_ns: 5,
             path_off: 6,
             path_len: 7,
+            path_bloom: 0,
         };
         assert_eq!(
             dir.bytes(),
@@ -314,8 +382,32 @@ mod tests {
             dir: 1,
             name_off: 2,
             name_len: 3,
+            name_bloom: 0,
         };
         assert_eq!(file.bytes(), [1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0]);
+    }
+
+    /// The bloom a row stores and the mask a query builds share one hash, so a
+    /// haystack containing the query always carries all of the query's bits.
+    #[test]
+    fn a_query_inside_a_haystack_blooms_a_subset() {
+        for (name, query) in [
+            (&b"XReport.TXT"[..], "report"),
+            (&b"annual Report.pdf"[..], "report"),
+            (&b"my report file.txt"[..], "report file"),
+            // KELVIN SIGN folds to `k` only in the lowercased haystack
+            (&b"\xe2\x84\xaaElvin.txt"[..], "kelvin"),
+            (&b"MiXeD/CaSe.txt"[..], "mixed/case"),
+            (&b"single"[..], "e"),
+        ] {
+            let haystack = name_haystack(name);
+            let file = bloom64(&haystack);
+            let path = bloom128(&haystack);
+            let bits = bloom64(query.as_bytes());
+            assert_eq!(file & bits, bits, "{name:?} / {query}");
+            let bits = bloom128(query.as_bytes());
+            assert_eq!(path & bits, bits, "{name:?} / {query}");
+        }
     }
 
     #[test]

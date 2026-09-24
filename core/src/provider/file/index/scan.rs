@@ -5,7 +5,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
 use crate::plugin::{Match, classify_bytes_confident, classify_ci_confident};
-use crate::provider::file::index::format::{Index, push_dir_path};
+use crate::provider::file::index::format::{Index, bloom64, bloom128, fold128, push_dir_path};
 use crate::provider::file::{entry_item, score_path, score_split_path};
 use crate::provider::{SHOW_CAP, push_lowered};
 use crate::wire::ResultItem;
@@ -118,6 +118,23 @@ fn scan_top<S>(
     }))
 }
 
+/// The bits a path-mode row's bloom must carry: every token's bigrams, OR'd in
+/// both widths. A token with `/` can match across the dir/name join, where no
+/// row stores the boundary bigrams, so it filters nothing.
+fn path_masks(query_lower: &str) -> (u64, u128) {
+    let mut mask64 = 0;
+    let mut mask128 = 0;
+    for token in query_lower.split_whitespace() {
+        if token.contains('/') {
+            continue;
+        }
+        let bytes = token.as_bytes();
+        mask64 |= bloom64(bytes);
+        mask128 |= bloom128(bytes);
+    }
+    (mask64, mask128)
+}
+
 /// Answer one query on an already-built index. `name_only` matches the name
 /// alone (`f` with a plain query); otherwise the whole path is matched.
 pub(super) fn search_in(
@@ -136,11 +153,21 @@ pub(super) fn search_in(
         kind.map_or(0, Match::weight)
     };
 
+    // The bloom pre-filter: a row passes when its haystack can carry every bigram
+    // the query (or each path token) has, which any real match can.
+    let name_mask = bloom64(query_bytes);
+    let (token_mask64, token_mask128) = path_masks(query_lower);
+
     let candidates = if want_dir && name_only {
         scan_top(
             index.dir_count,
             || (),
             |_, i, top| {
+                // the stored path ends with the dir's own name, so its bloom
+                // carries every bigram the name can carry
+                if fold128(index.dir_bloom(i)) & name_mask != name_mask {
+                    return;
+                }
                 let rec = index.dir(i);
                 top.offer(tier(rec.name).saturating_sub(rec.depth), i);
             },
@@ -150,6 +177,9 @@ pub(super) fn search_in(
             index.dir_count,
             || (),
             |_, i, top| {
+                if index.dir_bloom(i) & token_mask128 != token_mask128 {
+                    return;
+                }
                 let rec = index.dir(i);
                 let score = score_path(
                     &String::from_utf8_lossy(rec.name),
@@ -165,6 +195,9 @@ pub(super) fn search_in(
             index.file_count,
             || (),
             |_, i, top| {
+                if index.file_bloom(i) & name_mask != name_mask {
+                    return;
+                }
                 let rec = index.file(i);
                 // a zero score is dropped, so only a hit pays for the depth lookup
                 let score = tier(rec.name);
@@ -176,6 +209,10 @@ pub(super) fn search_in(
     } else {
         scan_top(index.file_count, String::new, |name_lower, i, top| {
             let rec = index.file(i);
+            let halves = index.file_bloom(i) | fold128(index.dir_bloom(rec.dir));
+            if halves & token_mask64 != token_mask64 {
+                return;
+            }
             let dir = index.dir(rec.dir);
             let name = String::from_utf8_lossy(rec.name);
             name_lower.clear();
@@ -342,6 +379,52 @@ mod tests {
         let index = parsed(&bytes, home);
 
         assert_eq!(search_in(&index, "k", false, true).len(), 1);
+    }
+
+    /// The bloom pre-filter only ever rejects rows no matcher could score: the
+    /// non-ASCII haystack, a word-start hit, a spaced name query and a token
+    /// landing on either half of a path all survive it.
+    #[test]
+    fn the_bloom_filter_keeps_every_kind_of_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        write(&home.join("\u{212A}elvin.txt"));
+        write(&home.join("annual Report.pdf"));
+        write(&home.join("My File.txt"));
+        write(&home.join("single"));
+        write(&home.join("proj/downloads/notes.txt"));
+
+        let bytes = build_ok(home, MAX_ENTRIES);
+        let index = parsed(&bytes, home);
+
+        for query in [
+            "kelvin",
+            "k",
+            "report",
+            "annual report",
+            "my file",
+            "single",
+        ] {
+            assert_eq!(search_in(&index, query, false, true).len(), 1, "{query}");
+        }
+        assert_eq!(
+            search_in(&index, "proj", true, false).len(),
+            2,
+            "a dir token reaches the dir and its child"
+        );
+        assert_eq!(
+            search_in(&index, "downloads", false, false).len(),
+            1,
+            "a parent token"
+        );
+        assert_eq!(
+            search_in(&index, "notes.txt", false, false).len(),
+            1,
+            "the name half"
+        );
+        // `downloads/notes` matches across the dir/name join, where no bloom
+        // stores the boundary bigrams: the slashed token must filter nothing
+        assert_eq!(search_in(&index, "downloads/notes", false, false).len(), 1);
     }
 
     #[test]
