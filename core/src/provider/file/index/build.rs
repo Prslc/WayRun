@@ -1,4 +1,5 @@
 use std::ffi::{OsStr, OsString};
+use std::io::{self, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -31,45 +32,63 @@ impl Tables {
         }
     }
 
-    /// The image bytes: header, home, both tables and their blooms, then the
-    /// blobs. The one place an image is written, so the walk and the update
-    /// cannot drift apart.
-    pub(super) fn assemble(mut self, home: &Path, exclude: &[String]) -> Vec<u8> {
+    /// The image's length for the tables as they stand.
+    fn len(&self, home: &Path) -> usize {
+        HEADER
+            + home.as_os_str().as_bytes().len()
+            + self.dirs.len() * DIR_REC
+            + self.files.len() * FILE_REC
+            + self.files.len() * FILE_BLOOM
+            + self.dirs.len() * DIR_BLOOM
+            + self.names.len()
+            + self.paths.len()
+    }
+
+    /// Write the image through `out`: header, home, both tables and their
+    /// blooms, then the blobs; `(dir_count, file_count, length)`. The one place
+    /// an image is written, so the walk and the update cannot drift apart; a
+    /// caller with a file streams it, `assemble` collects it.
+    pub(super) fn write_into(
+        mut self,
+        home: &Path,
+        exclude: &[String],
+        out: &mut impl Write,
+    ) -> io::Result<(u32, u32, usize)> {
         self.files.sort_by_key(|rec| rec.dir);
         let home_bytes = home.as_os_str().as_bytes();
-        let mut out = Vec::with_capacity(
-            HEADER
-                + home_bytes.len()
-                + self.dirs.len() * DIR_REC
-                + self.files.len() * FILE_REC
-                + self.files.len() * FILE_BLOOM
-                + self.dirs.len() * DIR_BLOOM
-                + self.names.len()
-                + self.paths.len(),
-        );
-        out.extend_from_slice(&header_bytes(
+        let len = self.len(home);
+        out.write_all(&header_bytes(
             self.dirs.len() as u32,
             self.files.len() as u32,
             self.names.len() as u32,
             home_bytes.len() as u32,
             self.paths.len() as u32,
             exclude_hash(exclude),
-        ));
-        out.extend_from_slice(home_bytes);
+        ))?;
+        out.write_all(home_bytes)?;
         for d in &self.dirs {
-            out.extend_from_slice(&d.bytes());
+            out.write_all(&d.bytes())?;
         }
         for f in &self.files {
-            out.extend_from_slice(&f.bytes());
+            out.write_all(&f.bytes())?;
         }
         for f in &self.files {
-            out.extend_from_slice(&f.name_bloom.to_le_bytes());
+            out.write_all(&f.name_bloom)?;
         }
         for d in &self.dirs {
-            out.extend_from_slice(&d.path_bloom.to_le_bytes());
+            out.write_all(&d.path_bloom)?;
         }
-        out.extend_from_slice(&self.names);
-        out.extend_from_slice(&self.paths);
+        out.write_all(&self.names)?;
+        out.write_all(&self.paths)?;
+        Ok((self.dirs.len() as u32, self.files.len() as u32, len))
+    }
+
+    /// The whole image as bytes, for tests: `refresh` streams through a file.
+    #[cfg(test)]
+    pub(super) fn assemble(self, home: &Path, exclude: &[String]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(self.len(home));
+        self.write_into(home, exclude, &mut out)
+            .expect("a Vec never fails to write");
         out
     }
 }
@@ -121,7 +140,9 @@ struct Seg {
     mtime_ns: i64,
     name: Vec<u8>,
     lower: String,
-    files: Vec<Vec<u8>>,
+    /// The file names, each a u32 length and its bytes, so a directory's files
+    /// cost one allocation instead of one per name.
+    files: Vec<u8>,
 }
 
 /// The walk's limits: the entries produced so far, and whether a directory's
@@ -193,7 +214,7 @@ pub(super) fn walk_into(
         mtime_ns: mtime_ns(root)?,
         path_off,
         path_len,
-        path_bloom: bloom128(root_lower.as_bytes()),
+        path_bloom: bloom128(root_lower.as_bytes()).to_le_bytes(),
     });
     let root_slot = tables.dirs.len() as u32 - 1;
 
@@ -205,7 +226,7 @@ pub(super) fn walk_into(
             dir: root_slot,
             name_off,
             name_len,
-            name_bloom: bloom64(&name_haystack(bytes)),
+            name_bloom: bloom64(&name_haystack(bytes)).to_le_bytes(),
         });
     }
     let limits = Limits {
@@ -312,11 +333,18 @@ fn read_task(task: Task, exclude: &[String], limits: &Limits) -> (Option<Seg>, V
                 seg.depth,
             ));
         }
-        seg.files = entries
+        let size: usize = entries
             .files
             .iter()
-            .map(|name| name.as_os_str().as_bytes().to_vec())
-            .collect();
+            .map(|name| name.as_os_str().as_bytes().len() + 4)
+            .sum();
+        seg.files = Vec::with_capacity(size);
+        for name in &entries.files {
+            let bytes = name.as_os_str().as_bytes();
+            seg.files
+                .extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+            seg.files.extend_from_slice(bytes);
+        }
     }
     (Some(seg), children)
 }
@@ -344,27 +372,38 @@ fn merge(tables: &mut Tables, root_slot: u32, depth: u32, cap: usize, segs: Vec<
             mtime_ns: seg.mtime_ns,
             path_off,
             path_len,
-            path_bloom: bloom128(seg.lower.as_bytes()),
+            path_bloom: bloom128(seg.lower.as_bytes()).to_le_bytes(),
         });
         stack.push(slot);
-        for file in seg.files {
+        let mut at = 0;
+        while let Some((name, next)) = split_files(&seg.files, at) {
+            at = next;
             if tables.dirs.len() + tables.files.len() >= cap {
                 return;
             }
-            let (name_off, name_len) = push_name(&mut tables.names, &file);
+            let (name_off, name_len) = push_name(&mut tables.names, name);
             tables.files.push(FileOut {
                 dir: slot,
                 name_off,
                 name_len,
-                name_bloom: bloom64(&name_haystack(&file)),
+                name_bloom: bloom64(&name_haystack(name)).to_le_bytes(),
             });
         }
     }
 }
 
-/// Walk `home` into the index image; `cap` bounds dirs and files together, and
+/// One segment's length-prefixed file names: the name at `at` and where the
+/// next one starts.
+fn split_files(buf: &[u8], at: usize) -> Option<(&[u8], usize)> {
+    let len_end = at.checked_add(4)?;
+    let len = u32::from_le_bytes(buf.get(at..len_end)?.try_into().ok()?) as usize;
+    let end = len_end.checked_add(len)?;
+    Some((buf.get(len_end..end)?, end))
+}
+
+/// Walk `home` into the index tables; `cap` bounds dirs and files together, and
 /// `exclude` holds the names the walk never enters; `None` if it must not persist.
-pub(super) fn build(home: &Path, cap: usize, exclude: &[String]) -> Option<Vec<u8>> {
+pub(super) fn build(home: &Path, cap: usize, exclude: &[String]) -> Option<Tables> {
     let mut root_lower = String::new();
     // lossy only for the haystack: a UTF-8 query can never carry replaced bytes
     push_lowered(
@@ -384,7 +423,7 @@ pub(super) fn build(home: &Path, cap: usize, exclude: &[String]) -> Option<Vec<u
         exclude,
         walk_threads(),
     )?;
-    Some(tables.assemble(home, exclude))
+    Some(tables)
 }
 
 #[cfg(test)]
@@ -497,7 +536,9 @@ mod tests {
         write(&home.join("node_modules/pruned.txt"));
 
         let custom = ["vendor".to_string()];
-        let bytes = build(home, MAX_ENTRIES, &custom).unwrap();
+        let bytes = build(home, MAX_ENTRIES, &custom)
+            .unwrap()
+            .assemble(home, &custom);
         let index = parsed(&bytes, home);
 
         assert!(search_in(&index, "kept.txt", false, true).is_empty());

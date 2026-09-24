@@ -262,7 +262,7 @@ pub(super) struct DirOut {
     pub(super) mtime_ns: i64,
     pub(super) path_off: u32,
     pub(super) path_len: u32,
-    pub(super) path_bloom: u128,
+    pub(super) path_bloom: [u8; DIR_BLOOM],
 }
 
 impl DirOut {
@@ -284,7 +284,7 @@ pub(super) struct FileOut {
     pub(super) dir: u32,
     pub(super) name_off: u32,
     pub(super) name_len: u32,
-    pub(super) name_bloom: u64,
+    pub(super) name_bloom: [u8; FILE_BLOOM],
 }
 
 impl FileOut {
@@ -368,7 +368,7 @@ mod tests {
             mtime_ns: 5,
             path_off: 6,
             path_len: 7,
-            path_bloom: 0,
+            path_bloom: [0; DIR_BLOOM],
         };
         assert_eq!(
             dir.bytes(),
@@ -382,7 +382,7 @@ mod tests {
             dir: 1,
             name_off: 2,
             name_len: 3,
-            name_bloom: 0,
+            name_bloom: [0; FILE_BLOOM],
         };
         assert_eq!(file.bytes(), [1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0]);
     }

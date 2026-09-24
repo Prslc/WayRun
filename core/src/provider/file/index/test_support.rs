@@ -28,7 +28,10 @@ pub(super) fn shipped_exclude() -> Vec<String> {
 
 /// A stock install's behaviour: the shipped `[files] exclude` list.
 pub(super) fn build_ok(home: &Path, cap: usize) -> Vec<u8> {
-    build(home, cap, &shipped_exclude()).expect("a readable home builds")
+    let exclude = shipped_exclude();
+    build(home, cap, &exclude)
+        .expect("a readable home builds")
+        .assemble(home, &exclude)
 }
 
 pub(super) fn summaries(items: &[ResultItem]) -> Vec<String> {

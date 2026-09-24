@@ -41,8 +41,19 @@ pub fn tmp_path(path: &Path) -> PathBuf {
 
 /// Write `<path>.tmp`, then rename: a reader only ever sees a whole file.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    write_atomic_with(path, |file| file.write_all(bytes))
+}
+
+/// [`write_atomic`] for a body a closure writes, so a caller holding large
+/// pieces streams them instead of assembling the bytes first.
+pub fn write_atomic_with(
+    path: &Path,
+    write: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
+) -> std::io::Result<()> {
     let tmp = tmp_path(path);
-    std::fs::write(&tmp, bytes)?;
+    let mut file = std::fs::File::create(&tmp)?;
+    write(&mut file)?;
+    drop(file);
     std::fs::rename(&tmp, path)
 }
 

@@ -135,7 +135,7 @@ impl<'a> Patcher<'a> {
                 dir: new_slot,
                 name_off,
                 name_len,
-                name_bloom: bloom64(&name_haystack(rec.name)),
+                name_bloom: bloom64(&name_haystack(rec.name)).to_le_bytes(),
             });
         }
         let mut child = self.tree.first[slot as usize];
@@ -163,7 +163,7 @@ impl<'a> Patcher<'a> {
                 dir: new_slot,
                 name_off,
                 name_len,
-                name_bloom: bloom64(&name_haystack(bytes)),
+                name_bloom: bloom64(&name_haystack(bytes)).to_le_bytes(),
             });
         }
         let mut known = Vec::new();
@@ -212,7 +212,7 @@ impl<'a> Patcher<'a> {
             mtime_ns,
             path_off,
             path_len,
-            path_bloom: bloom128(rec.path_lower.as_bytes()),
+            path_bloom: bloom128(rec.path_lower.as_bytes()).to_le_bytes(),
         });
         Some(slot)
     }
@@ -300,7 +300,7 @@ mod tests {
         write(&home.join("keep/a.txt"));
         write(&home.join("keep/sub/b.txt"));
         write(&home.join("other/c.txt"));
-        let before = build(home, MAX_ENTRIES, &[]).unwrap();
+        let before = build(home, MAX_ENTRIES, &[]).unwrap().assemble(home, &[]);
 
         // one of each kind the patch has to splice
         write(&home.join("keep/new.txt"));
@@ -315,7 +315,10 @@ mod tests {
         let tables = patch(&index, &changed, &[], MAX_ENTRIES).expect("the images splice");
         assert_eq!(
             tables_of(&tables.assemble(home, &[]), home),
-            tables_of(&build(home, MAX_ENTRIES, &[]).unwrap(), home),
+            tables_of(
+                &build(home, MAX_ENTRIES, &[]).unwrap().assemble(home, &[]),
+                home
+            ),
             "the patch matches a full walk"
         );
     }
@@ -346,7 +349,7 @@ mod tests {
                 mtime_ns: 0,
                 path_off,
                 path_len,
-                path_bloom: bloom128(name),
+                path_bloom: bloom128(name).to_le_bytes(),
             });
         }
         let mut bytes = Vec::new();
@@ -363,7 +366,7 @@ mod tests {
             bytes.extend_from_slice(&dir.bytes());
         }
         for dir in &dirs {
-            bytes.extend_from_slice(&dir.path_bloom.to_le_bytes());
+            bytes.extend_from_slice(&dir.path_bloom);
         }
         bytes.extend_from_slice(&names);
         bytes.extend_from_slice(&paths);
@@ -381,7 +384,7 @@ mod tests {
         let home = dir.path();
         write(&home.join("a/keep.txt"));
 
-        let bytes = build(home, MAX_ENTRIES, &[]).unwrap();
+        let bytes = build(home, MAX_ENTRIES, &[]).unwrap().assemble(home, &[]);
         let index = parsed(&bytes, home);
         assert!(changed_dirs(&index).is_empty());
 

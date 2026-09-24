@@ -5,6 +5,7 @@ mod scan;
 mod test_support;
 mod update;
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
@@ -313,14 +314,14 @@ fn refresh(home: &Path) {
     };
 
     let started = Instant::now();
-    let (bytes, patched) = match patched {
-        Some(tables) => (tables.assemble(home, &exclude), true),
+    let (tables, patched) = match patched {
+        Some(tables) => (tables, true),
         None => {
-            let Some(bytes) = build(home, MAX_ENTRIES, &exclude) else {
+            let Some(tables) = build(home, MAX_ENTRIES, &exclude) else {
                 eprintln!("wayrun: file index build skipped: the walk did not finish");
                 return;
             };
-            (bytes, false)
+            (tables, false)
         }
     };
     if !crate::config::get().files.index {
@@ -331,7 +332,15 @@ fn refresh(home: &Path) {
     };
     // a cache file, or its `.tmp`, may exist from here on
     lock().clean = false;
-    if let Err(err) = crate::system::fs::write_atomic(&path, &bytes) {
+    // the image streams to the file: materialising 30+ MB to hand to one
+    // `write_all` would hold both copies at the peak
+    let mut shape = (0u32, 0u32, 0usize);
+    let write = crate::system::fs::write_atomic_with(&path, |file| {
+        let mut buf = std::io::BufWriter::new(file);
+        shape = tables.write_into(home, &exclude, &mut buf)?;
+        buf.flush()
+    });
+    if let Err(err) = write {
         eprintln!("wayrun: file index write failed: {err}");
         return;
     }
@@ -341,8 +350,7 @@ fn refresh(home: &Path) {
         store(map);
     }
 
-    let dir_count = u32_at(&bytes, 8);
-    let file_count = u32_at(&bytes, 12);
+    let (dir_count, file_count, len) = shape;
     let capped = dir_count as usize + file_count as usize >= MAX_ENTRIES;
     let tag = if patched {
         " (patched)"
@@ -353,7 +361,7 @@ fn refresh(home: &Path) {
     };
     eprintln!(
         "wayrun: file index {dir_count} dirs, {file_count} files, {}MB, {:.1}s{tag}",
-        bytes.len() / 1_000_000,
+        len / 1_000_000,
         started.elapsed().as_secs_f64(),
     );
 }
