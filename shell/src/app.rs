@@ -437,6 +437,9 @@ impl State {
         // The surface is gone, so nothing is composing on it any more.
         self.preedit = None;
         self.preedit_active = false;
+        // With a long history the payload is megabytes, and the rest of a
+        // dismissal already frees what a hidden launcher holds.
+        self.rows = Vec::new();
     }
 
     /// Keep the selection inside the `max_rows` window, minimally.
