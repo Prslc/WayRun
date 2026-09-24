@@ -4,8 +4,8 @@ const VARS: [&str; 4] = ["LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"];
 /// Point the process at the UI locale (`ui.locale`, else the session's), process-
 /// global so every crate's chrome and row text agree; a change needs a restart.
 pub fn init() {
-    let configured = crate::config::get().ui.locale;
-    rust_i18n::set_locale(&resolve(&configured, |key| std::env::var(key).ok()));
+    let config = crate::config::get();
+    rust_i18n::set_locale(&resolve(&config.ui.locale, |key| std::env::var(key).ok()));
 }
 
 /// The configured locale when it names one, else the session's.

@@ -424,8 +424,8 @@ fn configured_theme() -> Option<String> {
     if !crate::config::path()?.is_file() {
         return None;
     }
-    let theme = crate::config::get().icon.theme;
-    let theme = theme.trim();
+    let config = crate::config::get();
+    let theme = config.icon.theme.trim();
     (!theme.is_empty()).then(|| theme.to_string())
 }
 

@@ -265,8 +265,8 @@ fn remap(home: &Path) {
     }
     let _guard = BuildGuard;
 
-    let exclude = crate::config::get().files.exclude;
-    if let Some((map, _)) = load_swept(home, &exclude, false) {
+    let config = crate::config::get();
+    if let Some((map, _)) = load_swept(home, &config.files.exclude, false) {
         store_loaded(map);
     }
 }
@@ -279,8 +279,9 @@ fn validate(home: &Path) -> bool {
     }
     let _guard = BuildGuard;
 
-    let exclude = crate::config::get().files.exclude;
-    match load_swept(home, &exclude, true) {
+    let config = crate::config::get();
+    let exclude = &config.files.exclude;
+    match load_swept(home, exclude, true) {
         // moved listings need the patch, which belongs off this search's path
         Some((_, moved)) if !moved.is_empty() => false,
         Some((map, _)) => {
@@ -298,16 +299,17 @@ fn refresh(home: &Path) {
         return;
     }
     let _guard = BuildGuard;
-    let exclude = crate::config::get().files.exclude;
+    let config = crate::config::get();
+    let exclude = &config.files.exclude;
 
-    let patched = match load_swept(home, &exclude, true) {
+    let patched = match load_swept(home, exclude, true) {
         Some((map, moved)) if moved.is_empty() => {
             store_loaded(map);
             return;
         }
         Some((map, moved)) => Index::parse(&map[..], home).and_then(|index| {
             worth_patching(&index, &moved)
-                .then(|| patch(&index, &moved, &exclude, MAX_ENTRIES))
+                .then(|| patch(&index, &moved, exclude, MAX_ENTRIES))
                 .flatten()
         }),
         None => None,
@@ -317,7 +319,7 @@ fn refresh(home: &Path) {
     let (tables, patched) = match patched {
         Some(tables) => (tables, true),
         None => {
-            let Some(tables) = build(home, MAX_ENTRIES, &exclude) else {
+            let Some(tables) = build(home, MAX_ENTRIES, exclude) else {
                 eprintln!("wayrun: file index build skipped: the walk did not finish");
                 return;
             };
@@ -337,7 +339,7 @@ fn refresh(home: &Path) {
     let mut shape = (0u32, 0u32, 0usize);
     let write = crate::system::fs::write_atomic_with(&path, |file| {
         let mut buf = std::io::BufWriter::new(file);
-        shape = tables.write_into(home, &exclude, &mut buf)?;
+        shape = tables.write_into(home, exclude, &mut buf)?;
         buf.flush()
     });
     if let Err(err) = write {
@@ -346,7 +348,7 @@ fn refresh(home: &Path) {
     }
     // the map only reaches the queries if the image it came from can be
     // walked: the load gate is the one gate for that
-    if let Some((map, _)) = load_swept(home, &exclude, false) {
+    if let Some((map, _)) = load_swept(home, exclude, false) {
         store(map);
     }
 
