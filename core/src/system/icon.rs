@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use gio::prelude::Cast;
 
@@ -175,12 +175,9 @@ fn builtin_icon(name: &str) -> Option<String> {
 }
 
 pub fn warn_if_no_icon_theme() {
-    let roots = xdg::icon_theme_dirs();
-    let found = theme_chain(&roots).iter().any(|theme| {
-        roots
-            .iter()
-            .any(|root| root.join(theme).join("index.theme").is_file())
-    });
+    let found = chain_for(&start_theme())
+        .iter()
+        .any(|(_, index)| index.is_some());
     if !found {
         eprintln!("wayrun: no icon theme found; row and action icons use the built-in placeholder");
     }
@@ -411,11 +408,50 @@ fn theme_chain_from(start: &str, roots: &[PathBuf]) -> Vec<String> {
     chain
 }
 
-fn theme_chain(roots: &[PathBuf]) -> Vec<String> {
-    let start = configured_theme()
+/// The theme lookup order with the `index.theme` each directory resolved to, so
+/// walking it reads and parses nothing again.
+type Chain = Vec<(PathBuf, Option<ThemeIndex>)>;
+
+/// Chains by start theme. The parsed indexes are held for the process the way
+/// `resolve`'s cache is: the theme is fixed, and a `config.toml` or settings edit
+/// lands under a new key.
+static CHAINS: OnceLock<Mutex<HashMap<String, Arc<Chain>>>> = OnceLock::new();
+
+fn chain_for(start: &str) -> Arc<Chain> {
+    let chains = CHAINS.get_or_init(|| Mutex::new(HashMap::default()));
+    let mut chains = chains.lock().unwrap_or_else(|err| err.into_inner());
+    if let Some(chain) = chains.get(start) {
+        return Arc::clone(chain);
+    }
+
+    let roots = xdg::icon_theme_dirs();
+    let built: Chain = theme_chain_from(start, &roots)
+        .into_iter()
+        .flat_map(|theme| {
+            // a theme is spread across roots; a root without it has nothing to say
+            roots.iter().filter_map(move |root| {
+                let dir = root.join(&theme);
+                dir.is_dir().then(|| {
+                    let index = std::fs::read_to_string(dir.join("index.theme"))
+                        .ok()
+                        .map(|text| parse_index(&text));
+                    (dir, index)
+                })
+            })
+        })
+        .collect();
+
+    let chain = Arc::new(built);
+    chains.insert(start.to_string(), Arc::clone(&chain));
+    chain
+}
+
+/// The theme a lookup starts from: the config's, else the desktop's, else the
+/// spec's fallback.
+fn start_theme() -> String {
+    configured_theme()
         .or_else(xdg::settings_icon_theme)
-        .unwrap_or_else(|| "hicolor".to_string());
-    theme_chain_from(&start, roots)
+        .unwrap_or_else(|| "hicolor".to_string())
 }
 
 /// The `[icon] theme` override, read without creating `config.toml` so an icon
@@ -429,26 +465,16 @@ fn configured_theme() -> Option<String> {
     (!theme.is_empty()).then(|| theme.to_string())
 }
 
-/// A theme name resolved through the theme chain; the first hit wins. A theme is
+/// A theme name resolved through the cached chain; the first hit wins. A theme is
 /// spread across roots, so all of them are searched before the next theme.
 fn find_theme_icon(name: &str) -> Option<String> {
-    let roots = xdg::icon_theme_dirs();
-    for theme in theme_chain(&roots) {
-        for root in &roots {
-            let dir = root.join(&theme);
-            if !dir.is_dir() {
-                continue;
-            }
-            let index = std::fs::read_to_string(dir.join("index.theme"))
-                .ok()
-                .map(|text| parse_index(&text));
-            let hit = match &index {
-                Some(index) if !index.dirs.is_empty() => find_in_theme(&dir, index, name),
-                _ => scan_theme(&dir, name),
-            };
-            if hit.is_some() {
-                return hit;
-            }
+    for (dir, index) in chain_for(&start_theme()).iter() {
+        let hit = match index {
+            Some(index) if !index.dirs.is_empty() => find_in_theme(dir, index, name),
+            _ => scan_theme(dir, name),
+        };
+        if hit.is_some() {
+            return hit;
         }
     }
     None
