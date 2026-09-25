@@ -1,3 +1,4 @@
+mod actions;
 mod ime;
 mod input;
 mod scale;
