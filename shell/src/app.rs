@@ -646,7 +646,7 @@ impl State {
 
     /// Rows that move under a stationary pointer are different rows and fire no
     /// enter/exit, so re-derive the hover; `Hover::Clear` is left alone.
-    fn resync_hover(&mut self) {
+    pub fn resync_hover(&mut self) {
         let hit = self.pointer.and_then(|(x, y)| {
             if let Some(menu) = &self.menu {
                 self.appearance

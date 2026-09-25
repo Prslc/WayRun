@@ -200,7 +200,7 @@ impl Shell {
             return;
         };
 
-        self.record_row_for(&launch.effective);
+        self.record_row_for(&launch, &launch.effective);
 
         // Enter runs the remembered default action when the row has one, but
         // usage above stays keyed to the row's own command.
@@ -209,20 +209,17 @@ impl Shell {
         self.schedule_dismiss(now);
     }
 
-    /// Record the selected row in usage history, unless the command about to run
-    /// is a clipboard write: a copy is no re-launchable target and stays out of history.
-    fn record_row_for(&self, command: &Action) {
-        if matches!(command, Action::Copy { .. }) {
+    /// Record a row in usage history, unless the command about to run is a
+    /// clipboard write: a copy is no re-launchable target and stays out of history.
+    fn record_row_for(&self, launch: &app::Launch, runs: &Action) {
+        if matches!(runs, Action::Copy { .. }) {
             return;
         }
-        let Some(launch) = self.app.selected_row() else {
-            return;
-        };
         let usage = serde_json::json!({
             "title": launch.title,
-            "summary": launch.summary.unwrap_or_default(),
+            "summary": launch.summary,
             "on_click": launch.target,
-            "icon": launch.icon.unwrap_or_default(),
+            "icon": launch.icon,
             "ephemeral": launch.ephemeral,
         });
         backend::select(&usage);
@@ -250,6 +247,7 @@ impl Shell {
         }
         if self.app.open_actions() {
             self.app.retarget_height(now);
+            self.app.resync_hover();
             // The panel is taller than the row list was: the band below the
             // current card edge belongs to the backdrop during the reflow.
             self.needs_full = true;
@@ -262,6 +260,7 @@ impl Shell {
         self.app.cancel_panel_resume();
         if self.app.menu.take().is_some() {
             self.app.retarget_height(now);
+            self.app.resync_hover();
             self.needs_full = true;
             self.redraw();
         }
@@ -292,7 +291,9 @@ impl Shell {
     fn execute_action(&mut self, action: &ActionItem, now: Instant) {
         match &action.action {
             PanelAction::Execute { command } => {
-                self.record_row_for(command);
+                if let Some(launch) = self.app.selected_row() {
+                    self.record_row_for(&launch, command);
+                }
                 backend::command(command);
                 self.schedule_dismiss(now);
             }
