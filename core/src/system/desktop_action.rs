@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
-use freedesktop_desktop_entry::{DesktopEntry, get_languages_from_env};
+use freedesktop_desktop_entry::DesktopEntry;
 
 use crate::system::xdg;
 
@@ -29,6 +29,107 @@ pub fn find(id: &str) -> Option<PathBuf> {
 pub fn entry(id: &str, locales: Option<&[String]>) -> Option<DesktopEntry> {
     let path = find(id)?;
     DesktopEntry::from_path(&path, locales).ok()
+}
+
+/// The locale list every `.desktop` read localises through, from
+/// `g_get_language_names()`; `.encoding` variants are dropped so `zh_CN` matches.
+/// One list for the whole core, so a row and the `%c` it launches with agree.
+pub fn locales() -> Vec<String> {
+    locales_from(gio::glib::language_names().into_iter().map(Into::into))
+}
+
+fn locales_from(names: impl IntoIterator<Item = String>) -> Vec<String> {
+    names
+        .into_iter()
+        .filter(|name| !name.contains('.'))
+        .collect()
+}
+
+/// What a `.desktop` file says beyond what gio's `AppInfo` exposes, read in the
+/// one pass that also keeps every reader on the same file.
+pub struct Details {
+    /// `GenericName=`, localised and trimmed; an empty one is dropped.
+    pub generic: Option<String>,
+    /// `Keywords=`, localised, trimmed, empties dropped.
+    pub keywords: Vec<String>,
+    /// `[Desktop Action …]` groups as `(id, localised name)`.
+    pub actions: Vec<(String, String)>,
+    /// The program the entry's `Exec=` runs, for the runner's PATH attribution.
+    pub exec: Option<String>,
+    /// `Terminal=`.
+    pub terminal: bool,
+}
+
+/// Read `id`'s `.desktop` file and interpret what the launcher needs from it.
+pub fn details(id: &str, locales: &[String]) -> Option<Details> {
+    Some(details_of(&entry(id, Some(locales))?, locales))
+}
+
+fn details_of(entry: &DesktopEntry, locales: &[String]) -> Details {
+    let generic = entry
+        .generic_name(locales)
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty());
+
+    let keywords = entry
+        .keywords(locales)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|word| word.trim().to_string())
+        .filter(|word| !word.is_empty())
+        .collect();
+
+    let actions = entry
+        .actions()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|id| {
+            let name = entry.action_name(id, locales)?.trim().to_string();
+            (!name.is_empty()).then(|| (id.to_string(), name))
+        })
+        .collect();
+
+    Details {
+        generic,
+        keywords,
+        actions,
+        exec: exec_basename(entry),
+        terminal: entry.terminal(),
+    }
+}
+/// Basename of the program a desktop entry's `Exec=` runs, for the runner's PATH hits.
+fn exec_basename(entry: &DesktopEntry) -> Option<String> {
+    let argv: Vec<String> = gio::glib::shell_parse_argv(entry.exec()?)
+        .ok()?
+        .iter()
+        .map(|word| word.to_string_lossy().into_owned())
+        .collect();
+    exec_program(&argv)
+}
+
+/// The program a desktop `Exec=` runs, from its parsed argv: `env` is unwrapped
+/// to the real program; a shell, sandbox or interpreter wrapper maps to nothing.
+fn exec_program(argv: &[String]) -> Option<String> {
+    let mut words = argv.iter();
+    let first = program_name(words.next()?)?;
+    let program = if first == "env" {
+        let found = words.find(|word| !word.starts_with('-') && !word.contains('='))?;
+        program_name(found)
+    } else {
+        Some(first)
+    }?;
+    const WRAPPERS: [&str; 8] = [
+        "sh", "bash", "dash", "zsh", "flatpak", "snap", "python", "python3",
+    ];
+    (!WRAPPERS.contains(&program.as_str())).then_some(program)
+}
+
+/// The basename of a program word, e.g. `/usr/bin/foo` or `foo` -> `foo`.
+fn program_name(word: &str) -> Option<String> {
+    Path::new(word)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_owned)
 }
 
 /// The icon of the app a Wayland `app_id` names: the id's `.desktop` file wins
@@ -103,7 +204,7 @@ fn expand(exec: &str, entry: &DesktopEntry, action_id: &str, path: &Path) -> Vec
     let Ok(parsed) = gio::glib::shell_parse_argv(exec) else {
         return Vec::new();
     };
-    let locales = get_languages_from_env();
+    let locales = locales();
     let codes = Codes::of(entry, action_id, path, &locales);
     let mut argv = Vec::with_capacity(parsed.len());
     for arg in parsed {
@@ -207,5 +308,96 @@ Exec=nautilus %i --profile \"100%% sure\"
     fn a_semicolon_is_not_a_command_separator() {
         // The whole point of the argv runner: `;` is an argument, not syntax.
         assert_eq!(argv("tab")[2], "a b;c");
+    }
+
+    /// `details_of` against a `.desktop` body, with the locales pinned so the
+    /// result cannot depend on the test runner's `$LANG`.
+    fn details_of(content: &str, locales: &[&str]) -> Details {
+        let locales: Vec<String> = locales.iter().map(|l| (*l).to_string()).collect();
+        let path = Path::new("/usr/share/applications/app.desktop");
+        let entry = DesktopEntry::from_str(path, content, Some(&locales)).unwrap();
+        super::details_of(&entry, &locales)
+    }
+
+    #[test]
+    fn details_read_the_generic_name_keywords_and_actions() {
+        let details = details_of(
+            "[Desktop Entry]\n\
+             GenericName=Virtualization Software\n\
+             Keywords=virtualization;\n\
+             Actions=Manager;\n\
+             Name[de]=Oracle VirtualBox\n\
+             \n\
+             [Desktop Action Manager]\n\
+             Name=Open VM Manager\n\
+             Name[de]=VM Manager oeffnen\n\
+             Exec=VirtualBox\n\
+             \n\
+             [Desktop Action Broken]\n\
+             Name[de]=Nur auf Deutsch\n",
+            &["en"],
+        );
+        assert_eq!(details.generic.as_deref(), Some("Virtualization Software"));
+        assert_eq!(details.keywords, ["virtualization"]);
+        // an undeclared group is not a row, and neither is a localised-only name
+        assert_eq!(
+            details.actions,
+            [("Manager".to_string(), "Open VM Manager".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_localised_action_name_wins_in_its_locale() {
+        let entry = "[Desktop Entry]\n\
+                     Name=VirtualBox\n\
+                     Actions=Manager;\n\
+                     [Desktop Action Manager]\n\
+                     Name=Open VM Manager\n\
+                     Name[de]=VM Manager oeffnen\n";
+
+        assert_eq!(
+            details_of(entry, &["de_DE"]).actions[0].1,
+            "VM Manager oeffnen"
+        );
+        assert_eq!(details_of(entry, &["en"]).actions[0].1, "Open VM Manager");
+    }
+
+    #[test]
+    fn desktop_locales_drop_encoding_variants() {
+        // the shape g_get_language_names returns for zh_CN.UTF-8, with the bare
+        // language before an encoded key can match it
+        let names = ["zh_CN.UTF-8", "zh_CN", "zh.UTF-8", "zh", "C"].map(String::from);
+        assert_eq!(locales_from(names), ["zh_CN", "zh", "C"]);
+        // a @modifier survives, its encoded spelling does not
+        let names = ["sr_RS.UTF-8@latin", "sr_RS@latin", "sr@latin"].map(String::from);
+        assert_eq!(locales_from(names), ["sr_RS@latin", "sr@latin"]);
+    }
+
+    #[test]
+    fn an_env_wrapper_maps_to_the_real_program() {
+        let argv = |words: &[&str]| {
+            words
+                .iter()
+                .map(|word| (*word).to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            exec_program(&argv(&[
+                "env",
+                "GTK_IM_MODULE=fcitx",
+                "nautilus",
+                "--new-window"
+            ])),
+            Some("nautilus".into())
+        );
+        assert_eq!(
+            exec_program(&argv(&["/usr/lib/firefox/firefox", "%u"])),
+            Some("firefox".into())
+        );
+        assert_eq!(exec_program(&argv(&["sh", "-c", "scrcpy"])), None);
+        assert_eq!(
+            exec_program(&argv(&["env", "A=1", "flatpak", "run", "x"])),
+            None
+        );
     }
 }

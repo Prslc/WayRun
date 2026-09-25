@@ -8,19 +8,19 @@ use std::pin::Pin;
 use std::sync::LazyLock;
 
 use anyhow::Result;
-use freedesktop_desktop_entry::DesktopEntry;
 use gio::prelude::{AppInfoExt, IconExt};
 
 use crate::plugin::{Meta, Plugin, Rank, Ranked};
+use crate::system::desktop_action;
 use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
 use rust_i18n::t;
 
-use self::desktop::{desktop_locales, exec_basename, parse_meta};
+use self::desktop::meta;
 use self::model::{CachedApp, Field, Hit, Query};
 use self::score::{action_score, score_app};
 
 static APPS: LazyLock<Vec<CachedApp>> = LazyLock::new(|| {
-    let locales = desktop_locales();
+    let locales = desktop_action::locales();
     gio::AppInfo::all()
         .into_iter()
         .filter_map(|app| {
@@ -34,10 +34,15 @@ static APPS: LazyLock<Vec<CachedApp>> = LazyLock::new(|| {
                 .icon()
                 .and_then(|i| i.to_string())
                 .map(|s| s.to_string());
-            let entry = crate::system::desktop_action::entry(&id, Some(&locales));
-            let exec = entry.as_ref().and_then(exec_basename);
-            let terminal = entry.as_ref().is_some_and(DesktopEntry::terminal);
-            let meta = entry.as_ref().map(|entry| parse_meta(entry, &locales));
+            // One read of the entry, interpreted once: gio's `AppInfo` exposes
+            // neither `Exec=`, `GenericName=`, `Keywords=` nor `Actions=`.
+            let (exec, terminal, meta) = match desktop_action::details(&id, &locales) {
+                Some(details) => {
+                    let meta = meta(&details);
+                    (details.exec, details.terminal, Some(meta))
+                }
+                None => (None, false, None),
+            };
             Some(CachedApp {
                 title_field: Field::new(&title),
                 comment_field: comment.as_deref().map(Field::new),
