@@ -1,8 +1,11 @@
+use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use calloop::channel::Sender;
@@ -47,8 +50,9 @@ pub fn socket_path() -> PathBuf {
 /// Bind the listener (also the single-instance guard) and spawn the accept loop.
 pub fn serve(tx: Sender<Command>) -> std::io::Result<()> {
     let path = socket_path();
-    // Single-instance guard: a live listener here means another daemon owns the
-    // launcher, and stealing the socket would leave it holding a stale surface.
+    // Single-instance guard: a live listener means another daemon owns the
+    // launcher; the lock makes the check race-free.
+    lock_instance(&path)?;
     if UnixStream::connect(&path).is_ok() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::AddrInUse,
@@ -69,6 +73,25 @@ pub fn serve(tx: Sender<Command>) -> std::io::Result<()> {
         }
     });
 
+    Ok(())
+}
+
+/// The instance lock, held for the process's life: the connect probe alone
+/// races, since two starts can both find no listener and both unlink the socket.
+static INSTANCE_LOCK: Mutex<Option<File>> = Mutex::new(None);
+
+/// Take the lock beside the socket, or refuse when another daemon holds it.
+fn lock_instance(path: &Path) -> std::io::Result<()> {
+    let file = File::create(path.with_extension("lock"))?;
+    // SAFETY: `flock` takes an owned fd and a flag word; the file outlives it.
+    let taken = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0;
+    if !taken {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AddrInUse,
+            format!("another wayrun holds {}", path.display()),
+        ));
+    }
+    *INSTANCE_LOCK.lock().unwrap_or_else(PoisonError::into_inner) = Some(file);
     Ok(())
 }
 
@@ -128,7 +151,20 @@ pub fn client(verb: &str) -> std::process::ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::{Command, parse_request};
+    use super::{Command, lock_instance, parse_request};
+
+    #[test]
+    fn a_second_instance_lock_is_refused() {
+        let dir = std::env::temp_dir().join(format!("wayrun-lock-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("wayrun.sock");
+
+        lock_instance(&path).unwrap();
+        let refused = lock_instance(&path).unwrap_err();
+        assert_eq!(refused.kind(), std::io::ErrorKind::AddrInUse);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn every_client_verb_is_answered() {

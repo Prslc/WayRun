@@ -1,7 +1,11 @@
 use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
+use std::time::Duration;
 
 use calloop::channel::Sender as EventSender;
+
+/// How long a selection read may take before its child is killed.
+const PASTE_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Read the selection on one worker thread, so a held Ctrl+V queues generations
 /// instead of growing a thread per press.
@@ -29,15 +33,33 @@ pub fn read(jobs: &Sender<u64>, generation: u64) {
 }
 
 fn paste() -> Option<String> {
-    let output = Command::new("wl-paste")
+    let mut child = Command::new("wl-paste")
         .arg("--no-newline")
+        .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .output()
+        .spawn()
         .ok()?;
 
-    if !output.status.success() {
-        return None;
-    }
+    // Read the pipe from a thread: a child whose output outgrows the pipe buffer
+    // would otherwise block against a wait on this one.
+    let mut stdout = child.stdout.take()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut text = Vec::new();
+        let read = std::io::Read::read_to_end(&mut stdout, &mut text);
+        let _ = tx.send((read, text));
+    });
 
-    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+    match rx.recv_timeout(PASTE_TIMEOUT) {
+        Ok((Ok(_), text)) if child.wait().is_ok_and(|status| status.success()) => {
+            Some(String::from_utf8_lossy(&text).into_owned())
+        }
+        // A selection owner that never serves the read must not wedge the worker
+        // (and with it every later paste), so the child is killed instead.
+        _ => {
+            let _ = child.kill();
+            let _ = child.wait();
+            None
+        }
+    }
 }
