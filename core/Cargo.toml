@@ -21,7 +21,6 @@ rusqlite = "0.38.0"
 rust-i18n = { version = "1.2.2", default-features = false }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-tempfile = "3.26.0"
 tokio = { version = "1.50.0", features = ["rt-multi-thread", "macros", "process", "io-util", "io-std", "sync", "time"] }
 toml = "1.1.2"
 urlencoding = "2"
@@ -30,3 +29,6 @@ freedesktop-desktop-entry = { version = "0.8", default-features = false }
 memmap2 = "0.9"
 minreq = { version = "3.0.0", default-features = false, features = ["https-native-tls", "json-using-serde", "urlencoding", "proxy"] }
 rayon = "1.12.0"
+
+[dev-dependencies]
+tempfile = "3.26.0"
