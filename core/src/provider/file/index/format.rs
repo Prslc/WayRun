@@ -194,8 +194,7 @@ pub(super) fn bloom128(haystack: &[u8]) -> u128 {
 }
 
 /// A 128-bit bloom folded into the 64-bit space: bit `k` means a bigram whose
-/// index is `k` or `k + 64` occurs, so one mask can test a file bloom and a
-/// path bloom together.
+/// index is `k` or `k + 64` occurs, so one mask covers both bloom widths.
 pub(super) fn fold128(bloom: u128) -> u64 {
     (bloom | bloom >> 64) as u64
 }

@@ -321,7 +321,6 @@ async fn forget_external(command: &str, row: &Action) -> Result<bool> {
     let response = rpc_call(command, &request).await;
     Ok(response.is_some_and(|reply| reply.get("error").is_none()))
 }
-/// An absolute path is kept; anything else falls back to the identity icon.
 fn resolve_item_icon(icon: &str, fallback: Option<String>) -> Option<String> {
     host_icon_path(icon).or(fallback)
 }

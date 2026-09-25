@@ -152,9 +152,8 @@ impl IconCache {
         );
     }
 
-    /// Draw the icon contained in a `size`×`size` box at `(x, y)`, at `opacity`;
-    /// `size` is in the target's pixels. A missing file is asked for, never
-    /// rasterised here, so no frame pays for a decode.
+    /// Draw the icon contained in a `size`×`size` box at `(x, y)`, at `opacity`.
+    /// A missing file is asked for, never rasterised here: no frame decodes.
     pub fn draw(
         &mut self,
         target: &mut Pixmap,

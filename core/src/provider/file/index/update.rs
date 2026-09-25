@@ -263,8 +263,7 @@ mod tests {
     use std::path::Path;
 
     /// The image's tables as text, in slot order, blooms included: what a patch
-    /// and a walk of the same state must agree on. The blobs' byte order is each
-    /// writer's own.
+    /// and a walk of the same state must agree on.
     fn tables_of(bytes: &[u8], home: &Path) -> Vec<String> {
         let index = parsed(bytes, home);
         let dirs = (0..index.dir_count).map(|i| {

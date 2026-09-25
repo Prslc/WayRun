@@ -85,7 +85,7 @@ fn build_entries(config: &Config) -> Vec<Entry> {
             continue;
         }
         let Some(command) = &p.command else {
-            continue; // unknown id without an external host -> skipped
+            continue;
         };
         let meta = cache
             .fresh(command)
@@ -376,7 +376,6 @@ mod tests {
         );
         let merged = merge_config(base, user);
         assert_eq!(merged.plugins[0].command.as_deref(), Some("ext-host"));
-        // keyword untouched when the user only sets command
         assert_eq!(merged.plugins[0].keyword, "g");
     }
 

@@ -763,7 +763,7 @@ impl State {
     /// `delete_surrounding_text` lengths are UTF-8 *bytes*: remove characters
     /// while they fit, stop at the ends, so a bogus length cannot spin.
     pub fn delete_surrounding(&mut self, before: u32, after: u32) {
-        // the IME is about to replace whatever is selected
+        // The IME is about to replace whatever is selected.
         self.delete_selection();
         self.caret = self.caret.min(self.query.len());
 
@@ -806,7 +806,7 @@ impl State {
     }
 
     pub fn left(&mut self) {
-        // with a selection, a bare arrow collapses to the end it moves towards
+        // With a selection, a bare arrow collapses to the end it moves towards.
         if let Some((start, _)) = self.selection() {
             self.anchor = None;
             self.caret = start;

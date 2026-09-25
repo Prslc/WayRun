@@ -44,10 +44,8 @@ impl Tables {
             + self.paths.len()
     }
 
-    /// Write the image through `out`: header, home, both tables and their
-    /// blooms, then the blobs; `(dir_count, file_count, length)`. The one place
-    /// an image is written, so the walk and the update cannot drift apart; a
-    /// caller with a file streams it, `assemble` collects it.
+    /// Write the image through `out`: header, home, both tables and their blooms,
+    /// then the blobs; the one place an image is written, so a walk and a patch agree.
     pub(super) fn write_into(
         mut self,
         home: &Path,
@@ -278,8 +276,7 @@ fn task_of(
     }
 }
 
-/// Read one directory and spawn its children, so the whole walk rides rayon's
-/// scheduler.
+/// Read one directory and spawn its children, so the whole walk rides rayon's scheduler.
 fn visit<'s>(
     scope: &rayon::Scope<'s>,
     task: Task,

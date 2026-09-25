@@ -85,7 +85,7 @@ async fn search(input: &str) -> Vec<ResultItem> {
     }
 
     // Every default provider answers and the merge orders them, so a prefix
-    // command can no longer hide an exact app.
+    // command never hides an exact app.
     let mut rows: Vec<(Rank, u32, ResultItem)> = Vec::new();
     for (at, entry) in reg.iter().filter(|e| e.keyword.is_empty()).enumerate() {
         // only a forked host runs under the deadline; a built-in answers off its
@@ -120,8 +120,7 @@ async fn search(input: &str) -> Vec<ResultItem> {
 }
 
 /// Each row's usage key, aligned with `rows`, so the counts query and the merge
-/// share one pass; a row with no command carries an empty key, which matches
-/// nothing.
+/// share one pass; a row with no command carries an empty key.
 fn usage_keys(rows: &[(Rank, u32, ResultItem)]) -> Vec<String> {
     rows.iter()
         .map(|(_, _, item)| item.on_click.as_ref().map(Action::key).unwrap_or_default())
@@ -133,8 +132,7 @@ fn usage_keys(rows: &[(Rank, u32, ResultItem)]) -> Vec<String> {
 const DEFAULT_DEADLINE: Duration = Duration::from_millis(50);
 
 /// Order the default providers' rows: the strongest kind first, then the most
-/// picked row of that kind, then the registry order that otherwise ties them.
-/// `keys` is each row's usage key, aligned with `rows`.
+/// picked of that kind, then the registry order that otherwise ties them.
 fn merge_ranked(
     rows: Vec<(Rank, u32, ResultItem)>,
     keys: &[String],
@@ -270,8 +268,7 @@ mod tests {
         merge_ranked(rows, &keys, counts)
     }
 
-    /// A prefix command may no longer hide an exact app, whatever the registry
-    /// order says.
+    /// A prefix command never hides an exact app, whatever the registry order says.
     #[test]
     fn an_exact_row_leads_a_prefix_one_from_an_earlier_provider() {
         let rows = vec![
@@ -302,8 +299,7 @@ mod tests {
         assert_eq!(merge(rows, &HashMap::default())[0].title, "first");
     }
 
-    /// A provider that only lists sits below every scored row and keeps its own
-    /// order.
+    /// A provider that only lists sits below every scored row and keeps its own order.
     #[test]
     fn a_listed_row_sits_below_a_scored_one() {
         let rows = vec![
@@ -317,9 +313,7 @@ mod tests {
     }
 
     /// The merge orders by the weight a provider computed, not by the kind band:
-    /// a title word (3000) beats a description's prefix (2500) but not a
-    /// description's exact match (5000), and a plain title substring (500) is
-    /// below a scaled-up metadata kind.
+    /// a title word beats a description's prefix but not its exact match.
     #[test]
     fn a_scaled_weight_orders_across_kinds() {
         let rows = vec![

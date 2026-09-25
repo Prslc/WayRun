@@ -331,7 +331,6 @@ fn do_search(query: &str) -> Vec<(Rank, ResultItem)> {
             scored.push((weight, Hit::App(app)));
         }
 
-        // Each action is its own row (DMS-style).
         for action in app.meta.iter().flat_map(|m| &m.actions) {
             if let Some((_, weight)) = action_score(&action.name_lower, &query.lower) {
                 scored.push((weight, Hit::Action(app, action)));
@@ -639,9 +638,8 @@ mod tests {
         assert_eq!(app("zed dev"), 0, "and prose never prefix-matches here");
     }
 
-    /// The share is what makes the surfaces comparable: a title match beats a
-    /// description match of comparable strength, while an exact keyword still
-    /// beats a title hit the query only sits inside of.
+    /// The share makes the surfaces comparable: a title match beats a description
+    /// match of comparable strength, while an exact keyword still beats a title hit.
     #[test]
     fn the_surface_share_orders_against_the_kind() {
         let m = meta(None, &[]);

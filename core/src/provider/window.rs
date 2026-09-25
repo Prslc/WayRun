@@ -58,8 +58,7 @@ impl Plugin for WindowPlugin {
     }
 }
 
-/// A window with its lowercased title and app id, so a keystroke never re-lowers
-/// a title.
+/// A window with its lowercased title and app id, so a keystroke never re-lowers a title.
 struct CachedWindow {
     window: Window,
     title_lower: String,

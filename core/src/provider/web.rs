@@ -137,7 +137,7 @@ fn do_search(engine: &Engine, query: &str) -> Result<Vec<ResultItem>> {
         .context("fetching web suggestions")?;
     let json: Vec<serde_json::Value> = response.json().context("parsing web suggestions")?;
 
-    // one resolved engine icon shared by every row (header + suggestions)
+    // One resolved engine icon, shared by the header row and every suggestion.
     let icon = crate::system::icon::resolve(engine.icon);
 
     let summary = t!("plugin.web.summary", engine = engine.name);

@@ -65,7 +65,6 @@ fn do_search(expr: &str) -> Vec<ResultItem> {
         let name = name.to_ascii_lowercase();
         let one = |f: fn(f64) -> f64| args.first().map(|&v| f(v));
         match name.as_str() {
-            // one-argument functions
             "sqrt" => one(f64::sqrt),
             "cbrt" => one(f64::cbrt),
             "exp" => one(f64::exp),
@@ -85,7 +84,6 @@ fn do_search(expr: &str) -> Vec<ResultItem> {
             "floor" => one(f64::floor),
             "ceil" => one(f64::ceil),
             "round" => one(f64::round),
-            // two-argument functions
             "pow" | "atan2" | "hypot" | "min" | "max" => {
                 if args.len() == 2 {
                     let (a, b) = (args[0], args[1]);

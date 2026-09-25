@@ -40,10 +40,8 @@ impl Action {
     }
 }
 
-/// A row's panel command: execute the row's own `Action`, or a launcher-level
-/// pin/unpin/history operation the shell turns into its own RPC call. `Pin`
-/// names the row's scope only: the core holds the payload it emitted and looks
-/// the row up by the command, so a payload never carries a copy of itself.
+/// A row's panel command: the row's own `Action`, or a launcher-level
+/// pin/unpin/history operation the shell turns into its own RPC call.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PanelAction {

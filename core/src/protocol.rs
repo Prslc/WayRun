@@ -33,7 +33,6 @@ pub fn theme_notification() -> Notification<ThemeConfig> {
     }
 }
 
-/// The `results` notification for one search payload.
 pub fn results_notification(items: &[ResultItem]) -> Notification<&[ResultItem]> {
     Notification {
         jsonrpc: "2.0",
@@ -121,7 +120,6 @@ pub struct Search {
     request: watch::Sender<Option<Request>>,
 }
 
-/// What the worker answers: a query, or the empty-query history.
 #[derive(Clone)]
 enum Request {
     Query(String),

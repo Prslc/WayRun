@@ -19,8 +19,7 @@ pub async fn forget_row(command: &Action) -> bool {
 }
 
 /// The rows of the payload last built for one scope: what a `pin` stores, held
-/// here so no payload has to carry a copy of itself. One scope is live at a time
-/// (the panel's), so only the newest payload is kept.
+/// here so no payload has to carry a copy of itself.
 static LAST_ROWS: Mutex<Option<(String, Vec<ResultItem>)>> = Mutex::new(None);
 
 /// The rows a `pin` may name: an ephemeral row is offered no pin entry, so it is

@@ -62,8 +62,7 @@ fn spawn_detached(command: process::Command) {
 }
 
 /// The scoped `gio <verb> <arg>` line, or `None` without transient scopes or the
-/// gio CLI — the caller then keeps its in-process gio call, which would fork the
-/// app into the launcher's own cgroup.
+/// gio CLI — the caller's fallback then forks into the launcher's own cgroup.
 fn gio_line(scope: bool, gio: bool, verb: &str, arg: &str) -> Option<process::Command> {
     (scope && gio).then(|| scoped_command(true, "gio", &[verb.to_string(), arg.to_string()]))
 }

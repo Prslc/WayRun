@@ -166,7 +166,6 @@ mod tests {
         assert_eq!(config.web_search.engine, "duckduckgo");
         assert_eq!(config.font.family, "Noto Sans");
         assert_eq!(config.icon.theme, "Papirus");
-        // an absent section keeps its default
         assert_eq!(
             parse("[web_search]\nengine = \"google\"").font,
             Font::default()

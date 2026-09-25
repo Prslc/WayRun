@@ -139,8 +139,8 @@ pub fn push_lowered(out: &mut String, s: &str) {
     }
 }
 
-/// A URL row's extra command: copy the link instead of opening it. Every
-/// provider whose rows are URLs shares this one action.
+/// A URL row's extra command: copy the link instead of opening it. Several
+/// providers share it, so it carries its own remembered-default scope.
 pub fn copy_url_action(item: &ResultItem) -> Vec<ActionItem> {
     let Some(Action::Open { uri }) = item.on_click.as_ref() else {
         return Vec::new();

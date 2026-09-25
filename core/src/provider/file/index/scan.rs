@@ -129,8 +129,7 @@ fn scan_top<S>(
 }
 
 /// The bits a path-mode row's bloom must carry: every token's bigrams, OR'd in
-/// both widths. A token with `/` can match across the dir/name join, where no
-/// row stores the boundary bigrams, so it filters nothing.
+/// both widths. A token with `/` joins across dir/name, which no row stores.
 fn path_masks(query_lower: &str) -> (u64, u128) {
     let mut mask64 = 0;
     let mut mask128 = 0;
@@ -396,9 +395,8 @@ mod tests {
         assert_eq!(search_in(&index, "k", false, true).len(), 1);
     }
 
-    /// The bloom pre-filter only ever rejects rows no matcher could score: the
-    /// non-ASCII haystack, a word-start hit, a spaced name query and a token
-    /// landing on either half of a path all survive it.
+    /// The bloom pre-filter only ever rejects rows no matcher could score: a
+    /// non-ASCII haystack, a word-start hit, a spaced query and a path token.
     #[test]
     fn the_bloom_filter_keeps_every_kind_of_match() {
         let dir = tempfile::tempdir().unwrap();

@@ -167,7 +167,6 @@ impl TextEngine {
         shaped
     }
 
-    /// The fit that missed the cache.
     fn fit_uncached(
         &mut self,
         text: &str,

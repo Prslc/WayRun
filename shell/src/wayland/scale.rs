@@ -15,11 +15,9 @@ use wayland_protocols::wp::viewporter::client::wp_viewporter::{self, WpViewporte
 
 use super::Shell;
 
-/// Object data for the fractional-scale proxies.
 #[derive(Debug)]
 pub struct ScaleData;
 
-/// Object data for the viewporter proxies.
 #[derive(Debug)]
 pub struct ViewportData;
 
