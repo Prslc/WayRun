@@ -275,12 +275,13 @@ fn validate(home: &Path) -> bool {
     let config = crate::config::get();
     let exclude = &config.files.exclude;
     match load_swept(home, exclude, true) {
-        // moved listings need the patch, which belongs off this search's path;
-        // the verdict waits in `State` for the refresh it triggers
-        Some((_, moved)) if !moved.is_empty() => {
+        // The stale image answers this query too: the already-mapped case takes
+        // the same trade, and a dead row lives only as long as the patch (~0.1s).
+        Some((map, moved)) if !moved.is_empty() => {
             if let Some((mtime, size)) = image_id() {
                 lock().swept = Some((mtime, size, moved));
             }
+            store_loaded(map);
             false
         }
         Some((map, _)) => {
