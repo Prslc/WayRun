@@ -55,7 +55,8 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 | `reveal` | `uri` | 在文件管理器中定位文件（仅面板可见） |
 | `terminal` | `uri` | 在 URI 所在目录打开终端，文件则用其父目录（仅面板可见） |
 
-`run` 的 `cmd` 是整条 shell 行；`launch` 与 `desktop_action` 的 id 不加引号。
+`run` 的 `cmd` 是整条 shell 行，内容不会被改写：`%u` 这类字段码原样交给 shell，
+因为只有 `launch` 与 `desktop_action` 会读 `.desktop` 的字段码；后两者的 id 不加引号。
 `file:` URI 会做百分号编码，路径里的空格和非 ASCII 字符都能保留；`Terminal=true`
 的处理器会在终端中启动。
 

@@ -60,9 +60,11 @@ result's `on_click` and of a panel `execute` action:
 | `reveal` | `uri` | show a file in the file manager (panel-only) |
 | `terminal` | `uri` | open a terminal in the URI's directory, its parent for a file (panel-only) |
 
-`run`'s `cmd` is a whole shell line; `launch` and `desktop_action` carry an
-unquoted id. File URIs are percent-encoded, so paths with spaces or non-ASCII
-characters survive; a `Terminal=true` handler is started inside a terminal.
+`run`'s `cmd` is a whole shell line, and nothing in it is rewritten: a
+`%u`-style field code reaches the shell as typed, since only `launch` and
+`desktop_action` read `.desktop` field codes; those two carry an unquoted id.
+File URIs are percent-encoded, so paths with spaces or non-ASCII characters
+survive; a `Terminal=true` handler is started inside a terminal.
 
 `search` takes an object with a `text` key (a non-empty string). An absent
 `params`, an empty `text`, a bare string, `{"query": …}`, or a non-string `text`

@@ -78,23 +78,20 @@ fn spawn_gio_scoped(verb: &str, arg: &str) -> bool {
     }
 }
 
-/// Run a shell command detached from the backend (system commands, …). Shell
-/// is intended here: `%u`/`%f` leftovers are stripped before execution.
+/// Run a shell command detached from the backend (system commands, …). Shell is
+/// intended here: the line is the caller's, field codes and all.
 pub fn execute_command(cmd: &str) {
-    let clean_cmd = cmd
-        .replace("%u", "")
-        .replace("%U", "")
-        .replace("%f", "")
-        .replace("%F", "");
-
-    let args = vec![
-        "-c".to_string(),
-        format!("setsid {clean_cmd} >/dev/null 2>&1 &"),
-    ];
+    let args = vec!["-c".to_string(), detached_line(cmd)];
     let mut command = scoped("sh", &args);
     // `sh` inherits the JSON-RPC pipe otherwise; its errors belong on the journal.
     command.stdout(process::Stdio::null());
     spawn_detached(command);
+}
+
+/// The shell line that runs `cmd` and lets the launcher return: detached from
+/// the session, with its output discarded.
+fn detached_line(cmd: &str) -> String {
+    format!("setsid {cmd} >/dev/null 2>&1 &")
 }
 
 /// Join an argv into a `sh` command line, quoting tokens that need it: the `run:`
@@ -434,6 +431,20 @@ mod tests {
     #[test]
     fn an_empty_token_is_quoted_to_survive_the_shell() {
         assert_eq!(shell_join(&argv(&["foo", ""])), "foo ''");
+    }
+
+    /// Only `launch` and `desktop_action` read `.desktop` field codes; a `run`
+    /// line is the caller's whole shell line, so a `date +%F` must survive.
+    #[test]
+    fn a_run_line_reaches_the_shell_untouched() {
+        for cmd in [
+            "/usr/bin/date +%F",
+            "/usr/bin/date +%u",
+            "/usr/bin/sed s/%f/X/",
+            "/usr/bin/curl %U",
+        ] {
+            assert!(detached_line(cmd).contains(cmd), "{cmd}");
+        }
     }
 
     #[test]
