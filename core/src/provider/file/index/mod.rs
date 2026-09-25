@@ -408,6 +408,9 @@ fn refresh(home: &Path) {
         len / 1_000_000,
         started.elapsed().as_secs_f64(),
     );
+    // the walk and the patch build their tables in the arena, and glibc keeps the
+    // pages; hand them back now rather than at the reaper's idle unmap
+    trim_allocator();
 }
 
 /// `$HOME`, `$XDG_CACHE_HOME/wayrun/file-index.bin`.
