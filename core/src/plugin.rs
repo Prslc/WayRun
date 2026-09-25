@@ -15,7 +15,7 @@ pub use model::{
     Match, Rank, Ranked, classify, classify_bytes_confident, classify_ci, classify_ci_confident,
     classify_confident,
 };
-pub use registry::{list_plugins, print_list, reload, reload_if_changed};
+pub use registry::{index_owned, list_plugins, print_list, reload, reload_if_changed};
 pub use search::dispatch;
 
 pub trait Plugin: Send + Sync {

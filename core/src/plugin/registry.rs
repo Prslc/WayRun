@@ -54,14 +54,26 @@ async fn rebuild() {
 async fn apply(new_config: Config) {
     let entries = build_entries(&new_config);
     // The index exists only for `f`/`d`; with both gone, leave no cache behind.
-    let index_enabled = entries
-        .iter()
-        .any(|entry| crate::provider::file::index::owns(entry.plugin.meta().id));
+    let index_enabled = owns_index(&entries);
     *CONFIG.write().await = new_config;
     *REGISTRY.write().await = entries;
     crate::provider::file::index::sync_enabled(index_enabled);
     crate::provider::file::index::settings_changed();
     REGISTRY_READY.store(true, Ordering::Release);
+}
+
+/// Whether either provider the file index serves is among `entries`.
+fn owns_index(entries: &[Entry]) -> bool {
+    entries
+        .iter()
+        .any(|entry| crate::provider::file::index::owns(entry.plugin.meta().id))
+}
+
+/// Whether the live registry has an index-owned provider: what the startup
+/// warm-up asks before it spends a sweep on an index nothing would search.
+pub async fn index_owned() -> bool {
+    ensure_loaded().await;
+    owns_index(&REGISTRY.read().await)
 }
 
 /// Build registry entries from a config without contacting a host: a cached

@@ -36,6 +36,9 @@ struct State {
     /// can never be held without its idle clock.
     live: Option<(Arc<Mmap>, Instant)>,
     last_check: Option<Instant>,
+    /// A sweep's verdict for one image: the file's `(mtime_ns, size)` and the
+    /// directories it found moved, so the refresh it triggers sweeps nothing twice.
+    swept: Option<(i64, u64, Vec<u32>)>,
     /// Set by [`discard`] once it has unlinked the cache and cleared before any
     /// write: while it holds, no cache file is on disk, so unlinks can be skipped.
     clean: bool,
@@ -44,6 +47,7 @@ struct State {
 static STATE: Mutex<State> = Mutex::new(State {
     live: None,
     last_check: None,
+    swept: None,
     // a previous process may have left cache files behind
     clean: false,
 });
@@ -127,6 +131,34 @@ pub fn owns(plugin_id: &str) -> bool {
     OWNERS.contains(&plugin_id)
 }
 
+/// Pre-warm the index at startup, so the first `f`/`d` query is not the one that
+/// pays the freshness sweep: a resident core boots long before the user types.
+pub fn warm_up() {
+    if REAPER.set(()).is_ok() {
+        tokio::spawn(reaper());
+    }
+    if !crate::config::get().files.index {
+        return;
+    }
+    tokio::spawn(async move {
+        if !crate::plugin::index_owned().await {
+            return;
+        }
+        let Ok(home) = crate::system::fs::get_home() else {
+            return;
+        };
+        // the cold branch of `ensure`, run to completion behind the boot instead
+        // of in front of the first query
+        let cold = home.clone();
+        let loaded = tokio::task::spawn_blocking(move || validate(&cold))
+            .await
+            .unwrap_or(false);
+        if !loaded {
+            let _ = tokio::task::spawn_blocking(move || refresh(&home)).await;
+        }
+    });
+}
+
 /// Keep the cache only while the index has an owner; the registry calls this on
 /// every rebuild, including the plugins.toml watcher's.
 pub fn sync_enabled(enabled: bool) {
@@ -147,6 +179,7 @@ fn store(map: Mmap) {
     {
         let mut state = lock();
         state.live = Some((Arc::new(map), Instant::now()));
+        state.swept = None;
     }
     // the reaper may be parked with nothing to watch
     WAKE.notify_one();
@@ -160,6 +193,7 @@ pub fn discard() {
         state.live = None;
         // re-enabling must rebuild at once, not wait out the refresh TTL
         state.last_check = None;
+        state.swept = None;
         let clean = state.clean;
         state.clean = true;
         clean
@@ -269,8 +303,14 @@ fn validate(home: &Path) -> bool {
     let config = crate::config::get();
     let exclude = &config.files.exclude;
     match load_swept(home, exclude, true) {
-        // moved listings need the patch, which belongs off this search's path
-        Some((_, moved)) if !moved.is_empty() => false,
+        // moved listings need the patch, which belongs off this search's path;
+        // the verdict waits in `State` for the refresh it triggers
+        Some((_, moved)) if !moved.is_empty() => {
+            if let Some((mtime, size)) = image_id() {
+                lock().swept = Some((mtime, size, moved));
+            }
+            false
+        }
         Some((map, _)) => {
             store_loaded(map);
             true
@@ -289,7 +329,22 @@ fn refresh(home: &Path) {
     let config = crate::config::get();
     let exclude = &config.files.exclude;
 
-    let patched = match load_swept(home, exclude, true) {
+    // The sweep that decided this refresh is reused when it still describes the
+    // image on disk: sweeping every recorded directory twice would cost as much
+    // as the patch it decided on.
+    let swept = lock()
+        .swept
+        .take()
+        .filter(|(mtime, size, _)| image_id() == Some((*mtime, *size)));
+    let loaded = load_swept(home, exclude, swept.is_none());
+    let loaded = match (swept, loaded) {
+        (Some((_, _, moved)), Some((map, _))) => Some((map, moved)),
+        // the image went away under the verdict, so there is nothing to patch
+        (Some(_), None) => None,
+        (None, loaded) => loaded,
+    };
+
+    let patched = match loaded {
         Some((map, moved)) if moved.is_empty() => {
             store_loaded(map);
             return;
@@ -368,11 +423,22 @@ fn load() -> Option<Mmap> {
 }
 
 pub(super) fn mtime_ns(path: &Path) -> Option<i64> {
-    let time = std::fs::metadata(path).ok()?.modified().ok()?;
-    match time.duration_since(UNIX_EPOCH) {
+    mtime_of(&std::fs::metadata(path).ok()?)
+}
+
+/// A stat's mtime, in nanoseconds since the epoch; negative before it.
+fn mtime_of(meta: &std::fs::Metadata) -> Option<i64> {
+    match meta.modified().ok()?.duration_since(UNIX_EPOCH) {
         Ok(since) => Some(since.as_nanos() as i64),
         Err(before) => Some(-(before.duration().as_nanos() as i64)),
     }
+}
+
+/// The cache image's identity, `(mtime_ns, size)`. It is replaced only by an
+/// atomic rename, so a sweep's verdict can be tied to the image it came from.
+fn image_id() -> Option<(i64, u64)> {
+    let meta = std::fs::metadata(path()?).ok()?;
+    Some((mtime_of(&meta)?, meta.len()))
 }
 
 #[cfg(test)]
