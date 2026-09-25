@@ -20,8 +20,7 @@ pub(super) fn draw_list(
     now: Instant,
 ) {
     let layout = state.appearance.layout;
-    let left = layout.card_x(surface) + geom::PAD;
-    let width = layout.card_w(surface) - 2.0 * geom::PAD;
+    let (left, width) = layout.row_band(surface);
     let top = layout.rows_top(surface);
 
     for (index, row) in state

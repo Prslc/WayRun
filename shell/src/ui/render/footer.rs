@@ -174,8 +174,8 @@ pub(super) fn draw_footer(
     let layout = state.appearance.layout;
     let top = layout.card_top(surface) + state.content_height() - geom::PAD - geom::FOOTER_H;
     let center_y = top + geom::FOOTER_H / 2.0;
-    let left = layout.card_x(surface) + geom::PAD;
-    let right = layout.card_x(surface) + layout.card_w(surface) - geom::PAD;
+    let (left, width) = layout.row_band(surface);
+    let right = left + width;
     let font_size = state.appearance.font.suggestion();
     let label_size = font_size * canvas.scale;
     let key_size = (font_size - 1.0).max(6.0) * canvas.scale;

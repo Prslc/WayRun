@@ -28,8 +28,7 @@ pub(super) fn draw_actions(
     let theme = state.theme;
     let layout = state.appearance.layout;
     let font = state.appearance.font;
-    let left = layout.card_x(surface) + geom::PAD;
-    let width = layout.card_w(surface) - 2.0 * geom::PAD;
+    let (left, width) = layout.row_band(surface);
 
     if let Some(title) = state.menu_parent_title() {
         let size = font.suggestion() * canvas.scale;

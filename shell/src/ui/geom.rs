@@ -87,6 +87,14 @@ impl Layout {
         ((surface.1 as f32) * self.top_ratio + self.offset_y).round()
     }
 
+    /// The band a row is drawn in, as `(left, width)`: the card inset by `PAD`,
+    /// shared by the result list, the action panel and the footer. The row hit
+    /// test uses the whole card width instead, so a press in that padding still
+    /// selects the row beside it.
+    pub fn row_band(&self, surface: (u32, u32)) -> (f32, f32) {
+        (self.card_x(surface) + PAD, self.card_w(surface) - 2.0 * PAD)
+    }
+
     /// The ✕ button's circle in logical pixels: centre x, centre y, radius. The
     /// toolbar draws it and `State::clear_hit` claims it.
     pub fn clear_circle(&self, surface: (u32, u32)) -> (f32, f32, f32) {
