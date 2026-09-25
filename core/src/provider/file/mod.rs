@@ -316,7 +316,12 @@ fn do_search(query: &str, want_dir: bool, by_name: bool) -> Vec<ResultItem> {
     )
 }
 
-/// The fallback when no index is available: the four roots, `depth` levels.
+/// Fallback walk depth: levels searched from each root while nothing is indexed.
+/// Not a config key: with the index on (the default) it has no effect at all.
+const FALLBACK_DEPTH: usize = 3;
+
+/// The fallback when no index is available: the four roots, [`FALLBACK_DEPTH`]
+/// levels.
 fn quick_search(
     home: &Path,
     query_lower: &str,
@@ -341,7 +346,7 @@ fn quick_search(
         }
 
         let walker = WalkDir::new(root)
-            .max_depth(files.depth)
+            .max_depth(FALLBACK_DEPTH)
             .into_iter()
             .filter_entry(|e| {
                 keep_entry(&e.file_name().to_string_lossy(), e.depth(), &files.exclude)
@@ -676,7 +681,7 @@ mod tests {
     }
 
     #[test]
-    fn the_quick_walk_stops_at_the_depth_it_is_given() {
+    fn the_quick_walk_stops_at_the_fallback_depth() {
         let dir = tempfile::tempdir().unwrap();
         let shallow = dir.path().join("Documents/a/b");
         let deep = shallow.join("c");
@@ -691,16 +696,7 @@ mod tests {
 
         assert!(
             quick_search(dir.path(), "deep.txt", false, true, &files).is_empty(),
-            "one level past the configured depth is out of reach"
-        );
-        let deeper = Files {
-            depth: 4,
-            ..Files::default()
-        };
-        assert_eq!(
-            quick_search(dir.path(), "deep.txt", false, true, &deeper).len(),
-            1,
-            "raising the depth reaches it"
+            "one level past the fallback depth is out of reach"
         );
     }
 }

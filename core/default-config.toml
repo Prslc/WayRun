@@ -14,5 +14,4 @@
 
 [files]
 # index = true                  # match f/d at any depth under $HOME
-# depth = 3                     # levels the search descends while unindexed; 1-16
-exclude = ["node_modules", "target", "__pycache__"] # the walk skips these; dot-prefixed names (.git) too
+# exclude = ["node_modules", "target", "__pycache__"] # names the walk never enters (dot-prefixed names like .git always are)

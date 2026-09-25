@@ -51,11 +51,8 @@ pub struct Icon {
 pub struct Files {
     /// Index `$HOME` so `f`/`d` match at any depth; the cost is one cache file.
     pub index: bool,
-    /// How many levels the search descends from each root when it is not indexed.
-    #[serde(deserialize_with = "lenient_depth")]
-    pub depth: usize,
     /// Directory names the walk never enters and a match never shows (a hidden
-    /// entry, a leading `.`, is skipped anyway); empty unless a file lists some.
+    /// entry, a leading `.`, is skipped anyway); a user's list replaces this one.
     pub exclude: Vec<String>,
 }
 
@@ -79,25 +76,21 @@ fn lenient_family<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::E
     })
 }
 
-/// The walk depth, clamped to its documented range.
-fn lenient_depth<'de, D: serde::Deserializer<'de>>(d: D) -> Result<usize, D::Error> {
-    Ok(usize::deserialize(d)?.clamp(MIN_DEPTH, MAX_DEPTH))
-}
-
 impl Default for Files {
     fn default() -> Self {
         Self {
             index: true,
-            depth: 3,
-            exclude: Vec::new(),
+            exclude: SHIPPED_EXCLUDES
+                .iter()
+                .map(|name| name.to_string())
+                .collect(),
         }
     }
 }
 
-/// Bounds for `[files] depth`: 0 would search nothing but a root itself, and a
-/// deep miss walks the whole tree, which is what the index is for.
-const MIN_DEPTH: usize = 1;
-const MAX_DEPTH: usize = 16;
+/// Names the walk never enters unless the user writes their own `exclude` list;
+/// the shipped template shows them commented out.
+const SHIPPED_EXCLUDES: [&str; 3] = ["node_modules", "target", "__pycache__"];
 
 impl Default for WebSearch {
     fn default() -> Self {
@@ -139,7 +132,6 @@ mod tests {
 
     #[test]
     fn a_key_of_the_wrong_type_rejects_the_file() {
-        assert!(toml::from_str::<Config>("[files]\ndepth = \"deep\"").is_err());
         assert!(toml::from_str::<Config>("[files]\nexclude = \"node_modules\"").is_err());
         assert!(toml::from_str::<Config>("[font]\nfamily = 5").is_err());
     }
@@ -189,19 +181,11 @@ mod tests {
     }
 
     #[test]
-    fn the_search_depth_is_bounded_to_its_documented_range() {
-        assert_eq!(parse("").files.depth, 3, "the shipped depth is unchanged");
-        assert_eq!(parse("[files]\ndepth = 1").files.depth, 1);
-        assert_eq!(parse("[files]\ndepth = 16").files.depth, 16);
-        assert_eq!(parse("[files]\ndepth = 0").files.depth, 1);
-        assert_eq!(parse("[files]\ndepth = 999").files.depth, 16);
-    }
-
-    #[test]
-    fn the_excluded_names_default_to_nothing() {
-        // nothing is hardcoded: the walk skips hidden names unless a list says
-        // otherwise, and the list the engine ships lives in the template below
-        assert!(parse("").files.exclude.is_empty());
+    fn the_excluded_names_default_to_the_shipped_list_and_a_users_list_replaces_it() {
+        assert_eq!(
+            parse("").files.exclude,
+            ["node_modules", "target", "__pycache__"]
+        );
         assert_eq!(
             parse("[files]\nexclude = [\"vendor\", \"dist\"]")
                 .files
@@ -219,15 +203,12 @@ mod tests {
     }
 
     #[test]
-    fn the_shipped_template_carries_the_exclusion_list_and_nothing_else() {
-        let mut shipped = parse(super::super::DEFAULT_TEMPLATE);
-        assert_eq!(
-            shipped.files.exclude,
-            ["node_modules", "target", "__pycache__"]
+    fn the_shipped_template_is_all_comments_and_its_example_matches_the_default() {
+        assert_eq!(parse(super::super::DEFAULT_TEMPLATE), Config::default());
+        // the example a user uncomments must name what is compiled in
+        assert!(
+            super::super::DEFAULT_TEMPLATE
+                .contains(r#"# exclude = ["node_modules", "target", "__pycache__"]"#)
         );
-        // the one key that is active is allowlisted here; any other key that
-        // stops being a comment changes the value and fails
-        shipped.files.exclude = Vec::new();
-        assert_eq!(shipped, Config::default());
     }
 }

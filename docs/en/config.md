@@ -48,10 +48,10 @@ launch.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `index` | `true` | Let `f` and `d` find files and directories anywhere under `$HOME`, not only near its top. |
-| `depth` | `3` | How many levels an unindexed search descends from each of its roots, `1` to `16`. Out-of-range values are clamped. |
-| `exclude` | `[]` | Directory names the search never enters and a result never shows. A name starting with `.` (`.git`, `.cache`) is always hidden and cannot be listed back into view. The shipped `config.toml` lists `node_modules`, `target` and `__pycache__`; delete a name there to search it again, and note that an absent key skips nothing beyond the hidden names. |
+| `exclude` | `["node_modules", "target", "__pycache__"]` | Directory names the search never enters and a result never shows. A name starting with `.` (`.git`, `.cache`) is always hidden and cannot be listed back into view. The shipped names are compiled in and shown commented in `config.toml`; writing your own list replaces them whole, and `exclude = []` searches everything but hidden names. |
 
 Indexing happens in the background, and only once `f` or `d` is used. Set
-`index = false` to search just `depth` levels under `$HOME` and leave no cache
+`index = false` to search just a few levels under `$HOME` and leave no cache
 behind; disabling both plugins does the same. Editing `exclude` makes the index
-rebuild on the next `f`/`d` search.
+rebuild on the next `f`/`d` search. A hidden or excluded name is still reachable
+by typing a path to it (`~/.config/niri/config.kdl`, `.config/niri/`).
