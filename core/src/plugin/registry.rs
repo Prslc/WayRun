@@ -69,13 +69,6 @@ fn owns_index(entries: &[Entry]) -> bool {
         .any(|entry| crate::provider::file::index::owns(entry.plugin.meta().id))
 }
 
-/// Whether the live registry has an index-owned provider: what the startup
-/// warm-up asks before it spends a sweep on an index nothing would search.
-pub async fn index_owned() -> bool {
-    ensure_loaded().await;
-    owns_index(&REGISTRY.read().await)
-}
-
 /// Build registry entries from a config without contacting a host: a cached
 /// identity is reused and the rest wait on [`resolve_pending`].
 fn build_entries(config: &Config) -> Vec<Entry> {

@@ -138,9 +138,6 @@ pub async fn handle(
                 let items = protocol::history_items().await;
                 respond_ok(tx, id, &items).await;
             } else {
-                // the shell sends this on every open, where the index's sweep can
-                // run behind the launch instead of in front of the first query
-                crate::provider::file::index::warm_up();
                 search.request_top();
             }
         }
