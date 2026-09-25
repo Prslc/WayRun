@@ -291,12 +291,18 @@ impl Shell {
     pub fn on_backend(&mut self, event: BackendEvent) {
         match event {
             BackendEvent::Theme(config) => {
+                self.icons.drop_tinted();
                 self.app.set_system_theme(
                     theme::Theme::from_config(&config),
                     Mode::from_wire(config.mode.as_deref()),
                 );
             }
             BackendEvent::Results(items) => {
+                // A payload landing after a dismissal must not repopulate the rows
+                // the dismissal dropped; a show always asks again.
+                if self.layer.is_none() {
+                    return;
+                }
                 let now = Instant::now();
                 self.app.apply_results(items, now);
                 let font = self.app.appearance.font;
@@ -347,6 +353,7 @@ impl Shell {
     /// `theme.toml` changed on disk. Radius, alpha and row count can move
     /// pixels outside the usual card damage, so the next frame is full.
     pub fn on_appearance(&mut self, config: AppearanceConfig, now: Instant) {
+        self.icons.drop_tinted();
         self.app.apply_appearance(config, now);
         self.needs_full = true;
         self.redraw();

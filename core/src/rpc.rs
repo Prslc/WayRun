@@ -142,6 +142,10 @@ pub async fn handle(
                 search.request_top();
             }
         }
+        "dismiss" => {
+            search.cancel();
+            crate::plugin::drop_remembered();
+        }
         "select" => {
             let Ok(payload) = select_payload(params.as_ref()) else {
                 if has_id {

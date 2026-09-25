@@ -45,6 +45,11 @@ fn remember(scope: &str, rows: &[ResultItem]) {
     *held = Some((scope.to_string(), kept));
 }
 
+/// Drop the remembered payload: the shell is hidden, so no `pin` can name a row.
+pub fn drop_remembered() {
+    *LAST_ROWS.lock().unwrap_or_else(PoisonError::into_inner) = None;
+}
+
 /// The row `command` names in `scope`'s remembered payload, or `None` when that
 /// payload no longer holds it (a newer search, a restarted core).
 fn remembered_row(scope: &str, command: &Action) -> Option<ResultItem> {
@@ -266,6 +271,17 @@ mod tests {
         Action::Run {
             cmd: cmd.to_string(),
         }
+    }
+
+    #[test]
+    fn a_dismissed_payload_holds_no_row() {
+        let command = run("cmd");
+        remember("", &[item("Kept", command.clone())]);
+        assert!(remembered_row("", &command).is_some());
+
+        drop_remembered();
+
+        assert!(remembered_row("", &command).is_none());
     }
 
     #[test]

@@ -133,6 +133,8 @@ impl Shell {
         // and these grow with every distinct payload.
         self.icons.clear();
         self.text.clear_cache();
+        // The core holds the payload it remembers for pins; a dismissal ends that.
+        backend::dismiss();
         self.app.hidden();
         ipc::VISIBLE.store(false, Ordering::Relaxed);
         // glibc keeps freed large allocations in its arena, so a hidden resident

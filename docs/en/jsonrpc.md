@@ -15,6 +15,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 |--------|--------|--------|
 | `search` | `{"text"}` | array of result items; sent as a notification, streams a `results` notification |
 | `top` | — | most-used items; sent as a notification, streams a `results` notification |
+| `dismiss` | — | `null` (the launcher closed: drops the remembered payload and any search still in flight) |
 | `select` | item object | `null` (records usage; `ephemeral` and `copy` rows are not) |
 | `command` | an [`Action`](#actions) object | `null` (runs one row or panel command) |
 | `pin` | `{"scope","on_click": Action}` | `{"pinned": bool}` (pins a row of that query's payload) |

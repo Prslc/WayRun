@@ -13,6 +13,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 |------|------|------|
 | `search` | `{"text"}` | 结果项数组；不带 `id` 时改为推送 `results` 通知 |
 | `top` | — | 最常用项；不带 `id` 时同样推送 `results` 通知 |
+| `dismiss` | — | `null`（启动器已关闭：丢弃记住的载荷与仍在飞行中的搜索） |
 | `select` | 结果项对象 | `null`（记录使用；`ephemeral` 与 `copy` 行不记录） |
 | `command` | 一个 [`Action`](#动作) 对象 | `null`（执行一条行或面板命令） |
 | `pin` | `{"scope","on_click": Action}` | `{"pinned": bool}`（把该查询载荷中的一行置顶） |

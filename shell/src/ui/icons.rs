@@ -56,6 +56,12 @@ impl IconCache {
         self.generation = self.generation.wrapping_add(1);
     }
 
+    /// Drop the recoloured bitmaps: a tint is keyed by the colour it was mixed
+    /// from, so a theme change leaves every entry unreachable.
+    pub fn drop_tinted(&mut self) {
+        self.tinted.clear();
+    }
+
     /// Ask the worker for `path`, unless it is cached or already asked for; a
     /// payload that arrives while the launcher is hidden lands before it shows.
     pub fn warm(&mut self, path: &str, size: u32) {

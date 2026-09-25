@@ -67,6 +67,12 @@ pub fn top() {
     notify("top", Value::Null);
 }
 
+/// The launcher was dismissed: the core drops the payload it remembered for
+/// pins and any search still in flight.
+pub fn dismiss() {
+    notify("dismiss", Value::Null);
+}
+
 /// Record the row the user launched.
 pub fn select(item: &Value) {
     notify("select", item.clone());
