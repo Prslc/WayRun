@@ -172,6 +172,15 @@ pub(super) fn walk_threads() -> u32 {
     std::thread::available_parallelism().map_or(1, |num| num.get() as u32)
 }
 
+/// A pool for one walk, built once per caller: the thread count is the caller's
+/// parameter, not global state, and a walk reusing it must not rebuild it.
+pub(super) fn walk_pool(threads: u32) -> Option<rayon::ThreadPool> {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(threads.clamp(1, walk_threads()) as usize)
+        .build()
+        .ok()
+}
+
 /// Where a walk starts: the directory, the slot its record goes in (`u32::MAX`
 /// for the image's own root), its depth and its lowered path.
 pub(super) struct Root<'a> {
@@ -188,7 +197,7 @@ pub(super) fn walk_into(
     root: Root<'_>,
     cap: usize,
     exclude: &[String],
-    threads: u32,
+    pool: &rayon::ThreadPool,
 ) -> Option<()> {
     let Root {
         path: dir,
@@ -234,11 +243,6 @@ pub(super) fn walk_into(
         failed: AtomicBool::new(false),
     };
     let segs = Mutex::new(Vec::new());
-    // a pool per walk keeps the thread count a caller's parameter, not global state
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(threads.clamp(1, walk_threads()) as usize)
-        .build()
-        .ok()?;
     pool.scope(|scope| {
         for (ordinal, name) in entries.dirs.iter().enumerate() {
             let task = task_of(&[], ordinal as u32, name, root, root_lower, depth);
@@ -408,6 +412,7 @@ pub(super) fn build(home: &Path, cap: usize, exclude: &[String]) -> Option<Table
         &String::from_utf8_lossy(home.as_os_str().as_bytes()),
     );
     let mut tables = Tables::new();
+    let pool = walk_pool(walk_threads())?;
     walk_into(
         &mut tables,
         Root {
@@ -418,7 +423,7 @@ pub(super) fn build(home: &Path, cap: usize, exclude: &[String]) -> Option<Table
         },
         cap,
         exclude,
-        walk_threads(),
+        &pool,
     )?;
     Some(tables)
 }
@@ -488,7 +493,7 @@ mod tests {
                 },
                 MAX_ENTRIES,
                 &[],
-                threads,
+                &walk_pool(threads).unwrap(),
             )
             .unwrap();
             tables.assemble(home, &[])

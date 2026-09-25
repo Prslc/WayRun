@@ -3,7 +3,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
 use crate::provider::file::index::build::{
-    Root, Tables, read_dir_entries, walk_into, walk_threads,
+    Root, Tables, read_dir_entries, walk_into, walk_pool, walk_threads,
 };
 use crate::provider::file::index::format::{
     DirOut, DirRec, FileOut, Index, bloom64, bloom128, name_haystack, push_dir_path, push_name,
@@ -99,6 +99,7 @@ pub(super) fn patch(
         changed: changed.iter().copied().collect(),
         exclude,
         cap,
+        pool: walk_pool(walk_threads())?,
         tables: Tables::new(),
     };
     patcher.emit(0, u32::MAX)?;
@@ -111,6 +112,8 @@ struct Patcher<'a> {
     changed: HashSet<u32>,
     exclude: &'a [String],
     cap: usize,
+    /// One pool for the whole patch: a newly found directory must not rebuild it.
+    pool: rayon::ThreadPool,
     tables: Tables,
 }
 
@@ -188,7 +191,7 @@ impl<'a> Patcher<'a> {
                         },
                         self.cap,
                         self.exclude,
-                        walk_threads(),
+                        &self.pool,
                     )?;
                 }
             }
