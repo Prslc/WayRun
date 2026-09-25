@@ -1,11 +1,7 @@
 target/
-.cargo-home/
-.run/
 AGENTS.md
 AGENTS.md.bak
 NOTES.md
 scripts/
 # bench-reported output written next to the model it was given
-index.html
-index.json
 *.report.json
