@@ -23,6 +23,10 @@ pub use notify::watch;
 /// watcher reload cannot truncate an editor's save.
 pub use system::fs::write_if_absent;
 
+/// Return the allocator's free pages to the kernel; shared by the shell's
+/// dismissal and the index reaper, both of which drop a large buffer.
+pub use system::fs::trim_allocator;
+
 /// `--list-plugins` prints the registry and exits; otherwise serve the protocol.
 async fn serve_or_list() -> Result<()> {
     if std::env::args().any(|a| a == "--list-plugins") {

@@ -3,6 +3,20 @@ use std::env;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+/// Release the allocator's free pages back to the kernel. Only glibc's
+/// `malloc_trim` does this; other targets leave it to their allocator.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+pub fn trim_allocator() {
+    // SAFETY: `malloc_trim` is a plain libc allocator call with no preconditions
+    // and no memory effects beyond returning free pages.
+    unsafe {
+        libc::malloc_trim(0);
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+pub fn trim_allocator() {}
+
 pub fn get_home() -> Result<PathBuf> {
     dirs::home_dir().context("finding the user HOME directory")
 }
