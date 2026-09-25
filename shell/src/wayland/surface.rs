@@ -250,6 +250,12 @@ impl Shell {
         if !self.ensure_buffers(physical_w, physical_h) {
             return;
         }
+        // Rasterise only when a buffer can take the frame: a deferred blit would
+        // otherwise draw the whole thing again on the retry.
+        if self.free_buffer_index().is_none() {
+            self.schedule_retry();
+            return;
+        }
         self.needs_present = false;
         // The fade begins on the first frame that is actually drawn.
         self.app.start_entrance(now);
