@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-26
+
+### Added
+
+- Every spawn in `executor.rs` goes through `systemd-run --user --scope
+  --collect --slice=app.slice`, so an app the launcher starts is no longer
+  accounted to `wayrun-launcher.service`: the unit's memory and CPU stay its own,
+  a restart cannot strand apps as `left-over process`, and systemd-oomd's victim
+  is the app rather than the launcher plus everything it ever started. Expansion
+  stays off (`--expand-environment=no`), since systemd-run's default rewrites a
+  literal `${HOME}` in a command line or URI; the gio paths go through `gio
+  launch`/`gio open` so the process gio forks lands in the scope too, and a spawn
+  now hands the child to a task that waits it, so it no longer lingers as a
+  zombie. Without a reachable user manager or the gio CLI the spawn keeps its
+  in-process call, and apps launched before this release keep their old cgroup —
+  a scope is not retroactive. See `resident.md`.
+- The `dismiss` method: the launcher says it has closed, and the core cancels
+  the search still in flight and drops the payload a `pin` names rows in. A
+  `results` payload that lands after a dismissal no longer refills the rows or
+  warms their icons.
+
+### Changed
+
+- **Breaking**: `[files] depth` is gone. It only mattered with the index off, so
+  the fallback walk owns it as a constant now; a config still carrying the key
+  parses and the key is ignored. An absent `exclude` now means the shipped
+  `node_modules`, `target` and `__pycache__` rather than no exclusion at all, a
+  user's own list replaces those names whole, and `exclude = []` searches
+  everything but hidden names. A `[files]` section that set `depth` or relied on
+  omitting `exclude` should be reviewed. See `config.md`.
+- **Breaking**: `pin` takes `{"scope","on_click": Action}`, the pair `unpin`
+  already took, and no longer accepts an `item` payload: the core looks the row
+  up in the payload it last emitted for that scope, so a client names the row by
+  the command it carries, and a command that payload no longer holds answers
+  `pinned: false` instead of storing a stale row. Every row used to embed a copy
+  of itself in its pin entry, and that copy crossed the wire twice; on a 20k-row
+  history the `top` payload fell 17,131,343 → 13,004,661 bytes (a row 942 → 678,
+  its pin entry 349 → 116) and peak RSS 74–76 → 69.6 MB, at 0.13 s wall either
+  way. What a pin stores is unchanged. See `jsonrpc.md`.
+- The file index loads lazily again, on the first `f`/`d`: pre-warming it cost
+  every launcher open 32 MB of page cache and a 33 MB mapping whether or not the
+  index was ever wanted. An index found stale now answers the query that found it
+  stale instead of falling back to the depth-3 walk, which buys recall (hundreds
+  of shallow rows against tens of thousands, once the image is a minute old) at
+  the price of row data up to ~0.1 s out of date.
+- The interactive path, by effect: a clipboard or window search answers from the
+  last fetch and revalidates in the background, where `niri msg -j windows`
+  (~12 ms) and `cliphist list` (~4 ms) used to run on every search past the
+  500 ms burst window; the file scan's chunks go through rayon (`d download` p50
+  2.29 → 2.02 ms, and the pool parks between searches: 0 CPU ticks over 90 s
+  idle); a streaming `top` no longer runs on the read loop, so typing does not
+  queue behind a full history build; the usage database gained an
+  `(on_click, key)` index and WAL, taking a one-shot `select` from 8 fdatasyncs
+  to 0; icons decode on a worker thread instead of in the frame that draws them;
+  the query and session-bus work moved off the runtime's workers; and a hidden
+  resident launcher drops the rows it was holding.
+- The release binary is linked with full LTO rather than thin: 6,984,904 →
+  6,510,872 bytes (6.8% smaller, ~2.87 MB gzipped), with startup unchanged.
+
+### Fixed
+
+- A `run` line reaches the shell as it was typed. `%u`, `%U`, `%f` and `%F` were
+  being deleted from it, so `r date +%F` ran `date +`, and a host's `run{cmd}`
+  was stripped the same way; the terminal path never did it, so which of the two
+  a command took decided whether the codes survived. `jsonrpc.md` now states that
+  only `launch` and `desktop_action` read `.desktop` field codes.
+- The shell's two external interactions are bounded. A clipboard read is killed
+  after one second and answered with no text, so a stuck selection owner cannot
+  wedge a paste, and the pipe is read from a thread of its own so a selection
+  larger than the pipe buffer cannot deadlock it. The IPC listener takes the
+  `wayrun.lock` flock before binding the socket, closing the race where two
+  simultaneous starts both unlinked it.
+- The shared copy-link action files its default under its own `copy-url` scope
+  instead of inheriting `firefox-bookmarks`, so a remembered default applies to
+  every URL row whichever provider answered.
+- Opening or closing the action panel re-derives the hover, so a stationary
+  pointer no longer highlights a row that moved out from under it; the shell's
+  `select` payload sends `summary` and `icon` as `null` rather than an empty
+  string, matching the rows the core emits.
+- A `.desktop` action's `%c` comes from the same locale list as the row's title,
+  so a session that sets `LC_ALL` or `LANGUAGE` over `LANG` no longer launches an
+  action named in a different language than the panel showed.
+
 ## [0.4.0] - 2026-09-24
 
 ### Added
