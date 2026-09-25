@@ -52,6 +52,8 @@ static STATE: Mutex<State> = Mutex::new(State {
     clean: false,
 });
 static BUILDING: AtomicBool = AtomicBool::new(false);
+/// Set by the first [`warm_up`] call, so a later launcher open is a no-op.
+static WARMED: AtomicBool = AtomicBool::new(false);
 static REAPER: OnceLock<()> = OnceLock::new();
 /// Wakes the reaper when an index is stored; it parks on this while nothing is
 /// mapped, so an unmapped index costs no wakeups.
@@ -131,9 +133,14 @@ pub fn owns(plugin_id: &str) -> bool {
     OWNERS.contains(&plugin_id)
 }
 
-/// Pre-warm the index at startup, so the first `f`/`d` query is not the one that
-/// pays the freshness sweep: a resident core boots long before the user types.
+/// Pre-warm the index when the launcher first opens, so its first `f`/`d` is not
+/// the query that pays the freshness sweep. Only the resident core warms: a
+/// one-shot client would wait for the work at exit, and a user who never opens
+/// the launcher pays nothing.
 pub fn warm_up() {
+    if std::env::var_os("WAYRUN_RESIDENT").is_none() || WARMED.swap(true, Ordering::AcqRel) {
+        return;
+    }
     if REAPER.set(()).is_ok() {
         tokio::spawn(reaper());
     }
@@ -147,7 +154,7 @@ pub fn warm_up() {
         let Ok(home) = crate::system::fs::get_home() else {
             return;
         };
-        // the cold branch of `ensure`, run to completion behind the boot instead
+        // the cold branch of `ensure`, run to completion behind the open instead
         // of in front of the first query
         let cold = home.clone();
         let loaded = tokio::task::spawn_blocking(move || validate(&cold))
@@ -156,6 +163,9 @@ pub fn warm_up() {
         if !loaded {
             let _ = tokio::task::spawn_blocking(move || refresh(&home)).await;
         }
+        // the sweep above is this process's due check, so the next query owes
+        // none; a failed build leaves no map, and `ensure` then checks anyway
+        lock().last_check = Some(Instant::now());
     });
 }
 

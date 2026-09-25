@@ -78,12 +78,6 @@ pub async fn serve() -> Result<()> {
 
     let _plugins_watcher = watchers::watch_plugins();
 
-    // The resident core boots long before the launcher shows, so the index is
-    // pre-warmed here; a one-shot client keeps its load on the first query.
-    if std::env::var_os("WAYRUN_RESIDENT").is_some() {
-        crate::provider::file::index::warm_up();
-    }
-
     let mut reader = BufReader::new(io::stdin()).lines();
     let search = Search::spawn(tx.clone());
     // `forget` and `command` wait on external hosts, so they run in tasks; the
