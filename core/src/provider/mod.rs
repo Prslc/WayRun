@@ -155,10 +155,13 @@ pub fn copy_url_action(item: &ResultItem) -> Vec<ActionItem> {
         },
         icon: Some("builtin:copy".to_string()),
         id: Some("copy_url".to_string()),
-        plugin: None,
+        plugin: Some(COPY_URL_SCOPE.to_string()),
         default: false,
     }]
 }
+
+/// The remembered-default scope of the shared copy-link action.
+const COPY_URL_SCOPE: &str = "copy-url";
 
 pub fn plugin_map() -> HashMap<&'static str, Box<dyn Plugin>> {
     let mut m: HashMap<&'static str, Box<dyn Plugin>> = HashMap::default();
@@ -214,6 +217,9 @@ mod tests {
                 }
             }
         );
+        // a shared action scopes its own default; a plugin's would apply to that
+        // plugin's rows only, and ownerless would forbid a default entirely
+        assert_eq!(actions[0].plugin.as_deref(), Some(COPY_URL_SCOPE));
 
         assert!(
             copy_url_action(&row(Some(Action::Run {
