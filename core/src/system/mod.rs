@@ -1,11 +1,8 @@
 pub mod compositor;
 pub mod db;
-pub mod defaults;
 pub mod desktop_action;
 pub mod executor;
 pub mod fs;
 pub mod icon;
-pub mod pins;
 pub mod theme;
-pub mod usage;
 pub mod xdg;

@@ -152,7 +152,7 @@ pub async fn handle(
                 }
                 return;
             };
-            let _ = crate::system::usage::record(&payload);
+            let _ = crate::system::db::usage::record(&payload);
             if has_id {
                 respond(tx, id, Ok(Value::Null)).await;
             }
@@ -202,7 +202,7 @@ pub async fn handle(
                 }
                 return;
             };
-            let unpinned = crate::system::pins::unpin(&scope, &command.key()).unwrap_or(false);
+            let unpinned = crate::system::db::pins::unpin(&scope, &command.key()).unwrap_or(false);
             if has_id {
                 respond(tx, id, Ok(json!({ "unpinned": unpinned }))).await;
             }
@@ -227,10 +227,10 @@ pub async fn handle(
             };
             match action_id {
                 Some(action_id) => {
-                    let _ = crate::system::defaults::set(&scope, action_id);
+                    let _ = crate::system::db::defaults::set(&scope, action_id);
                 }
                 None => {
-                    let _ = crate::system::defaults::clear(&scope);
+                    let _ = crate::system::db::defaults::clear(&scope);
                 }
             }
             if has_id {
@@ -244,7 +244,7 @@ pub async fn handle(
                 }
                 return;
             };
-            let removed = crate::system::usage::forget(&command.key()).unwrap_or(false);
+            let removed = crate::system::db::usage::forget(&command.key()).unwrap_or(false);
             // The provider walk waits on external hosts, so it must not hold the
             // read loop: the reply carries the id and may land out of order.
             let tx = tx.clone();

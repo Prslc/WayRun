@@ -67,7 +67,7 @@ pub fn pin_row(scope: &str, command: &Action) -> bool {
     let Some(row) = remembered_row(scope, command) else {
         return false;
     };
-    crate::system::pins::pin(scope, &row).is_ok()
+    crate::system::db::pins::pin(scope, &row).is_ok()
 }
 
 /// A pin's scope is the exact trimmed query, so a bare keyword never summons it;
@@ -85,8 +85,8 @@ pub async fn decorate(items: Vec<ResultItem>, scope: &str, history: bool) -> Vec
     // defaults are two reads, so one hop serves both.
     let scoped = scope.to_string();
     let Ok((pins, defaults)) = tokio::task::spawn_blocking(move || {
-        let pins: Vec<ResultItem> = crate::system::pins::get_pins(&scoped).unwrap_or_default();
-        (pins, crate::system::defaults::all().unwrap_or_default())
+        let pins: Vec<ResultItem> = crate::system::db::pins::get_pins(&scoped).unwrap_or_default();
+        (pins, crate::system::db::defaults::all().unwrap_or_default())
     })
     .await
     else {
@@ -213,7 +213,7 @@ fn attach_actions(
         });
     }
 
-    if history && crate::system::usage::is_recordable(item.ephemeral, Some(&on_click)) {
+    if history && crate::system::db::usage::is_recordable(item.ephemeral, Some(&on_click)) {
         actions.push(ActionItem {
             title: t!("action.remove_history"),
             action: PanelAction::Forget {

@@ -1,3 +1,9 @@
+pub mod defaults;
+pub mod pins;
+#[cfg(test)]
+mod test_support;
+pub mod usage;
+
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::path::PathBuf;
@@ -73,11 +79,6 @@ pub fn with_db<T>(f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         *guard = Some(open_conn()?);
     }
     f(guard.as_ref().expect("opened just above"))
-}
-
-#[cfg(test)]
-pub fn init_schema(conn: &Connection) {
-    conn.execute_batch(SCHEMA).ok();
 }
 
 #[cfg(test)]

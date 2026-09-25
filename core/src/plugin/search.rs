@@ -34,7 +34,7 @@ async fn search(input: &str) -> Vec<ResultItem> {
     let reg = REGISTRY.read().await;
 
     if input.trim() == "?" {
-        let defaults = tokio::task::spawn_blocking(crate::system::defaults::all)
+        let defaults = tokio::task::spawn_blocking(crate::system::db::defaults::all)
             .await
             .ok()
             .and_then(Result::ok)
@@ -113,7 +113,7 @@ async fn search(input: &str) -> Vec<ResultItem> {
     // workers; the keys go with it and come back, so they are built once.
     let keys = usage_keys(&rows);
     let Ok((counts, keys)) = tokio::task::spawn_blocking(move || {
-        let counts = crate::system::usage::counts(&keys);
+        let counts = crate::system::db::usage::counts(&keys);
         (counts, keys)
     })
     .await

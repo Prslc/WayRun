@@ -106,7 +106,7 @@ pub async fn serve() -> Result<()> {
 pub async fn history_items() -> Vec<ResultItem> {
     // The history is uncapped, so this is a read plus a JSON parse per row: real
     // work, and it runs on the blocking pool rather than a runtime worker.
-    let items = tokio::task::spawn_blocking(|| system::usage::get_top(i32::MAX))
+    let items = tokio::task::spawn_blocking(|| system::db::usage::get_top(i32::MAX))
         .await
         .ok()
         .and_then(Result::ok)

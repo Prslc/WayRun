@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use rusqlite::Connection;
 
-use crate::system::db::with_db;
+use super::with_db;
 use crate::wire::ResultItem;
 
 /// Pin one row to the top of one exact query (`""` is the empty-query history).
@@ -64,7 +64,7 @@ mod tests {
 
     fn test_conn() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        crate::system::db::init_schema(&conn);
+        crate::system::db::test_support::init_schema(&conn);
         conn
     }
 

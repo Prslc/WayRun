@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use rusqlite::Connection;
 
-use crate::system::db::with_db;
+use super::with_db;
 
 /// Remember `action_id` as the default Enter action for one plugin scope.
 pub fn set(scope: &str, action_id: &str) -> Result<()> {
@@ -49,7 +49,7 @@ mod tests {
 
     fn test_conn() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        crate::system::db::init_schema(&conn);
+        crate::system::db::test_support::init_schema(&conn);
         conn
     }
 
