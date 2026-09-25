@@ -22,9 +22,9 @@ impl WindowPlugin {
     pub fn new() -> Self {
         Self {
             meta: Meta {
-                id: "window",
+                id: "window".into(),
                 name: t!("plugin.window.name"),
-                icon: "builtin:window",
+                icon: "builtin:window".into(),
                 ready: t!("plugin.window.ready"),
             },
         }

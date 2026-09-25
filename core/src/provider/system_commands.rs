@@ -15,9 +15,9 @@ impl SystemCommands {
     pub fn new() -> Self {
         Self {
             meta: Meta {
-                id: "system-commands",
+                id: "system-commands".into(),
                 name: t!("plugin.system.name"),
-                icon: "builtin:power",
+                icon: "builtin:power".into(),
                 ready: t!("plugin.system.ready"),
             },
         }

@@ -41,12 +41,6 @@ pub struct External {
     command: String,
 }
 
-/// The registry is built once per process, so these small strings live exactly
-/// the process lifetime that `Meta`'s `&'static str` fields require.
-fn leak(s: String) -> &'static str {
-    Box::leak(s.into_boxed_str())
-}
-
 impl External {
     /// Build from the configured id, host command and discovered identity. A
     /// missing identity degrades to the id as display name.
@@ -63,9 +57,9 @@ impl External {
         let icon = host_icon_path(&icon).unwrap_or_default();
         Self {
             meta: Meta {
-                id: leak(id.to_string()),
+                id: id.to_string().into(),
                 name,
-                icon: leak(icon),
+                icon: icon.into(),
                 ready,
             },
             command,

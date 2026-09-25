@@ -83,9 +83,9 @@ impl AppSearch {
     pub fn new() -> Self {
         Self {
             meta: Meta {
-                id: "app-search",
+                id: "app-search".into(),
                 name: t!("plugin.app.name"),
-                icon: "builtin:app",
+                icon: "builtin:app".into(),
                 ready: t!("plugin.app.ready"),
             },
         }

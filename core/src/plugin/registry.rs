@@ -66,7 +66,7 @@ async fn apply(new_config: Config) {
 fn owns_index(entries: &[Entry]) -> bool {
     entries
         .iter()
-        .any(|entry| crate::provider::file::index::owns(entry.plugin.meta().id))
+        .any(|entry| crate::provider::file::index::owns(&entry.plugin.meta().id))
 }
 
 /// Build registry entries from a config without contacting a host: a cached

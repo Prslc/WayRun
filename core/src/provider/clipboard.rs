@@ -18,9 +18,9 @@ impl Clipboard {
     pub fn new() -> Self {
         Self {
             meta: Meta {
-                id: "clipboard",
+                id: "clipboard".into(),
                 name: t!("plugin.clipboard.name"),
-                icon: "builtin:clipboard",
+                icon: "builtin:clipboard".into(),
                 ready: t!("plugin.clipboard.ready"),
             },
         }

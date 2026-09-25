@@ -224,9 +224,9 @@ macro_rules! firefox_plugin {
             pub fn new() -> Self {
                 Self {
                     meta: Meta {
-                        id: $id,
+                        id: $id.into(),
                         name: $display,
-                        icon: $icon,
+                        icon: $icon.into(),
                         ready: $ready,
                     },
                 }

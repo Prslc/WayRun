@@ -15,9 +15,9 @@ impl Calculator {
     pub fn new() -> Self {
         Self {
             meta: Meta {
-                id: "calculator",
+                id: "calculator".into(),
                 name: t!("plugin.calculator.name"),
-                icon: "builtin:calculator",
+                icon: "builtin:calculator".into(),
                 ready: t!("plugin.calculator.ready"),
             },
         }

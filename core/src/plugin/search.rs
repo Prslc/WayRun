@@ -49,7 +49,7 @@ async fn search(input: &str) -> Vec<ResultItem> {
                 } else {
                     format!("{} <query>", entry.keyword)
                 };
-                let default = defaults.get(meta.id).map(String::as_str);
+                let default = defaults.get(&*meta.id).map(String::as_str);
                 identity_card(meta, help_summary(usage, &meta.ready, default))
             })
             .collect();
@@ -72,7 +72,7 @@ async fn search(input: &str) -> Vec<ResultItem> {
             if let Ok(Some(items)) = entry.plugin.default_view().await
                 && !items.is_empty()
             {
-                return fill_icons(entry.plugin.meta().icon, items);
+                return fill_icons(&entry.plugin.meta().icon, items);
             }
             let meta = entry.plugin.meta();
             return vec![identity_card(meta, meta.ready.clone())];
@@ -82,7 +82,7 @@ async fn search(input: &str) -> Vec<ResultItem> {
             if let Ok(results) = entry.plugin.search(query, input).await
                 && !results.is_empty()
             {
-                return fill_icons(entry.plugin.meta().icon, results);
+                return fill_icons(&entry.plugin.meta().icon, results);
             }
         }
 
@@ -103,7 +103,7 @@ async fn search(input: &str) -> Vec<ResultItem> {
             Some(entry.plugin.search_ranked(query, input).await)
         };
         if let Some(Ok(answered)) = answer {
-            let fallback = find_icon_path(entry.plugin.meta().icon);
+            let fallback = find_icon_path(&entry.plugin.meta().icon);
             rows.extend(answered.into_iter().map(|(rank, mut item)| {
                 fill_icon(&fallback, &mut item);
                 (rank, at as u32, item)
@@ -198,7 +198,7 @@ fn identity_card(meta: &Meta, summary: String) -> ResultItem {
         title: meta.name.clone(),
         summary: Some(summary),
         on_click: None,
-        icon: find_icon_path(meta.icon).or_else(|| Some(String::new())),
+        icon: find_icon_path(&meta.icon).or_else(|| Some(String::new())),
         ephemeral: false,
         actions: Vec::new(),
         badge: None,

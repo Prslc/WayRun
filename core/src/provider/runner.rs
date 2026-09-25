@@ -20,9 +20,9 @@ impl Runner {
     pub fn new() -> Self {
         Self {
             meta: Meta {
-                id: "runner",
+                id: "runner".into(),
                 name: t!("plugin.runner.name"),
-                icon: "builtin:terminal",
+                icon: "builtin:terminal".into(),
                 ready: t!("plugin.runner.ready"),
             },
         }

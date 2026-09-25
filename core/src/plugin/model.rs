@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use serde::Deserialize;
 
 use crate::provider::external::HostMeta;
@@ -24,9 +26,11 @@ const fn default_enabled() -> bool {
 }
 
 pub struct Meta {
-    pub id: &'static str,
+    /// Borrowed for a built-in, owned for a discovered host, so a host's
+    /// identity needs no lifetime extension.
+    pub id: Cow<'static, str>,
     pub name: String,
-    pub icon: &'static str,
+    pub icon: Cow<'static, str>,
     pub ready: String,
 }
 

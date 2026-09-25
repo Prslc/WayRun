@@ -48,9 +48,9 @@ fn resolve(engine: &str) -> &'static Engine {
 
 fn meta_of(engine: &Engine) -> Meta {
     Meta {
-        id: "web-search",
+        id: "web-search".into(),
         name: engine.name.to_string(),
-        icon: engine.icon,
+        icon: engine.icon.into(),
         ready: t!("plugin.web.ready", engine = engine.name),
     }
 }
