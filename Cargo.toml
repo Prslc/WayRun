@@ -5,6 +5,6 @@ members = ["core", "shell"]
 [profile.release]
 opt-level = 3
 strip = true
-lto = "thin"
+lto = true
 codegen-units = 1
 panic = "abort"
