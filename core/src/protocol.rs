@@ -80,18 +80,18 @@ pub async fn serve() -> Result<()> {
 
     let mut reader = BufReader::new(io::stdin()).lines();
     let search = Search::spawn(tx.clone());
-    // `forget` waits on external hosts, so it runs in a task; the handles are
-    // awaited before returning so a one-shot client still gets its reply.
-    let mut forgets: Vec<JoinHandle<()>> = Vec::new();
+    // `forget` and `command` wait on external hosts, so they run in tasks; the
+    // handles are awaited before returning so a one-shot client still replies.
+    let mut pending: Vec<JoinHandle<()>> = Vec::new();
 
     while let Some(line) = reader.next_line().await? {
-        rpc::handle(&line, &tx, &search, &mut forgets).await;
+        rpc::handle(&line, &tx, &search, &mut pending).await;
     }
 
-    // A pending search or forget still holds a sender clone; cancel or reap
-    // them, then drain the writer so a one-shot client gets its last response.
+    // A pending search or task still holds a sender clone; cancel or reap them,
+    // then drain the writer so a one-shot client gets its last response.
     search.cancel();
-    for handle in forgets {
+    for handle in pending {
         let _ = handle.await;
     }
 

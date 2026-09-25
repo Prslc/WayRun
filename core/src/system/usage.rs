@@ -26,20 +26,30 @@ pub fn counts(keys: &[String]) -> std::collections::HashMap<String, u32> {
     with_db(|conn| counts_with(conn, keys)).unwrap_or_default()
 }
 
+/// Rows per `IN (...)` batch. Batching keeps the SQL text one of two shapes, so
+/// sqlite parses it once instead of once per payload size.
+const COUNT_BATCH: usize = 100;
+
 fn counts_with(
     conn: &Connection,
     keys: &[String],
 ) -> Result<std::collections::HashMap<String, u32>> {
-    let placeholders = vec!["?"; keys.len()].join(",");
-    let sql = format!("SELECT on_click, count FROM usage WHERE on_click IN ({placeholders})");
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(rusqlite::params_from_iter(keys), |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
-    })?;
     let mut counts = std::collections::HashMap::default();
-    for row in rows {
-        let (key, count) = row?;
-        counts.insert(key, count);
+    let (full, tail) = keys.split_at(keys.len() / COUNT_BATCH * COUNT_BATCH);
+    for keys in full
+        .chunks(COUNT_BATCH)
+        .chain((!tail.is_empty()).then_some(tail))
+    {
+        let placeholders = vec!["?"; keys.len()].join(",");
+        let sql = format!("SELECT on_click, count FROM usage WHERE on_click IN ({placeholders})");
+        let mut stmt = conn.prepare_cached(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(keys), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, u32>(1)?))
+        })?;
+        for row in rows {
+            let (key, count) = row?;
+            counts.insert(key, count);
+        }
     }
     Ok(counts)
 }
@@ -134,6 +144,27 @@ mod tests {
         let items = get_top_with(&conn, 10).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].title, "Firefox");
+    }
+
+    #[test]
+    fn counts_span_more_than_one_batch() {
+        let conn = test_conn();
+        for i in 0..COUNT_BATCH + 3 {
+            record_with(&conn, &item(&format!("Row {i}"), run(&format!("cmd{i}")))).unwrap();
+        }
+        let keys: Vec<String> = (0..COUNT_BATCH + 3)
+            .map(|i| {
+                Action::Run {
+                    cmd: format!("cmd{i}"),
+                }
+                .key()
+            })
+            .collect();
+
+        let counts = counts_with(&conn, &keys).unwrap();
+
+        assert_eq!(counts.len(), COUNT_BATCH + 3);
+        assert!(counts.values().all(|count| *count == 1));
     }
 
     #[test]

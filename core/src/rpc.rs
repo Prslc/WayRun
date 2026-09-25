@@ -54,7 +54,7 @@ fn search_text(params: Option<&Value>) -> Result<String, ()> {
     }
 }
 
-fn select_payload(params: Option<&Value>) -> Result<String, ()> {
+fn select_payload(params: Option<Value>) -> Result<String, ()> {
     match params {
         Some(obj @ Value::Object(_)) => Ok(obj.to_string()),
         _ => Err(()),
@@ -84,9 +84,8 @@ fn command_param(params: Option<&Value>, key: &str) -> Result<Action, ()> {
     }
 }
 
-fn command_payload(params: Option<&Value>) -> Result<Action, ()> {
-    let value = params.cloned().ok_or(())?;
-    serde_json::from_value(value).map_err(|_| ())
+fn command_payload(params: Option<Value>) -> Result<Action, ()> {
+    serde_json::from_value(params.ok_or(())?).map_err(|_| ())
 }
 
 /// Handle one JSON-RPC 2.0 line. A line that is not valid JSON answers the
@@ -95,7 +94,7 @@ pub async fn handle(
     line: &str,
     tx: &mpsc::Sender<String>,
     search: &protocol::Search,
-    forgets: &mut Vec<JoinHandle<()>>,
+    pending: &mut Vec<JoinHandle<()>>,
 ) {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
         respond(tx, Value::Null, Err(PARSE_ERROR)).await;
@@ -112,11 +111,11 @@ pub async fn handle(
         respond(tx, id, Err(INVALID_REQUEST)).await;
         return;
     };
-    let params = value.get("params").cloned();
+    let params = value.get("params");
 
     match method {
         "search" => {
-            match search_text(params.as_ref()) {
+            match search_text(params) {
                 Ok(text) if !text.is_empty() => {
                     if has_id {
                         let results = crate::plugin::dispatch(&text).await;
@@ -147,7 +146,7 @@ pub async fn handle(
             crate::plugin::drop_remembered();
         }
         "select" => {
-            let Ok(payload) = select_payload(params.as_ref()) else {
+            let Ok(payload) = select_payload(params.cloned()) else {
                 if has_id {
                     respond(tx, id, Err(INVALID_PARAMS)).await;
                 }
@@ -159,21 +158,29 @@ pub async fn handle(
             }
         }
         "command" => {
-            let Ok(command) = command_payload(params.as_ref()) else {
+            let Ok(command) = command_payload(params.cloned()) else {
                 if has_id {
                     respond(tx, id, Err(INVALID_PARAMS)).await;
                 }
                 return;
             };
-            crate::system::executor::execute(&command);
-            if has_id {
-                respond(tx, id, Ok(Value::Null)).await;
-            }
+            // Executing reaches the session bus and waits on children, so it runs
+            // off the read loop; the reply then still lands for a one-shot client.
+            let tx = tx.clone();
+            pending.retain(|handle| !handle.is_finished());
+            pending.push(tokio::spawn(async move {
+                let execute =
+                    tokio::task::spawn_blocking(move || crate::system::executor::execute(&command));
+                let _ = execute.await;
+                if has_id {
+                    respond(&tx, id, Ok(Value::Null)).await;
+                }
+            }));
         }
         "pin" => {
             let (Ok(scope), Ok(command)) = (
-                string_param(params.as_ref(), "scope"),
-                command_param(params.as_ref(), "on_click"),
+                string_param(params, "scope"),
+                command_param(params, "on_click"),
             ) else {
                 if has_id {
                     respond(tx, id, Err(INVALID_PARAMS)).await;
@@ -187,8 +194,8 @@ pub async fn handle(
         }
         "unpin" => {
             let (Ok(scope), Ok(command)) = (
-                string_param(params.as_ref(), "scope"),
-                command_param(params.as_ref(), "on_click"),
+                string_param(params, "scope"),
+                command_param(params, "on_click"),
             ) else {
                 if has_id {
                     respond(tx, id, Err(INVALID_PARAMS)).await;
@@ -202,7 +209,7 @@ pub async fn handle(
         }
         "default" => {
             // scope is the owning plugin id; a null action_id clears the default
-            let Ok(scope) = string_param(params.as_ref(), "scope") else {
+            let Ok(scope) = string_param(params, "scope") else {
                 if has_id {
                     respond(tx, id, Err(INVALID_PARAMS)).await;
                 }
@@ -231,7 +238,7 @@ pub async fn handle(
             }
         }
         "forget" => {
-            let Ok(command) = command_param(params.as_ref(), "on_click") else {
+            let Ok(command) = command_param(params, "on_click") else {
                 if has_id {
                     respond(tx, id, Err(INVALID_PARAMS)).await;
                 }
@@ -241,8 +248,8 @@ pub async fn handle(
             // The provider walk waits on external hosts, so it must not hold the
             // read loop: the reply carries the id and may land out of order.
             let tx = tx.clone();
-            forgets.retain(|handle| !handle.is_finished());
-            forgets.push(tokio::spawn(async move {
+            pending.retain(|handle| !handle.is_finished());
+            pending.push(tokio::spawn(async move {
                 let owned = crate::plugin::forget_row(&command).await;
                 if has_id {
                     respond(&tx, id, Ok(json!({ "forgotten": removed || owned }))).await;
@@ -295,9 +302,9 @@ mod tests {
     async fn run(line: &str) -> Vec<String> {
         let (tx, mut rx) = mpsc::channel::<String>(32);
         let search = protocol::Search::spawn(tx.clone());
-        let mut forgets = Vec::new();
-        handle(line, &tx, &search, &mut forgets).await;
-        for handle in forgets {
+        let mut pending = Vec::new();
+        handle(line, &tx, &search, &mut pending).await;
+        for handle in pending {
             let _ = handle.await;
         }
         let mut msgs = Vec::new();
@@ -332,12 +339,12 @@ mod tests {
     async fn a_top_notification_streams_the_history() {
         let (tx, mut rx) = mpsc::channel::<String>(32);
         let search = protocol::Search::spawn(tx.clone());
-        let mut forgets = Vec::new();
+        let mut pending = Vec::new();
         handle(
             r#"{"jsonrpc":"2.0","method":"top"}"#,
             &tx,
             &search,
-            &mut forgets,
+            &mut pending,
         )
         .await;
 
@@ -459,8 +466,8 @@ mod tests {
     fn select_payload_accepts_item_object() {
         let p: Value =
             serde_json::from_str(r#"{"title":"x","on_click":{"type":"run","cmd":"ls"}}"#).unwrap();
-        assert!(select_payload(Some(&p)).unwrap().contains("run"));
-        assert!(select_payload(Some(&Value::String("run:ls".into()))).is_err());
+        assert!(select_payload(Some(p)).unwrap().contains("run"));
+        assert!(select_payload(Some(Value::String("run:ls".into()))).is_err());
     }
 
     #[test]

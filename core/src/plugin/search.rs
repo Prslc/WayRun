@@ -34,7 +34,11 @@ async fn search(input: &str) -> Vec<ResultItem> {
     let reg = REGISTRY.read().await;
 
     if input.trim() == "?" {
-        let defaults = crate::system::defaults::all().unwrap_or_default();
+        let defaults = tokio::task::spawn_blocking(crate::system::defaults::all)
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or_default();
         return reg
             .iter()
             .map(|entry| {

@@ -56,6 +56,10 @@ fn find_db() -> Result<PathBuf> {
 /// One copy at a time: a concurrent bookmark and history search share the cache.
 static COPY_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
+/// The open connection to the current snapshot copy, kept across searches so a
+/// keystroke is one query rather than a connection and a schema parse as well.
+static READER: LazyLock<Mutex<Option<(PathBuf, Connection)>>> = LazyLock::new(|| Mutex::new(None));
+
 /// The path of `source`'s cached copy for its current `(mtime, size)`.
 fn cached_copy(source: &Path) -> Result<PathBuf> {
     let meta = fs::metadata(source)?;
@@ -139,12 +143,19 @@ async fn do_search(mode: Mode, query: &str) -> Result<Vec<ResultItem>> {
         let db_path = find_db()?;
         let copy = cached_copy(&db_path)?;
 
-        let conn = Connection::open_with_flags(
-            snapshot_uri(&copy),
-            OpenFlags::SQLITE_OPEN_READ_ONLY
-                | OpenFlags::SQLITE_OPEN_URI
-                | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )?;
+        let mut reader = READER.lock().unwrap_or_else(|err| err.into_inner());
+        // The copy's path encodes the source's `(mtime, size)`, so a matching
+        // path is the same bytes and only a new snapshot pays for a connection.
+        if reader.as_ref().is_none_or(|(path, _)| path != &copy) {
+            let conn = Connection::open_with_flags(
+                snapshot_uri(&copy),
+                OpenFlags::SQLITE_OPEN_READ_ONLY
+                    | OpenFlags::SQLITE_OPEN_URI
+                    | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )?;
+            *reader = Some((copy, conn));
+        }
+        let conn = &reader.as_ref().expect("opened just above").1;
 
         let sql = match mode {
             Mode::Bookmarks => {
@@ -183,7 +194,7 @@ async fn do_search(mode: Mode, query: &str) -> Result<Vec<ResultItem>> {
             Mode::Bookmarks => "builtin:bookmark",
             Mode::History => "builtin:clock",
         });
-        let mut stmt = conn.prepare(sql)?;
+        let mut stmt = conn.prepare_cached(sql)?;
         let rows = stmt.query_map([query.as_str(), &pattern], move |row| {
             let title: Option<String> = row.get(0)?;
             let url: String = row.get(1)?;

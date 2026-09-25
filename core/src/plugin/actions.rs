@@ -81,10 +81,18 @@ pub(super) fn pin_scope(input: &str) -> Option<&str> {
 /// re-emitted from storage, so its fresh copy is dropped as a duplicate.
 pub async fn decorate(items: Vec<ResultItem>, scope: &str, history: bool) -> Vec<ResultItem> {
     ensure_loaded().await;
-    let pins: Vec<ResultItem> = crate::system::pins::get_pins(scope).unwrap_or_default();
+    // The shared connection stays off the runtime's workers: the pins and the
+    // defaults are two reads, so one hop serves both.
+    let scoped = scope.to_string();
+    let Ok((pins, defaults)) = tokio::task::spawn_blocking(move || {
+        let pins: Vec<ResultItem> = crate::system::pins::get_pins(&scoped).unwrap_or_default();
+        (pins, crate::system::defaults::all().unwrap_or_default())
+    })
+    .await
+    else {
+        return Vec::new();
+    };
     let (mut out, pinned) = merge_pins(pins, items);
-    // One query for every plugin's remembered default, not one per row.
-    let defaults = crate::system::defaults::all().unwrap_or_default();
     // What the shell can name in a `pin`: the rows as they arrive here.
     remember(scope, &out);
 
