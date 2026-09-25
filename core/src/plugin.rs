@@ -5,13 +5,14 @@ use crate::wire::{Action, ResultItem};
 
 mod actions;
 mod model;
+mod rank;
 mod registry;
 mod search;
 
 pub use actions::{decorate, drop_remembered, forget_row, pin_row};
 pub use model::Meta;
 /// The ranking vocabulary providers and the dispatcher share.
-pub use model::{
+pub use rank::{
     Match, Rank, Ranked, classify, classify_bytes_confident, classify_ci, classify_ci_confident,
     classify_confident,
 };

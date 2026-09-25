@@ -5,7 +5,7 @@ pub mod external;
 pub mod file;
 pub mod firefox;
 pub mod runner;
-pub mod system;
+pub mod system_commands;
 pub mod web;
 pub mod window;
 
@@ -175,7 +175,10 @@ pub fn plugin_map() -> HashMap<&'static str, Box<dyn Plugin>> {
     m.insert("file-search", Box::new(file::FileSearch::new()));
     m.insert("path-search", Box::new(file::PathSearch::new()));
     m.insert("clipboard", Box::new(clipboard::Clipboard::new()));
-    m.insert("system-commands", Box::new(system::SystemCommands::new()));
+    m.insert(
+        "system-commands",
+        Box::new(system_commands::SystemCommands::new()),
+    );
     m.insert("runner", Box::new(runner::Runner::new()));
     m.insert("window", Box::new(window::WindowPlugin::new()));
     m.insert("web-search", Box::new(web::WebSearch::new()));
