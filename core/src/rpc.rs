@@ -1,9 +1,9 @@
 use serde_json::{Value, json};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
 use crate::protocol;
-use crate::wire::Action;
+use crate::wire::{Action, ResultItem};
 
 const PARSE_ERROR: (i64, &str) = (-32700, "Parse error");
 const INVALID_REQUEST: (i64, &str) = (-32600, "Invalid Request");
@@ -93,7 +93,7 @@ fn command_payload(params: Option<Value>) -> Result<Action, ()> {
 pub async fn handle(
     line: &str,
     tx: &mpsc::Sender<String>,
-    search: &protocol::Search,
+    search: &Search,
     pending: &mut Vec<JoinHandle<()>>,
 ) {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
@@ -135,7 +135,7 @@ pub async fn handle(
         "top" => {
             if has_id {
                 search.cancel();
-                let items = protocol::history_items().await;
+                let items = history_items().await;
                 respond_ok(tx, id, &items).await;
             } else {
                 search.request_top();
@@ -293,6 +293,80 @@ pub async fn handle(
     }
 }
 
+/// The empty query: the full, uncapped history so deleting a row converges,
+/// with the scope's pins leading and every row's action panel attached.
+pub async fn history_items() -> Vec<ResultItem> {
+    // The history is uncapped, so this is a read plus a JSON parse per row: real
+    // work, and it runs on the blocking pool rather than a runtime worker.
+    let items = tokio::task::spawn_blocking(|| crate::system::db::usage::get_top(i32::MAX))
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default();
+    crate::plugin::decorate(items, "", true).await
+}
+
+/// The streaming search's one worker: a new request supersedes the pending one,
+/// and a superseded payload is dropped instead of emitted.
+pub struct Search {
+    request: watch::Sender<Option<Request>>,
+}
+
+#[derive(Clone)]
+enum Request {
+    Query(String),
+    Top,
+}
+
+impl Search {
+    /// Start the session's worker; it exits when the returned `Search` drops.
+    pub fn spawn(tx: mpsc::Sender<String>) -> Self {
+        let (request, mut rx) = watch::channel(None::<Request>);
+        tokio::spawn(async move {
+            while rx.changed().await.is_ok() {
+                let Some(request) = rx.borrow_and_update().clone() else {
+                    continue;
+                };
+                let results = match request {
+                    // Each query gets its own task: a panicking provider must not
+                    // silence the worker that answers every later search.
+                    Request::Query(query) => {
+                        match tokio::spawn(async move { crate::plugin::dispatch(&query).await })
+                            .await
+                        {
+                            Ok(results) => results,
+                            Err(_) => continue,
+                        }
+                    }
+                    Request::Top => history_items().await,
+                };
+                // A newer request, or a cancel, supersedes this payload.
+                if !rx.has_changed().unwrap_or(true) {
+                    protocol::emit(&tx, &protocol::results_notification(&results)).await;
+                }
+            }
+        });
+        Self { request }
+    }
+
+    /// Queue a query, superseding anything pending.
+    pub fn request(&self, query: &str) {
+        self.request
+            .send_replace(Some(Request::Query(query.to_string())));
+    }
+
+    /// Queue the empty-query history, superseding anything pending.
+    pub fn request_top(&self) {
+        self.request.send_replace(Some(Request::Top));
+    }
+
+    /// Drop the pending request, so a payload still in flight is not emitted and
+    /// the history it superseded stays the last one.
+    pub fn cancel(&self) {
+        self.request.send_replace(None);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,7 +375,7 @@ mod tests {
     /// Returns the messages emitted while one line is handled.
     async fn run(line: &str) -> Vec<String> {
         let (tx, mut rx) = mpsc::channel::<String>(32);
-        let search = protocol::Search::spawn(tx.clone());
+        let search = Search::spawn(tx.clone());
         let mut pending = Vec::new();
         handle(line, &tx, &search, &mut pending).await;
         for handle in pending {
@@ -338,7 +412,7 @@ mod tests {
     #[tokio::test]
     async fn a_top_notification_streams_the_history() {
         let (tx, mut rx) = mpsc::channel::<String>(32);
-        let search = protocol::Search::spawn(tx.clone());
+        let search = Search::spawn(tx.clone());
         let mut pending = Vec::new();
         handle(
             r#"{"jsonrpc":"2.0","method":"top"}"#,

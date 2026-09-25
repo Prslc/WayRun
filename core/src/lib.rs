@@ -11,6 +11,7 @@ mod plugin;
 mod protocol;
 mod provider;
 mod rpc;
+mod session;
 mod system;
 mod watchers;
 pub mod wire;
@@ -34,7 +35,7 @@ async fn serve_or_list() -> Result<()> {
         return Ok(());
     }
 
-    protocol::serve().await
+    session::serve().await
 }
 
 /// Run the core on stdin/stdout. `wayrun --core` (or invoking the binary as
