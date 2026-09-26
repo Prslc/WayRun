@@ -179,7 +179,9 @@ fn reap(idle: Duration, only: Option<&str>) {
 mod tests {
     use super::*;
 
-    const LIMIT: Duration = Duration::from_millis(500);
+    // Functional tests, not latency tests: the suite runs in parallel with
+    // process spawns of its own, so a call gets a load-tolerant deadline.
+    const LIMIT: Duration = Duration::from_secs(5);
 
     fn script(dir: &tempfile::TempDir, name: &str, body: &str) -> String {
         use std::io::Write;
@@ -238,7 +240,9 @@ mod tests {
                 counter.display()
             ),
         );
-        let limit = Duration::from_millis(150);
+        // Wide enough that a loaded machine still lets the script write its
+        // start line before the deadline kills it.
+        let limit = Duration::from_secs(1);
         assert!(call(&command, &request(), limit).await.is_none());
         assert!(call(&command, &request(), limit).await.is_none());
         assert_eq!(starts(&counter), 2, "the stalled host was replaced");
@@ -281,21 +285,31 @@ mod tests {
             ),
         );
         let limit = Duration::from_secs(2);
+        let slot = slot_for(&command);
         let first = tokio::spawn({
             let command = command.clone();
             async move { call(&command, &request(), limit).await }
         });
+        // Wait until the first call is inside the host, so the next two queue.
         for _ in 0..200 {
             if std::fs::read_to_string(&served).is_ok_and(|text| !text.is_empty()) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
+        let taken = slot.ticket.load(Ordering::SeqCst);
         let second = tokio::spawn({
             let command = command.clone();
             async move { call(&command, &request(), limit).await }
         });
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Spawn the overtaking call only once the second took its ticket, so
+        // the skip is the code's, not the scheduler's, to decide.
+        for _ in 0..200 {
+            if slot.ticket.load(Ordering::SeqCst) > taken {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
         let third = tokio::spawn({
             let command = command.clone();
             async move { call(&command, &request(), limit).await }
