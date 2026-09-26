@@ -49,7 +49,7 @@ systemctl --user enable --now wayrun-launcher
 
 ## 代理
 
-核自身不发起对外请求；需要联网的是注册的主机（例如 WayRun-Plugins 的
+后端自身不发起对外请求；需要联网的是注册的主机（例如 WayRun-Plugins 的
 `web.lua`）。它的 `wayrun.http.get` 读取启动器进程的环境变量，因此在单元文件里用
 `Environment=` 指定：
 
