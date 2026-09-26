@@ -78,4 +78,4 @@ enabled = true
 主机可以手写。[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区提供了一套
 Python 框架、Lua 与 Python 示例及模板（`template/`、`template.lua`），可复制起步。
 主机协议是 [jsonrpc.md](jsonrpc.md)
-中记录的 JSON-RPC 子集：`search`、`top`、`select`、`forget`、`list_plugins`。
+中记录的 JSON-RPC 子集：`search`、`top`、`forget`、`list_plugins`。

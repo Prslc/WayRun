@@ -95,4 +95,4 @@ Hosts can be written by hand. The
 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace ships a
 Python framework, Lua and Python examples and templates (`template/`,
 `template.lua`), and the host protocol is the JSON-RPC subset documented in
-[jsonrpc.md](jsonrpc.md): `search`, `top`, `select`, `forget`, `list_plugins`.
+[jsonrpc.md](jsonrpc.md): `search`, `top`, `forget`, `list_plugins`.
