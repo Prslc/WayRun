@@ -140,7 +140,7 @@ async fn rpc_call_within(
         .kill_on_drop(true)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit())
         .spawn()
         .ok()?; // command not found -> no host
 
@@ -566,7 +566,7 @@ mod tests {
     async fn a_stalled_host_is_given_up_on() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("stall.sh");
-        std::fs::write(&path, "#!/bin/sh\ncat >/dev/null\nsleep 600\n").unwrap();
+        std::fs::write(&path, "#!/bin/sh\ncat >/dev/null\nexec sleep 600\n").unwrap();
         let mut perms = std::fs::metadata(&path).unwrap().permissions();
         std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
         std::fs::set_permissions(&path, perms).unwrap();
