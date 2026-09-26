@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-26
+
+### Added
+
+- A plugin can be one Lua script the launcher runs itself. `wayrun --lua-host
+  <script.lua>` answers the external-host contract (`list_plugins`, `search`,
+  `top`, `forget`) with Lua 5.4 compiled into the binary, so nothing has to be
+  installed beside it, and a `plugins.toml` `command` entry points at the script
+  like any other host, its shebang naming the mode. The script runs sandboxed: a
+  curated global set (no `os`, `io`, `package`, `load` or `print`) and a
+  `wayrun` table of bindings — `t()` for locale-correct strings, `icon`,
+  `urlencode`, `json`/`toml` decoders, `sqlite` over an immutable snapshot of a
+  database, `http.get`, a scoped `fs`, `time`, `env`, `home`, `cache_dir`,
+  `web_search_engine`, `script_dir`, `plugin_dir` and `log`. The API guide lives
+  in the WayRun-Plugins workspace (`docs/en/LUA.md`).
+- `resident = true` keeps a host process alive across calls: about a
+  millisecond per call against the fresh fork's several. A per-request deadline
+  kills and restarts a stalled or crashed host, a call a newer one overtook is
+  skipped so a keystroke burst cannot stack work on the pipe, and a host is
+  reaped when the launcher dismisses or after two minutes idle; a resident
+  host's stderr joins the journal, where a fork-per-call child's is nulled. See
+  `plugins.md`.
+- `wayrun.plugin_dir(id)` names `~/.config/wayrun/plugins/<id>/`, the directory
+  a plugin keeps its files in, and `fs.read` reads a relative path under it,
+  refusing an absolute path or a `..`; `wayrun.toml.decode` parses the plugin's
+  own config file, the format the launcher's own configs are written in. A
+  plugin id is validated as a plain name, since it becomes a directory root.
+
+### Changed
+
+- **Breaking**: `b`, `h` and `s` no longer ship. The Firefox and web plugins are
+  Lua scripts in the WayRun-Plugins workspace now, registered as ordinary hosts
+  with a `command` entry, and what remains in the launcher is the mechanism:
+  `--lua-host`, the bindings and `resident`. See `plugins.md`.
+- **Breaking**: `wayrun.http.get` answers `{status, body}` instead of the bare
+  body string, and takes a `headers` sub-table beside the query parameters. A
+  script that read the body must read `res.body`; the headers are there because
+  minreq sends no `User-Agent` of its own, so an API that requires one
+  (GitHub's) was unreachable from a plugin while the Python SDKs, whose urllib
+  sends one by default, never saw the problem.
+- Host rows parse from the reply without a per-item clone: measured on the real
+  Firefox payloads, the bookmark query takes 1.56 → 1.36 ms and the history
+  query 2.48 → 2.35 ms, and every Python host call gains the same slice.
+
+### Fixed
+
+- `ui.locale` governs the text the `.desktop` files contribute (application
+  names, their comments and desktop action labels), not just the launcher's own
+  strings: the core pins the configured locale into `LANGUAGE` as well, which is
+  the variable glib reads its language from, and the executor hands every app it
+  launches the session's original value back. See `config.md` and `usage.md`.
+
 ## [0.5.0] - 2026-09-26
 
 ### Added
