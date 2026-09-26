@@ -218,9 +218,8 @@ pub async fn discover(command: &str, resident: bool) -> Vec<HostMeta> {
         .collect()
 }
 
-/// A host `result` array as rows: icons resolved, and `plugin` stamped as the
-/// actions' owner so a host default scopes like a built-in's; `None` if unusable.
-/// Consumes the response so each row parses without a clone.
+/// A host `result` array as rows: icons resolved and `plugin` stamped as the
+/// actions' owner; `None` if unusable. Consumes the reply, so no row is cloned.
 fn parse_result_items(
     response: serde_json::Value,
     plugin: &str,
