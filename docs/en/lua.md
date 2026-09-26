@@ -45,6 +45,9 @@ example `on_click = { type = "open", uri = "https://example.com" }`.
 | `wayrun.t(key, args)` | a UI string from the launcher's own tables, with `%{name}` filled from `args` |
 | `wayrun.log(message)` | writes to the launcher's journal under the script's name |
 | `wayrun.web_search_engine()` | the configured search engine, e.g. `"google"` |
+| `wayrun.time()` | Unix seconds, for signatures and cache TTLs |
+| `wayrun.env(name)` | the launcher process's variable `name`, or nil |
+| `wayrun.script_dir()` | the script's own directory, for an icon it ships |
 | `wayrun.json.decode(text)` / `wayrun.json.encode(value)` | JSON in and out |
 | `wayrun.fs.list(dir)` | entry names under `dir`, or nil |
 | `wayrun.fs.stat(path)` | `{ mtime_ns, size }`, or nil |
@@ -56,8 +59,10 @@ example `on_click = { type = "open", uri = "https://example.com" }`.
 
 `os`, `io`, `package`, `load` and `print` are not reachable: a script cannot
 read arbitrary files or run programs, and what it needs the table above
-provides. A call that raises yields no rows and reports to the journal, so
-`wayrun.log` and a `pcall` around risky work are the debugging tools.
+provides — the launcher's environment, through `wayrun.env`, is the one part of
+its process a script can touch. A call that raises yields no rows and reports
+to the journal, so `wayrun.log` and a `pcall` around risky work are the
+debugging tools.
 
 ## Limits
 

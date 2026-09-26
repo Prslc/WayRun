@@ -268,6 +268,16 @@ fn sdk(lua: &Lua, script: &str) -> mlua::Result<Table> {
         "web_search_engine",
         lua.create_function(|_, ()| Ok(crate::config::web_search_engine()))?,
     )?;
+    sdk.set("time", lua.create_function(|_, ()| Ok(now_seconds()))?)?;
+    sdk.set(
+        "env",
+        lua.create_function(|_, name: String| Ok(std::env::var(name).ok()))?,
+    )?;
+    let dir = script_dir(script);
+    sdk.set(
+        "script_dir",
+        lua.create_function(move |_, ()| Ok(dir.clone()))?,
+    )?;
     sdk.set(
         "t",
         lua.create_function(|_, (key, args): (String, Option<Table>)| Ok(translate(&key, args)))?,
@@ -285,6 +295,21 @@ fn sdk(lua: &Lua, script: &str) -> mlua::Result<Table> {
     sdk.set("http", http_lib(lua)?)?;
     sdk.set("sqlite", sqlite_lib(lua)?)?;
     Ok(sdk)
+}
+
+/// Unix seconds, the host clock a signature or a cache TTL needs.
+fn now_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// The script's own directory, so a plugin can ship an icon beside itself; the
+/// host has just read the file, so canonicalize only fails in theory.
+fn script_dir(script: &str) -> Option<String> {
+    let path = std::fs::canonicalize(script).unwrap_or_else(|_| std::path::PathBuf::from(script));
+    path.parent().map(|dir| dir.display().to_string())
 }
 
 fn json_lib(lua: &Lua) -> mlua::Result<Table> {
@@ -747,6 +772,32 @@ mod tests {
             return { { id = "demo", search = function() return {} end } }
             "#,
         );
+    }
+
+    #[test]
+    fn time_env_and_script_dir_are_bound() {
+        let host = host(
+            r#"
+            return {
+              {
+                id = "demo",
+                search = function()
+                  local path = wayrun.env("PATH")
+                  return {
+                    { title = tostring(type(wayrun.time()) == "number") },
+                    { title = tostring(path ~= nil and #path > 0) },
+                    { title = tostring(wayrun.script_dir()) },
+                  }
+                end,
+              },
+            }
+            "#,
+        );
+        let rows = search(&host, "demo", "x");
+        assert_eq!(rows[0]["title"], "true", "time is a number");
+        assert_eq!(rows[1]["title"], "true", "PATH is readable");
+        // The test script path is fabricated, so the fallback parent wins.
+        assert_eq!(rows[2]["title"], "/test");
     }
 
     #[test]

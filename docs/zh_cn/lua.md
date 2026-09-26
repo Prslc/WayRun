@@ -43,6 +43,9 @@ return {
 | `wayrun.t(key, args)` | 取启动器自带文案表中的一条，`%{name}` 由 `args` 填充 |
 | `wayrun.log(message)` | 以脚本名义写入启动器的 journal |
 | `wayrun.web_search_engine()` | 配置的搜索引擎，如 `"google"` |
+| `wayrun.time()` | Unix 秒，用于签名与缓存 TTL |
+| `wayrun.env(name)` | 启动器进程的环境变量 `name`，否则 nil |
+| `wayrun.script_dir()` | 脚本自身所在目录，用于携带图标等文件 |
 | `wayrun.json.decode(text)` / `wayrun.json.encode(value)` | JSON 进出 |
 | `wayrun.fs.list(dir)` | `dir` 下的条目名，否则 nil |
 | `wayrun.fs.stat(path)` | `{ mtime_ns, size }`，否则 nil |
@@ -53,7 +56,8 @@ return {
 ## 沙箱
 
 `os`、`io`、`package`、`load` 与 `print` 均不可达：脚本读不了任意文件、起不了
-进程；它需要的能力由上表提供。调用中抛错则本次返回空行并记录到 journal，因此
+进程；它需要的能力由上表提供——启动器的环境变量（`wayrun.env`）是脚本能触及
+的、启动器进程的唯一信息。调用中抛错则本次返回空行并记录到 journal，因此
 `wayrun.log` 与对风险操作的 `pcall` 就是调试手段。
 
 ## 限制
