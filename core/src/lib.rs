@@ -6,6 +6,7 @@ rust_i18n::i18n!("../locales", fallback = "en");
 
 pub mod config;
 pub mod i18n;
+pub mod lua_host;
 mod notify;
 mod plugin;
 mod protocol;

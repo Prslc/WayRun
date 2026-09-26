@@ -16,6 +16,7 @@ fasteval = "0.2.4"
 gio = "0.22.9"
 libc = "0.2"
 memchr = "2.8.3"
+mlua = { version = "0.12", features = ["lua54", "vendored", "serde"] }
 notify = "8.2"
 rusqlite = "0.38.0"
 rust-i18n = { version = "1.2.2", default-features = false }

@@ -25,6 +25,20 @@ fn main() -> std::process::ExitCode {
     let invoked_as = args.next().unwrap_or_default();
     let rest: Vec<String> = args.collect();
 
+    // The Lua plugin host: the VM lives in this same binary, never in the
+    // core's process, and the script path follows the flag.
+    if let Some(at) = rest.iter().position(|arg| arg == "--lua-host") {
+        let script = rest.get(at + 1).map(String::as_str).unwrap_or_default();
+        return match wayrun_core::lua_host::run(script) {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(error) => {
+                // `{:#}` keeps the cause: a broken script must say why.
+                eprintln!("wayrun: {error:#}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
+
     // The shell re-execs this binary with `--core`; a `wayrun-core` symlink
     // keeps the documented stdin/JSON-RPC entry point working.
     let as_core = std::path::Path::new(&invoked_as)
