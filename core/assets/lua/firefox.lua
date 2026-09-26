@@ -1,3 +1,4 @@
+#!/usr/bin/env -S wayrun --lua-host
 -- Firefox bookmarks and history from places.sqlite, as one host with two
 -- plugins: both read the same newest-profile snapshot.
 

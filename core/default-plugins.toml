@@ -20,14 +20,20 @@ enabled = true
 [[plugins]]
 id = "firefox-bookmarks"
 keyword = "b"
+script = "firefox.lua"
+resident = true
 
 [[plugins]]
 id = "firefox-history"
 keyword = "h"
+script = "firefox.lua"
+resident = true
 
 [[plugins]]
 id = "web-search"
 keyword = "s"
+script = "web.lua"
+resident = true
 
 [[plugins]]
 id = "file-search"

@@ -1,3 +1,4 @@
+#!/usr/bin/env -S wayrun --lua-host
 -- Web search suggestions from the configured engine's Firefox-style suggest
 -- endpoint, one header row plus one row per suggestion.
 

@@ -97,13 +97,18 @@ mod tests {
             .to_path_buf()
     }
 
-    fn sources(root: &Path) -> Vec<PathBuf> {
+    fn sources(root: &Path, ext: &str) -> Vec<PathBuf> {
         walkdir::WalkDir::new(root)
             .into_iter()
             .filter_map(Result::ok)
-            .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "rs"))
+            .filter(|entry| entry.path().extension().is_some_and(|e| e == ext))
             .map(|entry| entry.into_path())
             .collect()
+    }
+
+    /// The shipped Lua scripts, whose `wayrun.t` calls name keys too.
+    fn lua_sources() -> Vec<PathBuf> {
+        sources(&workspace().join("core/assets/lua"), "lua")
     }
 
     fn read(path: &Path) -> String {
@@ -120,45 +125,55 @@ mod tests {
             .collect()
     }
 
-    /// Every literal key a `t!(…)` call names, in either crate.
+    /// Every literal key a `t!(…)` call names, in either crate, or a
+    /// `wayrun.t("…")` in a shipped Lua script.
     fn t_keys() -> BTreeSet<String> {
         let root = workspace();
         let mut keys = BTreeSet::new();
         for dir in [root.join("core/src"), root.join("shell/src")] {
-            for file in sources(&dir) {
-                let text = read(&file);
-                let mut rest = text.as_str();
-                while let Some(at) = rest.find("t!(\"") {
-                    // `format!("` ends in the same four characters, so the `t`
-                    // has to stand on its own.
-                    let standalone = rest[..at]
-                        .chars()
-                        .next_back()
-                        .is_none_or(|c| !c.is_alphanumeric() && c != '_');
-                    rest = &rest[at + 4..];
-                    if !standalone {
-                        continue;
-                    }
-                    let Some(end) = rest.find('"') else { break };
-                    keys.insert(rest[..end].to_string());
-                    rest = &rest[end..];
-                }
+            for file in sources(&dir, "rs") {
+                collect_keys(&read(&file), "t!(\"", &mut keys);
             }
         }
+        for file in lua_sources() {
+            collect_keys(&read(&file), "wayrun.t(\"", &mut keys);
+        }
         keys
+    }
+
+    /// The quoted keys that follow every `marker` in `text`; the standalone
+    /// check is for `t!`, whose tail `format!(` shares.
+    fn collect_keys(text: &str, marker: &str, keys: &mut BTreeSet<String>) {
+        let mut rest = text;
+        while let Some(at) = rest.find(marker) {
+            let standalone = rest[..at]
+                .chars()
+                .next_back()
+                .is_none_or(|c| !c.is_alphanumeric() && c != '_');
+            rest = &rest[at + marker.len()..];
+            if !standalone {
+                continue;
+            }
+            let Some(end) = rest.find('"') else { break };
+            keys.insert(rest[..end].to_string());
+            rest = &rest[end..];
+        }
     }
 
     /// Every key a source tree names anywhere, whatever the call shape.
     fn named_keys(defined: &BTreeSet<String>) -> BTreeSet<String> {
         let root = workspace();
         let mut named = BTreeSet::new();
-        for dir in [root.join("core/src"), root.join("shell/src")] {
-            for file in sources(&dir) {
-                let text = read(&file);
-                for key in defined {
-                    if text.contains(&format!("\"{key}\"")) {
-                        named.insert(key.clone());
-                    }
+        let files: Vec<PathBuf> = [root.join("core/src"), root.join("shell/src")]
+            .iter()
+            .flat_map(|dir| sources(dir, "rs"))
+            .chain(lua_sources())
+            .collect();
+        for file in files {
+            let text = read(&file);
+            for key in defined {
+                if text.contains(&format!("\"{key}\"")) {
+                    named.insert(key.clone());
                 }
             }
         }

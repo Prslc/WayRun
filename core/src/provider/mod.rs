@@ -3,11 +3,10 @@ pub mod calculator;
 pub mod clipboard;
 pub mod external;
 pub mod file;
-pub mod firefox;
 mod resident;
 pub mod runner;
+pub mod shipped;
 pub mod system_commands;
-pub mod web;
 pub mod window;
 
 use std::collections::HashMap;
@@ -15,8 +14,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use crate::plugin::Plugin;
-use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
-use rust_i18n::t;
+use crate::wire::ResultItem;
 
 /// Rows a provider shows: the one cap every scored provider passes to
 /// [`rank_results`], so the index and the fallback walk cannot diverge.
@@ -140,39 +138,10 @@ pub fn push_lowered(out: &mut String, s: &str) {
     }
 }
 
-/// A URL row's extra command: copy the link instead of opening it. Several
-/// providers share it, so it carries its own remembered-default scope.
-pub fn copy_url_action(item: &ResultItem) -> Vec<ActionItem> {
-    let Some(Action::Open { uri }) = item.on_click.as_ref() else {
-        return Vec::new();
-    };
-    if !uri.starts_with("http") {
-        return Vec::new();
-    }
-    vec![ActionItem {
-        title: t!("action.copy_url"),
-        action: PanelAction::Execute {
-            command: Action::Copy { text: uri.clone() },
-        },
-        icon: Some("builtin:copy".to_string()),
-        id: Some("copy_url".to_string()),
-        plugin: Some(COPY_URL_SCOPE.to_string()),
-        default: false,
-    }]
-}
-
-/// The remembered-default scope of the shared copy-link action.
-const COPY_URL_SCOPE: &str = "copy-url";
-
 pub fn plugin_map() -> HashMap<&'static str, Box<dyn Plugin>> {
     let mut m: HashMap<&'static str, Box<dyn Plugin>> = HashMap::default();
     m.insert("calculator", Box::new(calculator::Calculator::new()));
     m.insert("app-search", Box::new(application::AppSearch::new()));
-    m.insert(
-        "firefox-bookmarks",
-        Box::new(firefox::FirefoxBookmarks::new()),
-    );
-    m.insert("firefox-history", Box::new(firefox::FirefoxHistory::new()));
     m.insert("file-search", Box::new(file::FileSearch::new()));
     m.insert("path-search", Box::new(file::PathSearch::new()));
     m.insert("clipboard", Box::new(clipboard::Clipboard::new()));
@@ -182,7 +151,6 @@ pub fn plugin_map() -> HashMap<&'static str, Box<dyn Plugin>> {
     );
     m.insert("runner", Box::new(runner::Runner::new()));
     m.insert("window", Box::new(window::WindowPlugin::new()));
-    m.insert("web-search", Box::new(web::WebSearch::new()));
     m
 }
 
@@ -193,46 +161,6 @@ mod tests {
         Match, classify, classify_bytes_confident, classify_ci, classify_ci_confident,
         classify_confident,
     };
-
-    fn row(on_click: Option<Action>) -> ResultItem {
-        ResultItem {
-            title: "x".to_string(),
-            summary: None,
-            on_click,
-            icon: None,
-            ephemeral: false,
-            actions: Vec::new(),
-            badge: None,
-        }
-    }
-
-    #[test]
-    fn only_a_url_row_offers_a_copy_link() {
-        let actions = copy_url_action(&row(Some(Action::Open {
-            uri: "https://example.com".to_string(),
-        })));
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].title, t!("action.copy_url"));
-        assert_eq!(
-            actions[0].action,
-            PanelAction::Execute {
-                command: Action::Copy {
-                    text: "https://example.com".to_string()
-                }
-            }
-        );
-        // a shared action scopes its own default; a plugin's would apply to that
-        // plugin's rows only, and ownerless would forbid a default entirely
-        assert_eq!(actions[0].plugin.as_deref(), Some(COPY_URL_SCOPE));
-
-        assert!(
-            copy_url_action(&row(Some(Action::Run {
-                cmd: "ls".to_string()
-            })))
-            .is_empty()
-        );
-        assert!(copy_url_action(&row(None)).is_empty());
-    }
 
     #[test]
     fn a_case_insensitive_classify_matches_the_lowered_one() {

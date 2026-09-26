@@ -89,23 +89,29 @@ fn build_entries(config: &Config) -> Vec<Entry> {
             });
             continue;
         }
-        let Some(command) = &p.command else {
-            continue;
+        let command = match (&p.command, &p.script) {
+            (Some(command), _) => command.clone(),
+            (None, Some(script)) => match crate::provider::shipped::path(script) {
+                Some(path) => path.display().to_string(),
+                None => continue,
+            },
+            (None, None) => continue,
         };
+        let resident = p.resident.unwrap_or(false);
         let meta = cache
-            .fresh(command)
+            .fresh(&command)
             .and_then(|metas| metas.into_iter().find(|m| m.id == p.id));
         let pending = meta.is_none().then(|| PendingHost {
             id: p.id.clone(),
             command: command.clone(),
-            resident: p.resident,
+            resident,
         });
         entries.push(Entry {
             plugin: Box::new(crate::provider::external::External::new(
                 &p.id,
                 command.clone(),
                 meta,
-                p.resident,
+                resident,
             )),
             keyword: p.keyword.clone(),
             external: true,
@@ -222,7 +228,7 @@ fn ensure_default_config(path: &std::path::Path) {
 }
 
 /// Overlay a user config on the shipped default: known ids take the user's
-/// keyword/enabled/command, unknown ids are appended (host-less ones skipped).
+/// keyword/enabled and any host field it set; unknown ids are appended as-is.
 fn merge_config(mut base: Config, user: Config) -> Config {
     for up in user.plugins {
         match base.plugins.iter_mut().find(|p| p.id == up.id) {
@@ -231,6 +237,12 @@ fn merge_config(mut base: Config, user: Config) -> Config {
                 dp.enabled = up.enabled;
                 if up.command.is_some() {
                     dp.command = up.command;
+                }
+                if up.script.is_some() {
+                    dp.script = up.script;
+                }
+                if up.resident.is_some() {
+                    dp.resident = up.resident;
                 }
             }
             None => base.plugins.push(up),
@@ -337,6 +349,46 @@ mod tests {
         assert_eq!(merged.plugins[0].keyword, "calc");
         assert!(!merged.plugins[0].enabled);
         assert!(merged.plugins[0].command.is_none());
+    }
+
+    #[test]
+    fn user_script_and_resident_override_only_when_set() {
+        let base_src = r#"
+            [[plugins]]
+            id = "firefox-bookmarks"
+            keyword = "b"
+            script = "firefox.lua"
+            resident = true
+            "#;
+        // An older user file without the new keys keeps the shipped wiring.
+        let merged = merge_config(
+            parse(base_src),
+            parse(
+                r#"
+                [[plugins]]
+                id = "firefox-bookmarks"
+                keyword = "b"
+                "#,
+            ),
+        );
+        assert_eq!(merged.plugins[0].script.as_deref(), Some("firefox.lua"));
+        assert_eq!(merged.plugins[0].resident, Some(true));
+
+        let merged = merge_config(
+            parse(base_src),
+            parse(
+                r#"
+                [[plugins]]
+                id = "firefox-bookmarks"
+                keyword = "bb"
+                script = "mine.lua"
+                resident = false
+                "#,
+            ),
+        );
+        assert_eq!(merged.plugins[0].keyword, "bb");
+        assert_eq!(merged.plugins[0].script.as_deref(), Some("mine.lua"));
+        assert_eq!(merged.plugins[0].resident, Some(false));
     }
 
     #[test]
