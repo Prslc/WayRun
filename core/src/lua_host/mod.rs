@@ -1,17 +1,13 @@
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::ffi::OsString;
 use std::io::{BufRead, Write};
-use std::os::unix::ffi::OsStringExt;
-use std::path::{Path, PathBuf};
-use std::rc::Rc;
-use std::time::UNIX_EPOCH;
 
 use anyhow::{Context, Result};
 use mlua::{Function, Lua, LuaOptions, LuaSerdeExt, StdLib, Table, Value};
 use serde_json::json;
 
 use crate::wire::ResultItem;
+
+mod sdk;
+mod sqlite;
 
 /// `wayrun --lua-host <script.lua>`: answer the external-host JSON-RPC
 /// contract from one Lua script, with the VM living in a process of its own.
@@ -56,8 +52,8 @@ impl Host {
         // mlua's error carries no Send bound, so it converts here, once.
         let load = || -> mlua::Result<(Lua, Vec<Plugin>)> {
             let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::default())?;
-            let sdk = sdk(&lua, script)?;
-            let env = script_env(&lua, &sdk)?;
+            let wayrun = sdk::build(&lua, script)?;
+            let env = script_env(&lua, &wayrun)?;
             let declared: Table = lua
                 .load(source)
                 .set_name(script)
@@ -240,412 +236,16 @@ impl Host {
     }
 }
 
-fn sdk(lua: &Lua, script: &str) -> mlua::Result<Table> {
-    let sdk = lua.create_table()?;
-    sdk.set(
-        "home",
-        lua.create_function(|_, ()| {
-            Ok(crate::system::fs::get_home()
-                .ok()
-                .map(|path| path.display().to_string()))
-        })?,
-    )?;
-    sdk.set(
-        "cache_dir",
-        lua.create_function(|_, ()| {
-            Ok(crate::system::fs::cache_dir().map(|path| path.display().to_string()))
-        })?,
-    )?;
-    sdk.set(
-        "icon",
-        lua.create_function(|_, spec: String| Ok(crate::system::icon::resolve(&spec)))?,
-    )?;
-    sdk.set(
-        "urlencode",
-        lua.create_function(|_, text: String| Ok(urlencoding::encode(&text).into_owned()))?,
-    )?;
-    sdk.set(
-        "web_search_engine",
-        lua.create_function(|_, ()| Ok(crate::config::web_search_engine()))?,
-    )?;
-    sdk.set("time", lua.create_function(|_, ()| Ok(now_seconds()))?)?;
-    sdk.set(
-        "env",
-        lua.create_function(|_, name: String| Ok(std::env::var(name).ok()))?,
-    )?;
-    let dir = script_dir(script);
-    sdk.set(
-        "script_dir",
-        lua.create_function(move |_, ()| Ok(dir.clone()))?,
-    )?;
-    sdk.set(
-        "t",
-        lua.create_function(|_, (key, args): (String, Option<Table>)| Ok(translate(&key, args)))?,
-    )?;
-    let name = script.to_string();
-    sdk.set(
-        "log",
-        lua.create_function(move |_, message: String| {
-            warn(&name, &message);
-            Ok(())
-        })?,
-    )?;
-    sdk.set("json", json_lib(lua)?)?;
-    sdk.set("fs", fs_lib(lua)?)?;
-    sdk.set("http", http_lib(lua)?)?;
-    sdk.set("sqlite", sqlite_lib(lua)?)?;
-    Ok(sdk)
-}
-
-/// Unix seconds, the host clock a signature or a cache TTL needs.
-fn now_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|since| since.as_secs() as i64)
-        .unwrap_or(0)
-}
-
-/// The script's own directory, so a plugin can ship an icon beside itself; the
-/// host has just read the file, so canonicalize only fails in theory.
-fn script_dir(script: &str) -> Option<String> {
-    let path = std::fs::canonicalize(script).unwrap_or_else(|_| std::path::PathBuf::from(script));
-    path.parent().map(|dir| dir.display().to_string())
-}
-
-fn json_lib(lua: &Lua) -> mlua::Result<Table> {
-    let json = lua.create_table()?;
-    json.set(
-        "decode",
-        lua.create_function(|lua, source: String| {
-            let value: serde_json::Value = serde_json::from_str(&source)
-                .map_err(|error| mlua::Error::RuntimeError(format!("json.decode: {error}")))?;
-            lua.to_value(&value)
-        })?,
-    )?;
-    json.set(
-        "encode",
-        lua.create_function(|lua, value: Value| {
-            let value: serde_json::Value = lua
-                .from_value(value)
-                .map_err(|error| mlua::Error::RuntimeError(format!("json.encode: {error}")))?;
-            serde_json::to_string(&value)
-                .map_err(|error| mlua::Error::RuntimeError(format!("json.encode: {error}")))
-        })?,
-    )?;
-    Ok(json)
-}
-
-fn fs_lib(lua: &Lua) -> mlua::Result<Table> {
-    let fs = lua.create_table()?;
-    fs.set(
-        "list",
-        lua.create_function(|lua, dir: String| {
-            let Ok(entries) = std::fs::read_dir(&dir) else {
-                return Ok(Value::Nil);
-            };
-            let list = lua.create_table()?;
-            let mut at = 0;
-            for entry in entries.flatten() {
-                if let Some(name) = entry.file_name().to_str() {
-                    at += 1;
-                    list.set(at, name.to_string())?;
-                }
-            }
-            Ok(Value::Table(list))
-        })?,
-    )?;
-    fs.set(
-        "stat",
-        lua.create_function(|lua, path: String| {
-            let Ok(meta) = std::fs::metadata(&path) else {
-                return Ok(Value::Nil);
-            };
-            let mtime_ns = meta
-                .modified()
-                .ok()
-                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-                .map(|since| since.as_nanos() as i64)
-                .unwrap_or(0);
-            let stat = lua.create_table()?;
-            stat.set("mtime_ns", mtime_ns)?;
-            stat.set("size", meta.len() as i64)?;
-            Ok(Value::Table(stat))
-        })?,
-    )?;
-    Ok(fs)
-}
-
-fn http_lib(lua: &Lua) -> mlua::Result<Table> {
-    let http = lua.create_table()?;
-    http.set(
-        "get",
-        lua.create_function(
-            |_, (url, params, timeout_ms): (String, Option<Table>, Option<u64>)| {
-                let seconds = (timeout_ms.unwrap_or(5_000) / 1_000).max(1);
-                let mut request = minreq::get(&url).with_timeout(seconds);
-                if let Some(params) = params {
-                    for pair in params.pairs::<String, Value>() {
-                        let (name, value) = pair?;
-                        let value = match value {
-                            Value::Integer(number) => number.to_string(),
-                            Value::Number(number) => number.to_string(),
-                            Value::String(text) => text.to_string_lossy(),
-                            Value::Boolean(flag) => flag.to_string(),
-                            other => {
-                                return Err(mlua::Error::RuntimeError(format!(
-                                    "http params must be scalars, got {other:?}"
-                                )));
-                            }
-                        };
-                        request = request.with_param(name, value);
-                    }
-                }
-                let request = match proxy_from_env() {
-                    Some(proxy) => request.with_proxy(proxy),
-                    None => request,
-                };
-                let response = request.send().map_err(|error| {
-                    mlua::Error::RuntimeError(format!("http.get {url}: {error}"))
-                })?;
-                response
-                    .as_str()
-                    .map(str::to_string)
-                    .map_err(|error| mlua::Error::RuntimeError(format!("http.get {url}: {error}")))
-            },
-        )?,
-    )?;
-    Ok(http)
-}
-
-fn proxy_from_env() -> Option<minreq::Proxy> {
-    let spec = ["https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY"]
-        .into_iter()
-        .find_map(|key| std::env::var(key).ok().filter(|value| !value.is_empty()))?;
-    match minreq::Proxy::new(&spec) {
-        Ok(proxy) => Some(proxy),
-        Err(error) => {
-            warn("sdk", &format!("ignoring proxy {spec:?}: {error}"));
-            None
-        }
-    }
-}
-
-/// Open connections kept across a script's calls, so a keystroke is one query
-/// rather than a copy, a connect and a schema parse as well.
-#[derive(Default)]
-struct Snapshots {
-    next: u64,
-    open: HashMap<u64, rusqlite::Connection>,
-}
-
-fn sqlite_lib(lua: &Lua) -> mlua::Result<Table> {
-    let sqlite = lua.create_table()?;
-    let snapshots = Rc::new(RefCell::new(Snapshots::default()));
-    let opener = Rc::clone(&snapshots);
-    sqlite.set(
-        "snapshot",
-        lua.create_function(move |_, path: String| {
-            let cache = crate::system::fs::cache_dir().ok_or_else(|| {
-                mlua::Error::RuntimeError("sqlite.snapshot: no cache directory".to_string())
-            })?;
-            opener
-                .borrow_mut()
-                .snapshot(&path, &cache)
-                .map_err(|error| mlua::Error::RuntimeError(format!("sqlite.snapshot: {error:#}")))
-        })?,
-    )?;
-    sqlite.set(
-        "query",
-        lua.create_function(
-            move |lua, (id, sql, params): (u64, String, Option<Table>)| {
-                let params = sqlite_params(params)?;
-                let rows = snapshots
-                    .borrow()
-                    .query(id, &sql, params)
-                    .map_err(|error| {
-                        mlua::Error::RuntimeError(format!("sqlite.query: {error:#}"))
-                    })?;
-                lua.to_value(&serde_json::Value::Array(rows))
-            },
-        )?,
-    )?;
-    Ok(sqlite)
-}
-
-impl Snapshots {
-    fn snapshot(&mut self, source: &str, cache: &Path) -> Result<u64> {
-        let copy = snapshot_copy(Path::new(source), cache)?;
-        let connection = rusqlite::Connection::open_with_flags(
-            snapshot_uri(&copy),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-                | rusqlite::OpenFlags::SQLITE_OPEN_URI
-                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )?;
-        self.next += 1;
-        self.open.insert(self.next, connection);
-        Ok(self.next)
-    }
-
-    fn query(
-        &self,
-        id: u64,
-        sql: &str,
-        params: Vec<rusqlite::types::Value>,
-    ) -> Result<Vec<serde_json::Value>> {
-        let connection = self.open.get(&id).context("unknown sqlite handle")?;
-        let mut statement = connection.prepare_cached(sql)?;
-        let columns: Vec<String> = statement
-            .column_names()
-            .iter()
-            .map(|name| name.to_string())
-            .collect();
-        let mut rows = statement.query(rusqlite::params_from_iter(params))?;
-        let mut out = Vec::new();
-        while let Some(row) = rows.next()? {
-            let mut record = serde_json::Map::new();
-            for (index, name) in columns.iter().enumerate() {
-                match row.get_ref(index)? {
-                    rusqlite::types::ValueRef::Null => {}
-                    rusqlite::types::ValueRef::Text(text) => {
-                        record.insert(
-                            name.clone(),
-                            json!(String::from_utf8_lossy(text).into_owned()),
-                        );
-                    }
-                    rusqlite::types::ValueRef::Integer(number) => {
-                        record.insert(name.clone(), json!(number));
-                    }
-                    rusqlite::types::ValueRef::Real(number) => {
-                        record.insert(name.clone(), json!(number));
-                    }
-                    // No consumer reads blobs; a blob column reads as absent.
-                    rusqlite::types::ValueRef::Blob(_) => {}
-                }
-            }
-            out.push(serde_json::Value::Object(record));
-        }
-        Ok(out)
-    }
-}
-
-fn sqlite_params(params: Option<Table>) -> mlua::Result<Vec<rusqlite::types::Value>> {
-    let mut out = Vec::new();
-    if let Some(params) = params {
-        for value in params.sequence_values::<Value>() {
-            out.push(match value? {
-                Value::Integer(number) => rusqlite::types::Value::Integer(number),
-                Value::Number(number) => rusqlite::types::Value::Real(number),
-                Value::String(text) => rusqlite::types::Value::Text(text.to_string_lossy()),
-                Value::Boolean(flag) => rusqlite::types::Value::Integer(flag as i64),
-                Value::Nil => rusqlite::types::Value::Null,
-                other => {
-                    return Err(mlua::Error::RuntimeError(format!(
-                        "sqlite params must be scalars, got {other:?}"
-                    )));
-                }
-            });
-        }
-    }
-    Ok(out)
-}
-
-/// The cached immutable copy of `source` for its current `(mtime, size)`; the
-/// snapshot keeps the writer's locking, `-wal` and `-shm` out of the picture.
-fn snapshot_copy(source: &Path, cache: &Path) -> Result<PathBuf> {
-    let meta = std::fs::metadata(source)?;
-    let size = meta.len();
-    let nanos = meta
-        .modified()?
-        .duration_since(UNIX_EPOCH)
-        .map(|since| since.as_nanos())
-        .unwrap_or(0);
-
-    let stem = format!("snap-{:016x}", hash_path(source));
-    let target = cache.join(format!("{stem}-{nanos}-{size}.sqlite"));
-    if target.is_file() {
-        return Ok(target);
-    }
-
-    // A pid-suffixed tmp keeps two racing hosts from interleaving one copy.
-    let tmp = cache.join(format!("{stem}.{}.tmp", std::process::id()));
-    std::fs::copy(source, &tmp)?;
-    std::fs::rename(&tmp, &target)?;
-    prune(cache, &target);
-    Ok(target)
-}
-
-/// Leave one `snap-*` snapshot behind (a superseded one and a crashed copy's
-/// tmp), so the cache holds a single copy per source.
-fn prune(dir: &Path, keep: &Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for path in entries.flatten().map(|entry| entry.path()) {
-        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        let stale = (name.starts_with("snap-") && name.ends_with(".sqlite") && path != keep)
-            || (name.starts_with("snap-") && name.ends_with(".tmp"));
-        if stale {
-            let _ = std::fs::remove_file(path);
-        }
-    }
-}
-
-fn hash_path(path: &Path) -> u64 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in path.as_os_str().as_encoded_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    hash
-}
-
-/// A snapshot's `file:` URI: `immutable=1` fits a copy that is never modified
-/// in place, and drops the locking, `-shm` and `-wal` machinery entirely.
-fn snapshot_uri(path: &Path) -> PathBuf {
-    let mut bytes = b"file:".to_vec();
-    for &byte in path.as_os_str().as_encoded_bytes() {
-        // escape everything outside the URI unreserved set, non-UTF-8 bytes included
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'.' | b'_' | b'~') {
-            bytes.push(byte);
-        } else {
-            bytes.extend_from_slice(format!("%{byte:02X}").as_bytes());
-        }
-    }
-    bytes.extend_from_slice(b"?immutable=1");
-    PathBuf::from(OsString::from_vec(bytes))
-}
-
-/// A script's `wayrun.t(key, args)`: the same tables the core reads, with the
-/// `%{name}` placeholders filled from `args`.
-fn translate(key: &str, args: Option<Table>) -> String {
-    let mut message = crate::_rust_i18n_translate(&rust_i18n::locale(), key);
-    if let Some(args) = args {
-        for pair in args.pairs::<String, Value>() {
-            let Ok((name, value)) = pair else { continue };
-            let text = match value {
-                Value::Integer(number) => number.to_string(),
-                Value::Number(number) => number.to_string(),
-                Value::String(text) => text.to_string_lossy(),
-                other => format!("{other:?}"),
-            };
-            message = message.replace(&format!("%{{{name}}}"), &text);
-        }
-    }
-    message
-}
-
 /// The script's whole world: a curated core of Lua plus `wayrun`. `os`, `io`,
 /// `package` and `load` are absent, and so is `print` (stdout is the wire).
-fn script_env(lua: &Lua, sdk: &Table) -> mlua::Result<Table> {
+fn script_env(lua: &Lua, wayrun: &Table) -> mlua::Result<Table> {
     let globals = lua.globals();
     let env = lua.create_table()?;
     for name in SAFE_GLOBALS {
         let value: Value = globals.get(*name)?;
         env.set(*name, value)?;
     }
-    env.set("wayrun", sdk)?;
+    env.set("wayrun", wayrun)?;
     Ok(env)
 }
 
@@ -717,7 +317,7 @@ fn read_plugins(declared: &Table, script: &str) -> mlua::Result<Vec<Plugin>> {
     Ok(plugins)
 }
 
-fn warn(script: &str, message: &str) {
+pub(super) fn warn(script: &str, message: &str) {
     eprintln!("wayrun-core: lua plugin {script}: {message}");
 }
 
@@ -899,36 +499,5 @@ mod tests {
         text: &str,
     ) -> std::result::Result<serde_json::Value, (i64, String)> {
         call(host, "search", json!({ "plugin": plugin, "text": text }))
-    }
-
-    #[test]
-    fn a_snapshot_query_reads_rows_and_absent_nulls() {
-        let dir = tempfile::tempdir().unwrap();
-        let source = dir.path().join("places.sqlite");
-        {
-            let connection = rusqlite::Connection::open(&source).unwrap();
-            connection
-                .execute_batch(
-                    "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT, note TEXT);
-                     INSERT INTO t (name) VALUES ('alpha'), ('beta');",
-                )
-                .unwrap();
-        }
-
-        let mut snapshots = Snapshots::default();
-        let id = snapshots
-            .snapshot(source.to_str().unwrap(), dir.path())
-            .unwrap();
-        let rows = snapshots
-            .query(
-                id,
-                "SELECT name FROM t WHERE name LIKE ?1 ORDER BY name",
-                vec![rusqlite::types::Value::Text("%a%".to_string())],
-            )
-            .unwrap();
-        assert_eq!(rows[0]["name"], "alpha");
-
-        let rows = snapshots.query(id, "SELECT note FROM t", vec![]).unwrap();
-        assert!(rows[0].as_object().unwrap().get("note").is_none());
     }
 }
