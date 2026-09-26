@@ -216,12 +216,24 @@ fn http_lib(lua: &Lua) -> mlua::Result<Table> {
     http.set(
         "get",
         lua.create_function(
-            |_, (url, params, timeout_ms): (String, Option<Table>, Option<u64>)| {
+            |lua, (url, params, timeout_ms): (String, Option<Table>, Option<u64>)| {
                 let seconds = (timeout_ms.unwrap_or(5_000) / 1_000).max(1);
                 let mut request = minreq::get(&url).with_timeout(seconds);
                 if let Some(params) = params {
                     for pair in params.pairs::<String, Value>() {
                         let (name, value) = pair?;
+                        if name == "headers" {
+                            let Value::Table(headers) = value else {
+                                return Err(mlua::Error::RuntimeError(format!(
+                                    "http headers must be a table, got {value:?}"
+                                )));
+                            };
+                            for pair in headers.pairs::<String, String>() {
+                                let (key, value) = pair?;
+                                request = request.with_header(key, value);
+                            }
+                            continue;
+                        }
                         let value = match value {
                             Value::Integer(number) => number.to_string(),
                             Value::Number(number) => number.to_string(),
@@ -243,10 +255,13 @@ fn http_lib(lua: &Lua) -> mlua::Result<Table> {
                 let response = request.send().map_err(|error| {
                     mlua::Error::RuntimeError(format!("http.get {url}: {error}"))
                 })?;
-                response
-                    .as_str()
-                    .map(str::to_string)
-                    .map_err(|error| mlua::Error::RuntimeError(format!("http.get {url}: {error}")))
+                let body = response.as_str().map_err(|error| {
+                    mlua::Error::RuntimeError(format!("http.get {url}: {error}"))
+                })?;
+                let reply = lua.create_table()?;
+                reply.set("status", response.status_code)?;
+                reply.set("body", body)?;
+                Ok(reply)
             },
         )?,
     )?;
@@ -310,5 +325,52 @@ mod tests {
         assert!(scoped_read(&roots, "a/../b").is_err());
         assert!(scoped_read(&roots, "/etc/hostname").is_err());
         assert!(scoped_read(&roots, "").is_err());
+    }
+
+    #[test]
+    fn http_get_sends_its_headers_and_answers_status_and_body() {
+        use std::io::{BufRead, BufReader, Write};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut head = String::new();
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
+                    break;
+                }
+                head.push_str(&line);
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                .unwrap();
+            head
+        });
+
+        let lua = Lua::new();
+        lua.globals().set("http", http_lib(&lua).unwrap()).unwrap();
+        lua.globals()
+            .set("url", format!("http://127.0.0.1:{port}/search"))
+            .unwrap();
+        let (status, body): (u16, String) = lua
+            .load(
+                r#"
+                local res = http.get(url, {
+                    q = "rust lang",
+                    headers = { ["X-Test"] = "yes" },
+                }, 2000)
+                return res.status, res.body
+                "#,
+            )
+            .eval()
+            .unwrap();
+        assert_eq!((status, body.as_str()), (200, "ok"));
+
+        let head = server.join().unwrap();
+        assert!(head.contains("X-Test: yes"), "{head}");
+        assert!(head.contains("q=rust%20lang"), "{head}");
     }
 }
