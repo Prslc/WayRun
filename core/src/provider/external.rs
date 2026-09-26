@@ -416,6 +416,84 @@ mod tests {
         assert!(!items[1].ephemeral, "an absent flag means record it");
     }
 
+    /// The golden corpus the Python SDK pins on its side (WayRun-Plugin,
+    /// `tests/test_golden.py`); both ends accept the same shapes.
+    #[test]
+    fn every_command_variant_parses_from_a_host() {
+        let response = serde_json::json!({
+            "result": [
+                {"title": "run", "on_click": {"type": "run", "cmd": "echo hi"}},
+                {"title": "terminal run", "on_click": {"type": "run_in_terminal", "cmd": "htop"}},
+                {"title": "open", "on_click": {"type": "open", "uri": "https://example.com"}},
+                {"title": "copy", "on_click": {"type": "copy", "text": "x"}},
+                {"title": "launch", "on_click": {"type": "launch", "desktop_id": "firefox.desktop"}},
+                {"title": "desktop action", "on_click": {"type": "desktop_action", "desktop_id": "firefox.desktop", "action_id": "new-private-window"}},
+                {"title": "reveal", "on_click": {"type": "reveal", "uri": "file:///home/u"}},
+                {"title": "terminal", "on_click": {"type": "terminal", "uri": "file:///home/u"}},
+                {"title": "ephemeral", "ephemeral": true},
+                {"title": "nulls", "summary": null, "on_click": null, "icon": null},
+            ]
+        });
+        let items = parse_result_items(&response, "golden", "/opt/identity.svg").unwrap();
+        assert_eq!(items.len(), 10, "every corpus row survives");
+        assert_eq!(
+            items[0].on_click,
+            Some(Action::Run {
+                cmd: "echo hi".to_string()
+            })
+        );
+        assert_eq!(
+            items[1].on_click,
+            Some(Action::RunInTerminal {
+                cmd: "htop".to_string()
+            })
+        );
+        assert_eq!(
+            items[2].on_click,
+            Some(Action::Open {
+                uri: "https://example.com".to_string()
+            })
+        );
+        assert_eq!(
+            items[3].on_click,
+            Some(Action::Copy {
+                text: "x".to_string()
+            })
+        );
+        assert_eq!(
+            items[4].on_click,
+            Some(Action::Launch {
+                desktop_id: "firefox.desktop".to_string()
+            })
+        );
+        assert_eq!(
+            items[5].on_click,
+            Some(Action::DesktopAction {
+                desktop_id: "firefox.desktop".to_string(),
+                action_id: "new-private-window".to_string()
+            })
+        );
+        assert_eq!(
+            items[6].on_click,
+            Some(Action::Reveal {
+                uri: "file:///home/u".to_string()
+            })
+        );
+        assert_eq!(
+            items[7].on_click,
+            Some(Action::Terminal {
+                uri: "file:///home/u".to_string()
+            })
+        );
+        assert!(items[8].ephemeral);
+        assert!(items[9].summary.is_none() && items[9].on_click.is_none());
+        assert_eq!(
+            items[9].icon.as_deref(),
+            Some("/opt/identity.svg"),
+            "an unset icon falls back to the identity"
+        );
+    }
+
     /// A host that answers the way a plugin framework does: it consumes the
     /// request and prints one response line.
     fn host(dir: &tempfile::TempDir, reply: &str) -> String {
