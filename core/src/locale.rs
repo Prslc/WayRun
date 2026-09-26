@@ -1,11 +1,31 @@
+use std::sync::OnceLock;
+
 /// The environment variables that name a locale, most specific first.
 const VARS: [&str; 4] = ["LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"];
 
-/// Point the process at the UI locale (`ui.locale`, else the session's), process-
-/// global so every crate's chrome and row text agree; a change needs a restart.
+/// The `LANGUAGE` the process started with, kept so launched apps can get it
+/// back: `init` pins the launcher's own choice there.
+static AMBIENT_LANGUAGE: OnceLock<Option<String>> = OnceLock::new();
+
+/// Point the process at the UI locale (`ui.locale`, else the session's), for every
+/// crate's chrome, the rows and glib's `.desktop` strings alike; needs a restart.
 pub fn init() {
     let config = crate::config::get();
-    rust_i18n::set_locale(&resolve(&config.ui.locale, |key| std::env::var(key).ok()));
+    let locale = resolve(&config.ui.locale, |key| std::env::var(key).ok());
+    rust_i18n::set_locale(&locale);
+    let ambient = std::env::var("LANGUAGE").ok();
+    let tag = glib_tag(&locale);
+    if ambient.as_deref() != Some(tag.as_str()) {
+        // SAFETY: both binaries call `init` before any other thread exists, and
+        // glib first reads the variable when its first locale lookup runs later.
+        unsafe { std::env::set_var("LANGUAGE", &tag) };
+    }
+    let _ = AMBIENT_LANGUAGE.set(ambient);
+}
+
+/// The `LANGUAGE` the process started with; absent when the session set none.
+pub(crate) fn ambient_language() -> Option<String> {
+    AMBIENT_LANGUAGE.get().cloned().flatten()
 }
 
 /// The configured locale when it names one, else the session's.
@@ -46,6 +66,18 @@ fn normalize(raw: &str) -> Option<String> {
     Some(tag)
 }
 
+/// A locale stem as the language tag glib matches `.desktop` keys with:
+/// `zh_cn` -> `zh_CN`, `en_us` -> `en_US`, `en` -> `en`.
+fn glib_tag(stem: &str) -> String {
+    let mut parts = stem.split('_');
+    let mut tag = parts.next().unwrap_or_default().to_string();
+    for part in parts {
+        tag.push('_');
+        tag.push_str(&part.to_uppercase());
+    }
+    tag
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,6 +103,13 @@ mod tests {
         assert_eq!(normalize("en_US.UTF-8").as_deref(), Some("en_us"));
         assert_eq!(normalize("zh_TW.UTF-8").as_deref(), Some("zh_cn"));
         assert_eq!(normalize("  "), None);
+    }
+
+    #[test]
+    fn a_stem_becomes_a_glib_language_tag() {
+        assert_eq!(glib_tag("zh_cn"), "zh_CN");
+        assert_eq!(glib_tag("en_us"), "en_US");
+        assert_eq!(glib_tag("en"), "en");
     }
 
     #[test]

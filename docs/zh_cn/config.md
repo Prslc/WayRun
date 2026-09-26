@@ -8,9 +8,10 @@
 
 | 键 | 默认 | 含义 |
 | --- | --- | --- |
-| `locale` | *（会话语言）* | 界面语言：`en` 或 `zh_cn`。省略时跟随 `$LC_ALL`/`$LC_MESSAGES`/`$LANG`。 |
+| `locale` | *（会话语言）* | 界面语言：`en` 或 `zh_cn`。省略时跟随 `$LC_ALL`/`$LC_MESSAGES`/`$LANG`/`$LANGUAGE`。 |
 
 启动时读取，因此修改后需下次启动生效（`systemctl --user restart wayrun-launcher`）。
+`.desktop` 文件带来的文字——应用名称、说明与桌面动作名——同样跟随此设置。
 没有对应语言表的值会退回英文，留空等同不写这个键。
 
 ## `[web_search]`

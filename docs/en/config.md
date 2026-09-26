@@ -9,11 +9,13 @@ default shown here.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `locale` | *(session locale)* | Interface language: `en` or `zh_cn`. Omitted, the launcher follows `$LC_ALL`/`$LC_MESSAGES`/`$LANG`. |
+| `locale` | *(session locale)* | Interface language: `en` or `zh_cn`. Omitted, the launcher follows `$LC_ALL`/`$LC_MESSAGES`/`$LANG`/`$LANGUAGE`. |
 
 Read at startup, so a change takes effect on the next launch
-(`systemctl --user restart wayrun-launcher`). A value with no table of its own
-falls back to English, and a blank value is the same as leaving the key out.
+(`systemctl --user restart wayrun-launcher`), and it also decides the language
+of the text `.desktop` files contribute: application names, their comments and
+desktop action labels. A value with no table of its own falls back to English,
+and a blank value is the same as leaving the key out.
 
 ## `[web_search]`
 

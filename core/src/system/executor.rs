@@ -43,6 +43,12 @@ fn scoped_command(scope: bool, program: &str, args: &[String]) -> process::Comma
         process::Command::new(program)
     };
     command.args(args);
+    // A launched app gets the session's language back: `locale` pins the
+    // launcher's own into `LANGUAGE`, and an app must not inherit that choice.
+    match crate::locale::ambient_language() {
+        Some(language) => command.env("LANGUAGE", language),
+        None => command.env_remove("LANGUAGE"),
+    };
     command
 }
 

@@ -20,7 +20,7 @@ use crate::ui::render;
 use crate::wayland::Shell;
 
 fn main() -> std::process::ExitCode {
-    wayrun_core::i18n::init();
+    wayrun_core::locale::init();
     let mut args = std::env::args();
     let invoked_as = args.next().unwrap_or_default();
     let rest: Vec<String> = args.collect();

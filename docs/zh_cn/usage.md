@@ -72,7 +72,8 @@
 再取 `$LANGUAGE` 的第一项。目前内置英文与简体中文；其他语言一律退回英文。
 
 要让语言不随会话变化，用 `config.toml` 的 `[ui] locale` 固定即可；常驻服务尤其需要它——它的
-unit 要么继承会话的语言环境，要么什么都没有。在 unit 里设 `Environment=LC_ALL=zh_CN.UTF-8`
+unit 要么继承会话的语言环境，要么什么都没有。应用名称、说明与桌面动作名来自 `.desktop`
+文件，同样跟随这一设置。在 unit 里设 `Environment=LC_ALL=zh_CN.UTF-8`
 同样有效。两种方式都只在启动时读取，改完需重启服务。
 
 ## 置顶

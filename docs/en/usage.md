@@ -89,8 +89,10 @@ Simplified Chinese ship; any other locale falls back to English.
 
 `config.toml`'s `[ui] locale` pins the language regardless of the session, which
 is what a resident service wants: its unit inherits the session's locale, or none
-at all. Setting `Environment=LC_ALL=zh_CN.UTF-8` in the unit works too. Either
-way the locale is read at startup, so restart the service after a change.
+at all. Application names, their descriptions and desktop action labels come from
+`.desktop` files and follow the same choice. Setting
+`Environment=LC_ALL=zh_CN.UTF-8` in the unit works too. Either way the locale is
+read at startup, so restart the service after a change.
 
 ## Pinned results
 
