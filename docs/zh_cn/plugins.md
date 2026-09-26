@@ -65,7 +65,8 @@ resident = true
 ```
 
 `id` 取脚本声明的插件之一；`h` 用同一个 `command` 注册 `firefox-history`。脚本能做
-什么见 [lua.md](lua.md)。
+什么见工作区的
+[Lua 插件](https://github.com/Prslc/WayRun-Plugins/blob/main/docs/zh_cn/LUA_CN.md)。
 
 ## 结果动作
 

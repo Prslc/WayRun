@@ -72,7 +72,9 @@ resident = true
 ```
 
 `id` names one plugin the script declares; register `firefox-history` with the
-same `command` for `h`. See [lua.md](lua.md) for what a script can do.
+same `command` for `h`. The workspace's
+[Lua plugins](https://github.com/Prslc/WayRun-Plugins/blob/main/LUA.md) guide
+covers what a script can do.
 
 ## Result actions
 
