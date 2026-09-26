@@ -71,7 +71,8 @@ resident = true
 
 结果行可以携带次级命令，显示在 `Shift+Enter` 二级菜单中。不同类型的菜单各不相同：
 `file-search`/`path-search` 提供“在终端中打开”“在文件管理器中显示”与“复制路径”，
-`app-search` 列出该条目的 `[Desktop Action …]`，`web-search` 与 Firefox 插件提供“复制链接”，
+`app-search` 列出该条目的 `[Desktop Action …]`，外部主机的行则按所带的 `actions`
+提供（工作区的 `web.lua` 提供“复制链接”），
 每个可操作的行都会补上启动器级别的置顶/取消置顶，空查询历史来源的行还会多一条“从历史中移除”。
 菜单最前是行自身的命令，外部主机自带的动作排在插件自身动作之后，启动器级条目在最后。
 
@@ -93,5 +94,6 @@ resident = true
 没有图标时，改用所属插件的身份图标；身份图标也没有时，回退到编入二进制的占位图。
 
 主机可以手写。[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区提供了一套
-Python 框架、示例插件与 `template/` 模板，可复制起步。主机协议是 [jsonrpc.md](jsonrpc.md)
+Python 框架、Lua 与 Python 示例及模板（`template/`、`template.lua`），可复制起步。
+主机协议是 [jsonrpc.md](jsonrpc.md)
 中记录的 JSON-RPC 子集：`search`、`top`、`select`、`forget`、`list_plugins`。

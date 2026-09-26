@@ -27,7 +27,7 @@ needs no GPU stack and no GUI toolkit.
 ## Demo
 
 <p align="center">
-  <img src="images/demo.avif" alt="WayRun — app search, file search, dynamic theming, and bookmarks" width="780">
+  <img src="images/demo.avif" alt="WayRun — app search, file search and dynamic theming" width="780">
 </p>
 
 ## Features
@@ -42,7 +42,10 @@ needs no GPU stack and no GUI toolkit.
   under its keyword.
 - **Themeable** — follows DankMaterialShell's Material You palette, with
   `theme.toml` overrides for colors, blur, layout, typography and motion.
-- **Extensible** — a TOML plugin registry plus external JSON-RPC hosts.
+- **Extensible** — eight built-ins in the binary; everything else is an
+  external host over a documented JSON-RPC contract, written in Python (a
+  shipped framework) or as one Lua script the launcher runs itself. A
+  `resident` host stays warm at about a millisecond per call.
 
 ## Requirements
 
@@ -76,6 +79,17 @@ The action panel, badge and built-in plugin glyphs are compiled into the binary,
 so the launcher is fully usable with no icon theme at all. App and file rows
 follow the desktop's icon theme; see [config.md](docs/en/config.md) for the
 `[icon]` override.
+
+## Plugins
+
+The built-ins in the table above ship inside the binary. Anything more is a
+host: an executable that speaks the documented JSON-RPC subset, registered from
+`plugins.toml`, forked per call or kept warm with `resident = true`. The
+[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace supplies a
+Python framework, Lua and Python examples (`firefox.lua`, `web.lua`, …) and
+templates to copy from. A Lua plugin is one script file — the launcher binary
+runs it itself, so there is no interpreter to install; see
+[Plugins](docs/en/plugins.md) and [Lua plugins](docs/en/lua.md).
 
 ## Quick Start
 

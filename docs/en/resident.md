@@ -54,9 +54,9 @@ manager, launches fall back to plain detached processes.
 
 ## Proxy
 
-The launcher's only outbound request is the web-search suggestion fetch, so a
-proxy only matters if the engine (`s` by default) is unreachable directly.
-Configure one with `Environment=` in the unit:
+The core makes no outbound requests itself; a registered host that fetches does
+— the WayRun-Plugins `web.lua`, for instance. Its `wayrun.http.get` reads the
+launcher's environment, so configure a proxy with `Environment=` in the unit:
 
 ```ini
 # HTTP CONNECT proxy; scheme optional, credentials optional
@@ -65,8 +65,8 @@ Environment=http_proxy=http://127.0.0.1:7890
 ```
 
 Then `systemctl --user daemon-reload && systemctl --user restart wayrun-launcher`.
-`https_proxy` is what the (HTTPS) suggest endpoints use; `http_proxy` covers a
-plain-`http://` engine. Only HTTP CONNECT proxies are supported
-(`[http://][user[:password]@]host[:port]`, default port 1080); a `socks5://` URL
-is not, and an unusable value is ignored, so the request falls back to a direct
-connection.
+The lowercase variable is read first, then the uppercase one, as curl reads
+them; the chosen proxy is used for every request. Only HTTP CONNECT proxies are
+supported (`[http://][user[:password]@]host[:port]`, default port 1080); a
+`socks5://` URL is not, and an unusable value is ignored, so the request falls
+back to a direct connection.

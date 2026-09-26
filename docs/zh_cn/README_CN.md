@@ -25,7 +25,7 @@
 ## 演示
 
 <p align="center">
-  <img src="../../images/demo.avif" alt="WayRun —— 应用搜索、文件搜索、动态主题与书签" width="780">
+  <img src="../../images/demo.avif" alt="WayRun —— 应用搜索、文件搜索与动态主题" width="780">
 </p>
 
 ## 功能特性
@@ -39,7 +39,9 @@
   Desktop Action、复制链接）；“置顶”让结果在其关键词下始终排在前面。
 - **可主题化** — 跟随 DankMaterialShell 的 Material You 调色板，并可用
   `theme.toml` 覆盖配色、模糊、布局、字体与动效。
-- **可扩展** — TOML 插件注册表，以及外部 JSON-RPC 主机。
+- **可扩展** — 二进制内置 8 个插件；其余一切通过有文档的 JSON-RPC 契约作为外部主机
+  接入：可以用 Python（自带框架）写，也可以就是一个 Lua 脚本、由启动器本体运行。
+  `resident` 主机跨调用保温，每次调用约 1 毫秒。
 
 ## 环境要求
 
@@ -68,6 +70,15 @@
 
 面板、徽标与内置插件的图形都已编入二进制，因此完全不装图标主题也能正常使用。应用与文件
 结果行图标跟随桌面自身的图标主题；可用 `[icon]` 覆盖，见 [config.md](config.md)。
+
+## 插件
+
+上表所列的内置插件都编在二进制里。之外的一切都是"主机"：一个讲 JSON-RPC 子集的
+可执行文件，在 `plugins.toml` 注册，逐次 fork 或以 `resident = true` 保温。
+[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区提供 Python 框架、
+Lua 与 Python 示例（`firefox.lua`、`web.lua` 等）以及可复制的模板。Lua 插件就是
+一个脚本文件——由启动器二进制本体运行，无需安装解释器；见[插件](plugins.md)与
+[Lua 插件](lua.md)。
 
 ## 快速开始
 

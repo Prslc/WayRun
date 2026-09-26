@@ -79,11 +79,12 @@ same `command` for `h`. See [lua.md](lua.md) for what a script can do.
 A result row can carry secondary commands, shown in the `Shift+Enter` panel. They
 differ by result type: `file-search`/`path-search` offer "Open in terminal",
 "Reveal in file manager" and "Copy path", `app-search` lists the entry's
-`[Desktop Action …]` groups, `web-search` and the Firefox plugins offer "Copy
-URL", and every actionable row gets the launcher-level pin/unpin — plus "Remove
-from history" on a row the empty-query history sourced. The row's own command
-leads the panel, an external host's own `actions` follow the plugin's, and the
-launcher-level entries come last.
+`[Desktop Action …]` groups, an external host's rows carry whatever `actions` it
+attaches (the workspace's `web.lua` offers "Copy URL"), and every actionable row
+gets the launcher-level pin/unpin — plus "Remove from history" on a row the
+empty-query history sourced. The row's own command leads the panel, an external
+host's own `actions` follow the plugin's, and the launcher-level entries come
+last.
 
 Give an action an `id` to let the user make it the default `Enter` action with
 `Alt+Enter`; the panel's **Open** entry — the row's own command — takes the
@@ -111,6 +112,6 @@ identity icon, and the built-in placeholder answers when that is missing too.
 
 Hosts can be written by hand. The
 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace ships a
-Python framework, example plugins, and a `template/` to copy from. The host
-protocol is the JSON-RPC subset documented in
+Python framework, Lua and Python examples and templates (`template/`,
+`template.lua`), and the host protocol is the JSON-RPC subset documented in
 [jsonrpc.md](jsonrpc.md): `search`, `top`, `select`, `forget`, `list_plugins`.

@@ -49,8 +49,9 @@ systemctl --user enable --now wayrun-launcher
 
 ## 代理
 
-启动器对外只有一个请求：拉取网页搜索建议。所以只有搜索引擎（默认 `s`）没法直连时，
-才需要配置代理。在单元文件里用 `Environment=` 指定：
+核自身不发起对外请求；需要联网的是注册的主机（例如 WayRun-Plugins 的
+`web.lua`）。它的 `wayrun.http.get` 读取启动器进程的环境变量，因此在单元文件里用
+`Environment=` 指定：
 
 ```ini
 # HTTP CONNECT 代理；scheme 和账号密码都可省略
@@ -59,6 +60,6 @@ Environment=http_proxy=http://127.0.0.1:7890
 ```
 
 改完执行 `systemctl --user daemon-reload && systemctl --user restart wayrun-launcher`。
-建议接口走 HTTPS，对应 `https_proxy`；`http_proxy` 只在引擎用纯 `http://` 时生效。
-目前只支持 HTTP CONNECT 代理（`[http://][user[:password]@]host[:port]`，端口默认 1080），
+小写变量优先、大写在其后（与 curl 的读法一致）；选中的代理用于所有请求。目前只支持
+HTTP CONNECT 代理（`[http://][user[:password]@]host[:port]`，端口默认 1080），
 不支持 `socks5://`；无法使用的值会被忽略，请求退回直连。

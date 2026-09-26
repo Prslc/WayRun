@@ -9,22 +9,21 @@ otherwise the whole input is an app/command query (see
 | Input | Action |
 | --- | --- |
 | `firefox` | search installed applications (name, keywords, description) |
-| `b <query>` | search Firefox bookmarks |
-| `h <query>` | search Firefox history |
 | `f <query>` | search files by name or path |
 | `d <query>` | search directories by path (multi-token) |
 | `r <query>` | fuzzy-search `$PATH` executables and run one |
 | `w <query>` | switch focus to a matching open window |
 | `c <query>` | search clipboard history (cliphist) |
-| `s <query>` | web search suggestions (engine set in `config.toml`) |
 | `?` | show keyword modes, default functions, hints and each plugin's remembered default action |
 | `lock` / `reboot` / `shutdown` | system commands |
 | `2 + 3` | inline calculator |
 | _(empty)_ | show most-used items |
 
-Some prefixes need an optional component: `w` a compositor backend, `b`/`h`
-Firefox, `c` cliphist, and copy/paste `wl-clipboard`. Without it, the keyword
-returns no rows. The full list is in the
+Some prefixes need an optional component: `w` a compositor backend, `c`
+cliphist, and copy/paste `wl-clipboard`. Without it, the keyword returns no
+rows. Anything else a `plugins.toml` host registers — the WayRun-Plugins
+workspace's Firefox and web search among them — adds its own keyword the same
+way; the full dependency list is in the
 [README](../../README.md#feature-dependencies).
 
 A query containing `/` or starting with `~` is a **path query**: the path is
@@ -55,8 +54,8 @@ points.
 commands that type of result offers. It leads with the row's own command
 (**Open**), then the actions its plugin adds for that type — a file row offers
 "Open in terminal", "Reveal in file manager" and "Copy path", an application row
-lists its `[Desktop Action …]` groups, a bookmark or search hit offers "Copy
-URL" — then anything an external host attached, and last the launcher-level
+lists its `[Desktop Action …]` groups — then anything an external host attached,
+and last the launcher-level
 entries: **Pin to top** / **Unpin**, plus **Remove from history** on a row the
 empty-query history sourced. The dot marks the entry `Enter` runs, so **Open**
 carries it until a default is remembered. A row with no command to offer has no
@@ -98,7 +97,7 @@ way the locale is read at startup, so restart the service after a change.
 **Pin to top** stores the row under the exact query it was pinned on — the whole
 trimmed input, keyword included — and re-emits it at the top the next time that
 same string is searched. Pinning Firefox on `firefox` leads the results for
-`firefox`, but not for `fire` or a bare keyword; pinning on `b firefox` leads
-only `b firefox`. The empty query is its own scope, so a pin made there leads the
+`firefox`, but not for `fire` or a bare keyword; pinning on `f report` leads
+only `f report`. The empty query is its own scope, so a pin made there leads the
 history. The original copy in the fresh results is dropped, so a pinned row
 appears once. **Unpin** takes it back out.
