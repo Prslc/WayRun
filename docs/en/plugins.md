@@ -91,10 +91,10 @@ so a script needs a shebang and the exec bit. Each call starts the host fresh an
 is bounded by a short timeout, so a stalled host cannot hang the launcher.
 
 `resident = true` keeps one host process alive across calls instead — about a
-millisecond per call against the fresh process's several. An idle host is
-dropped after two minutes; a crash or a stall kills it, and the next call starts
-a new one. The host must be stateless per call either way, but it may now cache
-within its process lifetime.
+millisecond per call against the fresh process's several. The host is dropped
+when the launcher dismisses, when it sits idle for two minutes, or when a call
+crashes or stalls; the next call starts a new one. The host must be stateless
+per call either way, but it may cache within its process lifetime.
 
 `script = "firefox.lua"` names one of the scripts shipped inside the binary; it
 is materialized under the cache dir and then behaves exactly like `command`.

@@ -153,6 +153,12 @@ fn ensure_reaper() {
     });
 }
 
+/// Drop every resident host now: a dismissal ends the session, so a host only
+/// the session kept warm goes with it.
+pub(crate) fn reap_all() {
+    reap(Duration::ZERO, None);
+}
+
 /// Kill the hosts idle past `idle` and forget the slots whose host is gone;
 /// `try_lock` skips a busy slot, and `only` narrows the sweep to one command.
 fn reap(idle: Duration, only: Option<&str>) {
@@ -318,6 +324,31 @@ mod tests {
         assert!(second.await.unwrap().is_none(), "overtaken while it waited");
         assert!(third.await.unwrap().is_some());
         assert_eq!(std::fs::read_to_string(&served).unwrap().lines().count(), 2);
+    }
+
+    #[tokio::test]
+    async fn dismiss_reaps_every_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let counter = dir.path().join("starts");
+        let command = echo_host(&dir, &counter);
+        assert!(call(&command, &request(), LIMIT).await.is_some());
+        // The exchange task releases the slot a beat after it replies.
+        for _ in 0..200 {
+            reap_all();
+            if !SLOTS.lock().unwrap().contains_key(&command) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            !SLOTS.lock().unwrap().contains_key(&command),
+            "the host is gone"
+        );
+        assert!(
+            call(&command, &request(), LIMIT).await.is_some(),
+            "restarted"
+        );
+        assert_eq!(starts(&counter), 2);
     }
 
     #[tokio::test]

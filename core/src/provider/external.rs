@@ -220,15 +220,22 @@ pub async fn discover(command: &str, resident: bool) -> Vec<HostMeta> {
 
 /// A host `result` array as rows: icons resolved, and `plugin` stamped as the
 /// actions' owner so a host default scopes like a built-in's; `None` if unusable.
+/// Consumes the response so each row parses without a clone.
 fn parse_result_items(
-    response: &serde_json::Value,
+    response: serde_json::Value,
     plugin: &str,
     icon: &str,
 ) -> Option<Vec<ResultItem>> {
-    let items = response.get("result")?.as_array()?;
+    let serde_json::Value::Object(mut object) = response else {
+        return None;
+    };
+    let items = match object.remove("result")? {
+        serde_json::Value::Array(items) => items,
+        _ => return None,
+    };
     let mut parsed: Vec<ResultItem> = items
-        .iter()
-        .filter_map(|it| serde_json::from_value(it.clone()).ok())
+        .into_iter()
+        .filter_map(|item| serde_json::from_value(item).ok())
         .collect();
     let identity = host_icon_path(icon);
     let owner = plugin.to_string();
@@ -265,7 +272,7 @@ async fn query_external(
     let Some(response) = host_call(command, resident, &request, HOST_TIMEOUT).await else {
         return Ok(Vec::new());
     };
-    Ok(parse_result_items(&response, plugin, icon).unwrap_or_default())
+    Ok(parse_result_items(response, plugin, icon).unwrap_or_default())
 }
 
 /// Ask the host for its default view (its `top` method). `Ok(None)` when it has
@@ -288,7 +295,7 @@ async fn query_default(
     if response.get("error").is_some() {
         return Ok(None);
     }
-    Ok(parse_result_items(&response, plugin, icon))
+    Ok(parse_result_items(response, plugin, icon))
 }
 
 /// First shell token of a `run` command (argv0), or `None` for any other
@@ -389,7 +396,7 @@ mod tests {
                 ],
             }]
         });
-        let items = parse_result_items(&response, "system-search", "").unwrap();
+        let items = parse_result_items(response, "system-search", "").unwrap();
         assert!(items[0].badge.is_none(), "a symbolic badge is dropped");
         assert_eq!(
             items[0].actions[0].plugin.as_deref(),
@@ -411,7 +418,7 @@ mod tests {
                 { "title": "Firefox", "on_click": {"type":"launch","desktop_id":"firefox.desktop"} },
             ]
         });
-        let items = parse_result_items(&response, "system-search", "").unwrap();
+        let items = parse_result_items(response, "system-search", "").unwrap();
         assert!(items[0].ephemeral, "the host's flag is carried through");
         assert!(!items[1].ephemeral, "an absent flag means record it");
     }
@@ -434,7 +441,7 @@ mod tests {
                 {"title": "nulls", "summary": null, "on_click": null, "icon": null},
             ]
         });
-        let items = parse_result_items(&response, "golden", "/opt/identity.svg").unwrap();
+        let items = parse_result_items(response, "golden", "/opt/identity.svg").unwrap();
         assert_eq!(items.len(), 10, "every corpus row survives");
         assert_eq!(
             items[0].on_click,

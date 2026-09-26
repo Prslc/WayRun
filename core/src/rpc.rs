@@ -144,6 +144,8 @@ pub async fn handle(
         "dismiss" => {
             search.cancel();
             crate::plugin::drop_remembered();
+            // A dismissal ends the session, so the warm hosts go with it.
+            crate::provider::resident::reap_all();
         }
         "select" => {
             let Ok(payload) = select_payload(params.cloned()) else {

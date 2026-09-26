@@ -3,7 +3,7 @@ pub mod calculator;
 pub mod clipboard;
 pub mod external;
 pub mod file;
-mod resident;
+pub(crate) mod resident;
 pub mod runner;
 pub mod shipped;
 pub mod system_commands;
