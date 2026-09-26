@@ -5,7 +5,6 @@ pub mod external;
 pub mod file;
 pub(crate) mod resident;
 pub mod runner;
-pub mod shipped;
 pub mod system_commands;
 pub mod window;
 

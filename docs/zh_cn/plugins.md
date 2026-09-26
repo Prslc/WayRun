@@ -18,8 +18,7 @@ enabled = true
 | `keyword` | 是 | 路由到该插件的前缀。`""` 表示它是**默认**提供者。 |
 | `enabled` | 否 | 默认 `true`。设为 `false` 可禁用而不删除条目。 |
 | `command` | 否 | 外部 JSON-RPC 2.0 主机，见下文。 |
-| `script` | 否 | 随二进制分发的 Lua 脚本，见下文。 |
-| `resident` | 否 | 跨调用保留主机进程；随附脚本默认 `true`。见下文。 |
+| `resident` | 否 | 默认 `false`。跨调用保留主机进程，见下文。 |
 
 调整条目顺序即可改变优先级。既不是内置 id、也不是外部主机的 id 会被忽略。
 
@@ -50,14 +49,23 @@ enabled = true
 `file-search` 与 `path-search` 经索引覆盖整个主目录。`config.md` 的 `[files]` 中设
 `index = false` 则只搜索主目录的 `depth` 层，且不留缓存。
 
-## 随附脚本
+## 示例插件
 
-`b`/`h` 与 `s` 以 Lua 脚本随二进制分发，而非编入二进制的 Rust：`firefox.lua`（书签
-与历史，读取最新 profile 的 `places.sqlite` 单一份快照）与 `web.lua`（`config.toml`
-中所设引擎的联想词）。脚本按需写入缓存目录，以常驻主机运行，条目以
-`script = "firefox.lua"` 与 `resident = true` 声明。把脚本拷出去、用 `command`
-条目指向你的副本，即可改为运行你的版本——与任何外部插件同一套[主机契约](#外部主机)，
-只是用 Lua 写。
+[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区在 Python 示例旁
+提供了 `firefox.lua`（书签与历史，读取最新 profile 的 `places.sqlite` 单一份快照）
+与 `web.lua`（`config.toml` 中所设引擎的联想词）。它们是普通的外部主机——由启动器
+二进制运行的 Lua 脚本——与其他主机一样注册：
+
+```toml
+[[plugins]]
+id = "firefox-bookmarks"
+keyword = "b"
+command = "/path/to/WayRun-Plugins/firefox.lua"
+resident = true
+```
+
+`id` 取脚本声明的插件之一；`h` 用同一个 `command` 注册 `firefox-history`。脚本能做
+什么见 [lua.md](lua.md)。
 
 ## 结果动作
 
@@ -79,9 +87,6 @@ enabled = true
 `resident = true` 则改为跨调用保留同一个主机进程：每次调用约 1ms，而新起进程要几毫秒。启动器
 关闭时、空闲两分钟后、或调用崩溃/卡死时，进程会被回收，下一次调用重新启动。两种模式下主机都必须
 对单次调用无状态，但常驻进程内可以自行缓存。
-
-`script = "firefox.lua"` 指向随二进制分发的脚本之一：它会被写入缓存目录，此后与 `command`
-行为完全一致。
 
 身份 `icon` 与每条结果的 `icon` 都必须是主机**自己准备**的图标文件的绝对路径，动作的 `icon`
 与行的 `badge` 同理。主题图标名、`papirus:` 规范、`builtin:` 字形一律视为无图标。结果行自身

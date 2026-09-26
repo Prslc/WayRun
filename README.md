@@ -15,8 +15,8 @@ English | [Chinese](docs/zh_cn/README_CN.md)
 </div>
 
 A Wayland-native application launcher and quick-search tool for Linux. Type to
-search installed apps, files, Firefox bookmarks, web suggestions and inline
-math, all from a single floating overlay.
+search installed apps, files, usage history and inline math, all from a single
+floating overlay.
 
 ## Overview
 
@@ -34,9 +34,8 @@ needs no GPU stack and no GUI toolkit.
 
 - **Launcher** — fuzzy search of installed applications, launched the way the
   desktop itself would, with Flatpak apps and themed icons per row.
-- **Quick search** — files and paths, Firefox bookmarks and history, clipboard
-  history, web suggestions, `$PATH` commands, open windows, system commands,
-  and inline math.
+- **Quick search** — files and paths, clipboard history, `$PATH` commands,
+  open windows, system commands, and inline math.
 - **Usage history** — most-used items on an empty query.
 - **Action panel & pins** — `Shift+Enter` opens a per-type action menu (reveal a
   file, run a desktop action, copy a link); `Pin to top` keeps a result first
@@ -57,15 +56,16 @@ needs no GPU stack and no GUI toolkit.
 
 ## Feature dependencies
 
-The overlay, and the built-in app, file, calculator and web search, need
+The overlay, and the built-in app, file and calculator search, need
 nothing beyond the compositor above. Every other feature depends on an optional
 component; when one is missing, the keyword returns no rows rather than an
-error:
+error. Extra plugins (Firefox bookmarks and history, web suggestions, and more)
+install from the [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins)
+workspace:
 
 | Feature | Needs |
 | --- | --- |
 | `w` open-window search | the niri (default) or Hyprland build — see [Compositor backends](#compositor-backends) |
-| `b` / `h` Firefox search | Firefox with a profile |
 | `c` clipboard history | [cliphist](https://github.com/sentriz/cliphist) running |
 | copy / paste and the "Copy …" actions | `wl-clipboard` (`wl-copy` / `wl-paste`) |
 | a terminal-only `$PATH` hit (`r`) | a terminal emulator (`$TERMINAL`, else one on `PATH`) |

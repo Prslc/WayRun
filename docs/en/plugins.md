@@ -19,8 +19,7 @@ enabled = true
 | `keyword` | yes | The prefix that routes input to this plugin. `""` makes it a **default** provider. |
 | `enabled` | no | Defaults to `true`. `false` disables the plugin without removing the entry. |
 | `command` | no | An external JSON-RPC 2.0 host. See below. |
-| `script` | no | A Lua script shipped with the binary. See below. |
-| `resident` | no | Keep the host process alive across calls; the shipped scripts default to `true`. See below. |
+| `resident` | no | Defaults to `false`. Keep the host process alive across calls. See below. |
 
 Reorder entries to change priority. An `id` that is neither a built-in nor a host
 is ignored.
@@ -56,16 +55,24 @@ A keyword whose dependency is absent returns no rows instead of failing.
 `config.md`'s `[files]` `index = false` restricts them to the configured `depth`
 instead; they then keep no cache.
 
-## Shipped scripts
+## Example plugins
 
-`b`/`h` and `s` ship inside the binary as Lua scripts rather than compiled-in
-Rust: `firefox.lua` (bookmarks and history, read from one snapshot of the newest
+The [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace ships
+`firefox.lua` (bookmarks and history, read from one snapshot of the newest
 profile's `places.sqlite`) and `web.lua` (suggestions from the engine set in
-`config.toml`). The scripts are written under the cache dir on demand, run as
-resident hosts, and their entries say so with `script = "firefox.lua"` and
-`resident = true`. Copy a script out, point a `command` entry at your copy, and
-it runs your version instead — the same [host contract](#external-hosts) as any
-external plugin, in Lua.
+`config.toml`) beside its Python examples. They are ordinary external hosts —
+Lua scripts run by the launcher's own binary — registered like any other:
+
+```toml
+[[plugins]]
+id = "firefox-bookmarks"
+keyword = "b"
+command = "/path/to/WayRun-Plugins/firefox.lua"
+resident = true
+```
+
+`id` names one plugin the script declares; register `firefox-history` with the
+same `command` for `h`. See [lua.md](lua.md) for what a script can do.
 
 ## Result actions
 
@@ -95,9 +102,6 @@ millisecond per call against the fresh process's several. The host is dropped
 when the launcher dismisses, when it sits idle for two minutes, or when a call
 crashes or stalls; the next call starts a new one. The host must be stateless
 per call either way, but it may cache within its process lifetime.
-
-`script = "firefox.lua"` names one of the scripts shipped inside the binary; it
-is materialized under the cache dir and then behaves exactly like `command`.
 
 Both the identity `icon` and each result `icon` must be an absolute path to an
 icon file the host ships itself; the same holds for an action's `icon` and a

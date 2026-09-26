@@ -15,18 +15,15 @@ pub struct PluginEntry {
     pub keyword: String,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    /// External JSON-RPC 2.0 host (resolved on PATH); `command` wins over
-    /// `script` when both are set, and the host answers the plugin's `search`.
+    /// External JSON-RPC 2.0 host (resolved on PATH). When set, the plugin is
+    /// not compiled in: a fresh process answers its `search` per call, or a
+    /// kept one when `resident`.
     #[serde(default)]
     pub command: Option<String>,
-    /// A Lua script shipped with the binary, materialized under the cache dir
-    /// and run as a host; an unknown name retires the entry.
+    /// Keep the host process alive across calls; dropped on dismissal and
+    /// after two idle minutes.
     #[serde(default)]
-    pub script: Option<String>,
-    /// Keep the host process alive across calls; omission keeps the shipped
-    /// default (true for the shipped scripts, false otherwise).
-    #[serde(default)]
-    pub resident: Option<bool>,
+    pub resident: bool,
 }
 
 const fn default_enabled() -> bool {

@@ -72,8 +72,7 @@ return {
 
 ## 注册
 
-与任何主机一致：单个可执行文件 token，因此脚本需要 shebang 与执行位——随二进
-制分发的脚本则用 `script` 键。
+与任何主机一致：单个可执行文件 token，因此脚本需要 shebang 与执行位。
 
 ```toml
 [[plugins]]
@@ -83,5 +82,7 @@ command = "/home/you/.config/wayrun/demo.lua"
 resident = true   # 跨调用保留一个主机进程
 ```
 
-脚本首行必须是 `#!/usr/bin/env -S wayrun --lua-host`。`core/assets/lua/` 下的
+脚本首行必须是 `#!/usr/bin/env -S wayrun --lua-host`。[WayRun-Plugins] 工作区下的
 `firefox.lua` 与 `web.lua` 是两个完整示例，前者读 `places.sqlite`，后者读网页。
+
+[WayRun-Plugins]: https://github.com/Prslc/WayRun-Plugins

@@ -519,14 +519,14 @@ mod tests {
               {
                 id = "demo",
                 search = function()
-                  return { { title = wayrun.t("plugin.web.summary", { engine = "Google" }) } }
+                  return { { title = wayrun.t("plugin.external.ready", { command = "my-host" }) } }
                 end,
               },
             }
             "#,
         );
         let rows = search(&host, "demo", "x");
-        assert_eq!(rows[0]["title"], "Search on Google");
+        assert_eq!(rows[0]["title"], "External plugin via my-host");
     }
 
     #[test]

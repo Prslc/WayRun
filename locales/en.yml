@@ -19,12 +19,6 @@ plugin.file.ready: Search files by name or path
 plugin.directory.name: Directories
 plugin.directory.ready: Search directories by path
 
-plugin.bookmarks.name: Bookmarks
-plugin.bookmarks.ready: Search Firefox bookmarks
-
-plugin.history.name: History
-plugin.history.ready: Search Firefox history
-
 plugin.runner.name: Run Action
 plugin.runner.ready: Run an executable on PATH
 
@@ -33,10 +27,6 @@ plugin.system.ready: Search system commands
 
 plugin.window.name: Window
 plugin.window.ready: Switch open windows
-
-plugin.web.ready: Search %{engine} suggestions
-plugin.web.summary: Search on %{engine}
-plugin.web.search: "Search: %{query}"
 
 plugin.external.ready: External plugin via %{command}
 
@@ -50,7 +40,6 @@ action.open: Open
 action.pin: Pin to top
 action.unpin: Unpin
 action.remove_history: Remove from history
-action.copy_url: Copy URL
 action.copy_path: Copy path
 action.reveal: Reveal in file manager
 action.terminal: Open in terminal

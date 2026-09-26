@@ -77,7 +77,7 @@ and a `pcall` around risky work are the debugging tools.
 ## Registering
 
 Like any host: a single executable token, so the script needs a shebang and the
-exec bit — or the `script` key for the ones shipped in the binary.
+exec bit.
 
 ```toml
 [[plugins]]
@@ -88,6 +88,8 @@ resident = true   # keep one host process warm between calls
 ```
 
 The first line of the script must be
-`#!/usr/bin/env -S wayrun --lua-host`. `firefox.lua` and `web.lua` under
-`core/assets/lua/` are complete worked examples, read from `places.sqlite` and
-the web respectively.
+`#!/usr/bin/env -S wayrun --lua-host`. The [WayRun-Plugins] workspace's
+`firefox.lua` and `web.lua` are complete worked examples, read from
+`places.sqlite` and the web respectively.
+
+[WayRun-Plugins]: https://github.com/Prslc/WayRun-Plugins
