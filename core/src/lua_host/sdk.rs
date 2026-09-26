@@ -1,3 +1,6 @@
+use std::cell::RefCell;
+use std::path::PathBuf;
+use std::rc::Rc;
 use std::time::UNIX_EPOCH;
 
 use mlua::{Lua, LuaSerdeExt, Table, Value};
@@ -5,7 +8,41 @@ use mlua::{Lua, LuaSerdeExt, Table, Value};
 use super::sqlite;
 use super::warn;
 
-pub(super) fn build(lua: &Lua, script: &str) -> mlua::Result<Table> {
+/// The plugin directories this script may read from, one per declared id;
+/// filled after the script is read, resolved by the bindings at call time.
+pub(super) type Scope = Rc<RefCell<Vec<PathBuf>>>;
+
+/// `<home>/.config/wayrun/plugins/<id>`, the directory a plugin reads its own
+/// files from; the user places them, nothing here is created for the script.
+pub(super) fn plugin_dir(id: &str) -> Option<PathBuf> {
+    let dir = crate::system::fs::get_home()
+        .ok()?
+        .join(".config/wayrun/plugins");
+    Some(dir.join(id))
+}
+
+/// The text of `name` under the first scope root that holds it; `Ok(None)`
+/// when none does, and an error when the name itself is not allowed.
+fn scoped_read(roots: &[PathBuf], name: &str) -> Result<Option<String>, String> {
+    let allowed = !name.is_empty()
+        && !name.starts_with('/')
+        && !name
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..");
+    if !allowed {
+        return Err("name must be a relative path without `..`".to_string());
+    }
+    for root in roots {
+        match std::fs::read_to_string(root.join(name)) {
+            Ok(text) => return Ok(Some(text)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Ok(None)
+}
+
+pub(super) fn build(lua: &Lua, script: &str, scope: Scope) -> mlua::Result<Table> {
     let sdk = lua.create_table()?;
     sdk.set(
         "home",
@@ -44,6 +81,12 @@ pub(super) fn build(lua: &Lua, script: &str) -> mlua::Result<Table> {
         lua.create_function(move |_, ()| Ok(dir.clone()))?,
     )?;
     sdk.set(
+        "plugin_dir",
+        lua.create_function(|_, id: String| {
+            Ok(plugin_dir(&id).map(|dir| dir.display().to_string()))
+        })?,
+    )?;
+    sdk.set(
         "t",
         lua.create_function(|_, (key, args): (String, Option<Table>)| Ok(translate(&key, args)))?,
     )?;
@@ -56,7 +99,8 @@ pub(super) fn build(lua: &Lua, script: &str) -> mlua::Result<Table> {
         })?,
     )?;
     sdk.set("json", json_lib(lua)?)?;
-    sdk.set("fs", fs_lib(lua)?)?;
+    sdk.set("toml", toml_lib(lua)?)?;
+    sdk.set("fs", fs_lib(lua, scope)?)?;
     sdk.set("http", http_lib(lua)?)?;
     sdk.set("sqlite", sqlite::lib(lua)?)?;
     Ok(sdk)
@@ -100,7 +144,22 @@ fn json_lib(lua: &Lua) -> mlua::Result<Table> {
     Ok(json)
 }
 
-fn fs_lib(lua: &Lua) -> mlua::Result<Table> {
+fn toml_lib(lua: &Lua) -> mlua::Result<Table> {
+    let toml = lua.create_table()?;
+    toml.set(
+        "decode",
+        lua.create_function(|lua, source: String| {
+            let value: toml::Value = toml::from_str(&source)
+                .map_err(|error| mlua::Error::RuntimeError(format!("toml.decode: {error}")))?;
+            let value = serde_json::to_value(&value)
+                .map_err(|error| mlua::Error::RuntimeError(format!("toml.decode: {error}")))?;
+            lua.to_value(&value)
+        })?,
+    )?;
+    Ok(toml)
+}
+
+fn fs_lib(lua: &Lua, scope: Scope) -> mlua::Result<Table> {
     let fs = lua.create_table()?;
     fs.set(
         "list",
@@ -136,6 +195,18 @@ fn fs_lib(lua: &Lua) -> mlua::Result<Table> {
             stat.set("size", meta.len() as i64)?;
             Ok(Value::Table(stat))
         })?,
+    )?;
+    fs.set(
+        "read",
+        lua.create_function(
+            move |lua, name: String| match scoped_read(&scope.borrow(), &name) {
+                Ok(Some(text)) => Ok(Value::String(lua.create_string(text)?)),
+                Ok(None) => Ok(Value::Nil),
+                Err(problem) => Err(mlua::Error::RuntimeError(format!(
+                    "fs.read {name:?}: {problem}"
+                ))),
+            },
+        )?,
     )?;
     Ok(fs)
 }
@@ -212,4 +283,32 @@ fn translate(key: &str, args: Option<Table>) -> String {
         }
     }
     message
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scoped_read_stays_inside_its_roots() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config.toml"), "a = 1").unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub/data.txt"), "x").unwrap();
+        let roots = vec![dir.path().to_path_buf()];
+
+        assert_eq!(
+            scoped_read(&roots, "config.toml").unwrap().as_deref(),
+            Some("a = 1")
+        );
+        assert_eq!(
+            scoped_read(&roots, "sub/data.txt").unwrap().as_deref(),
+            Some("x")
+        );
+        assert_eq!(scoped_read(&roots, "missing.txt").unwrap(), None);
+        assert!(scoped_read(&roots, "../escape.txt").is_err());
+        assert!(scoped_read(&roots, "a/../b").is_err());
+        assert!(scoped_read(&roots, "/etc/hostname").is_err());
+        assert!(scoped_read(&roots, "").is_err());
+    }
 }

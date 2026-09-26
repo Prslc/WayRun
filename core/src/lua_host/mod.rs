@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::io::{BufRead, Write};
+use std::rc::Rc;
 
 use anyhow::{Context, Result};
 use mlua::{Function, Lua, LuaOptions, LuaSerdeExt, StdLib, Table, Value};
@@ -50,9 +52,10 @@ struct Host {
 impl Host {
     fn new(script: &str, source: &str) -> Result<Self> {
         // mlua's error carries no Send bound, so it converts here, once.
+        let scope: sdk::Scope = Rc::new(RefCell::new(Vec::new()));
         let load = || -> mlua::Result<(Lua, Vec<Plugin>)> {
             let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::default())?;
-            let wayrun = sdk::build(&lua, script)?;
+            let wayrun = sdk::build(&lua, script, Rc::clone(&scope))?;
             let env = script_env(&lua, &wayrun)?;
             let declared: Table = lua
                 .load(source)
@@ -63,6 +66,11 @@ impl Host {
             Ok((lua, plugins))
         };
         let (lua, plugins) = load().map_err(|error| anyhow::anyhow!("{error}"))?;
+        // The declared ids are known only now; the fs scope fills here.
+        *scope.borrow_mut() = plugins
+            .iter()
+            .filter_map(|plugin| sdk::plugin_dir(&plugin.id))
+            .collect();
         Ok(Self {
             lua,
             script: script.to_string(),
@@ -279,6 +287,12 @@ fn read_plugins(declared: &Table, script: &str) -> mlua::Result<Vec<Plugin>> {
     for entry in declared.sequence_values::<Table>() {
         let entry = entry?;
         let id: String = entry.get("id")?;
+        // The id becomes a filesystem scope root, so it must be a plain name.
+        if id.is_empty() || id.contains('/') || id == "." || id == ".." {
+            return Err(mlua::Error::RuntimeError(format!(
+                "{script}: plugin id {id:?} is not a plain name"
+            )));
+        }
         if plugins.iter().any(|plugin: &Plugin| plugin.id == id) {
             return Err(mlua::Error::RuntimeError(format!(
                 "{script}: duplicate plugin id {id:?}"
@@ -398,6 +412,45 @@ mod tests {
         assert_eq!(rows[1]["title"], "true", "PATH is readable");
         // The test script path is fabricated, so the fallback parent wins.
         assert_eq!(rows[2]["title"], "/test");
+    }
+
+    #[test]
+    fn fs_read_is_scoped_and_toml_decodes() {
+        let host = host(
+            r#"
+            return {
+              {
+                id = "demo",
+                search = function()
+                  local decoded = wayrun.toml.decode("name = 'demo'\ncount = 3")
+                  return {
+                    { title = tostring(decoded.name) .. "/" .. tostring(decoded.count) },
+                    { title = tostring(wayrun.fs.read("nope.txt") == nil) },
+                    { title = tostring(not pcall(wayrun.fs.read, "../plugins.toml")) },
+                    { title = tostring(not pcall(wayrun.fs.read, "/etc/hostname")) },
+                    {
+                      title = tostring(
+                        (wayrun.plugin_dir("demo") or ""):match("/%.config/wayrun/plugins/demo$") ~= nil
+                      ),
+                    },
+                  }
+                end,
+              },
+            }
+            "#,
+        );
+        let rows = search(&host, "demo", "x");
+        assert_eq!(rows[0]["title"], "demo/3");
+        assert_eq!(
+            rows[1]["title"], "true",
+            "a missing file is nil, not an error"
+        );
+        assert_eq!(rows[2]["title"], "true", "a `..` name is refused");
+        assert_eq!(rows[3]["title"], "true", "an absolute name is refused");
+        assert_eq!(
+            rows[4]["title"], "true",
+            "the plugin dir sits in the config tree"
+        );
     }
 
     #[test]

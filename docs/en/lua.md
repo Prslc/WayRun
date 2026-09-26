@@ -48,6 +48,9 @@ example `on_click = { type = "open", uri = "https://example.com" }`.
 | `wayrun.time()` | Unix seconds, for signatures and cache TTLs |
 | `wayrun.env(name)` | the launcher process's variable `name`, or nil |
 | `wayrun.script_dir()` | the script's own directory, for an icon it ships |
+| `wayrun.plugin_dir(id)` | the directory a plugin may read from, `~/.config/wayrun/plugins/<id>` |
+| `wayrun.fs.read(name)` | a file under those directories; a relative name, nil when absent, an error when the name escapes |
+| `wayrun.toml.decode(text)` | TOML in, a table out |
 | `wayrun.json.decode(text)` / `wayrun.json.encode(value)` | JSON in and out |
 | `wayrun.fs.list(dir)` | entry names under `dir`, or nil |
 | `wayrun.fs.stat(path)` | `{ mtime_ns, size }`, or nil |
@@ -58,11 +61,11 @@ example `on_click = { type = "open", uri = "https://example.com" }`.
 ## The sandbox
 
 `os`, `io`, `package`, `load` and `print` are not reachable: a script cannot
-read arbitrary files or run programs, and what it needs the table above
-provides — the launcher's environment, through `wayrun.env`, is the one part of
-its process a script can touch. A call that raises yields no rows and reports
-to the journal, so `wayrun.log` and a `pcall` around risky work are the
-debugging tools.
+run programs, and the only files it can read are its own, through `fs.read`,
+confined to `~/.config/wayrun/plugins/<id>/`; the launcher's environment,
+through `wayrun.env`, is the one other part of its process a script can touch.
+A call that raises yields no rows and reports to the journal, so `wayrun.log`
+and a `pcall` around risky work are the debugging tools.
 
 ## Limits
 
