@@ -90,7 +90,7 @@ Python framework, Lua and Python examples (`firefox.lua`, `web.lua`, …) and
 templates to copy from. A Lua plugin is one script file — the launcher binary
 runs it itself, so there is no interpreter to install; see
 [Plugins](docs/en/plugins.md) and the workspace's
-[Lua plugins](https://github.com/Prslc/WayRun-Plugins/blob/main/LUA.md).
+[Lua plugins](https://github.com/Prslc/WayRun-Plugins/blob/main/docs/en/LUA.md).
 
 ## Quick Start
 
