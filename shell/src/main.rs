@@ -29,7 +29,7 @@ fn main() -> std::process::ExitCode {
     // core's process, and the script path follows the flag.
     if let Some(at) = rest.iter().position(|arg| arg == "--lua-host") {
         let script = rest.get(at + 1).map(String::as_str).unwrap_or_default();
-        return match wayrun_core::lua_host::run(script) {
+        return match wayrun_core::lua::run(script) {
             Ok(()) => std::process::ExitCode::SUCCESS,
             Err(error) => {
                 // `{:#}` keeps the cause: a broken script must say why.
