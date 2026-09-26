@@ -55,27 +55,6 @@ A keyword whose dependency is absent returns no rows instead of failing.
 `config.md`'s `[files]` `index = false` restricts them to the configured `depth`
 instead; they then keep no cache.
 
-## Example plugins
-
-The [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace ships
-`firefox.lua` (bookmarks and history, read from one snapshot of the newest
-profile's `places.sqlite`) and `web.lua` (suggestions from the engine set in
-`config.toml`) beside its Python examples. They are ordinary external hosts —
-Lua scripts run by the launcher's own binary — registered like any other:
-
-```toml
-[[plugins]]
-id = "firefox-bookmarks"
-keyword = "b"
-command = "/path/to/WayRun-Plugins/firefox.lua"
-resident = true
-```
-
-`id` names one plugin the script declares; register `firefox-history` with the
-same `command` for `h`. The workspace's
-[Lua plugins](https://github.com/Prslc/WayRun-Plugins/blob/main/LUA.md) guide
-covers what a script can do.
-
 ## Result actions
 
 A result row can carry secondary commands, shown in the `Shift+Enter` panel. They

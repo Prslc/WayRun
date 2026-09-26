@@ -49,25 +49,6 @@ enabled = true
 `file-search` 与 `path-search` 经索引覆盖整个主目录。`config.md` 的 `[files]` 中设
 `index = false` 则只搜索主目录的 `depth` 层，且不留缓存。
 
-## 示例插件
-
-[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区在 Python 示例旁
-提供了 `firefox.lua`（书签与历史，读取最新 profile 的 `places.sqlite` 单一份快照）
-与 `web.lua`（`config.toml` 中所设引擎的联想词）。它们是普通的外部主机——由启动器
-二进制运行的 Lua 脚本——与其他主机一样注册：
-
-```toml
-[[plugins]]
-id = "firefox-bookmarks"
-keyword = "b"
-command = "/path/to/WayRun-Plugins/firefox.lua"
-resident = true
-```
-
-`id` 取脚本声明的插件之一；`h` 用同一个 `command` 注册 `firefox-history`。脚本能做
-什么见工作区的
-[Lua 插件](https://github.com/Prslc/WayRun-Plugins/blob/main/docs/zh_cn/LUA_CN.md)。
-
 ## 结果动作
 
 结果行可以携带次级命令，显示在 `Shift+Enter` 二级菜单中。不同类型的菜单各不相同：

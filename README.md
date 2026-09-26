@@ -135,8 +135,6 @@ cargo build --release -p wayrun-shell --no-default-features      # no window sea
 - [Config](docs/en/config.md) — `config.toml` (search engine, font family).
 - [Plugins](docs/en/plugins.md) — `plugins.toml`, the built-ins, and external
   JSON-RPC hosts.
-- [Lua plugins](https://github.com/Prslc/WayRun-Plugins/blob/main/LUA.md) —
-  writing a plugin as one Lua script.
 - [JSON-RPC 2.0](docs/en/jsonrpc.md) — the wire protocol and the result schema.
 
 ## Credit
