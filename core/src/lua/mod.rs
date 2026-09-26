@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::rc::Rc;
 
@@ -8,6 +9,8 @@ use serde_json::json;
 
 use crate::wire::ResultItem;
 
+mod fuzzy;
+mod kv;
 mod sdk;
 mod sqlite;
 
@@ -47,15 +50,24 @@ struct Host {
     lua: Lua,
     script: String,
     plugins: Vec<Plugin>,
+    active: kv::Active,
 }
 
 impl Host {
     fn new(script: &str, source: &str) -> Result<Self> {
         // mlua's error carries no Send bound, so it converts here, once.
         let scope: sdk::Scope = Rc::new(RefCell::new(Vec::new()));
+        let active: kv::Active = Rc::new(RefCell::new(None));
+        let kv_paths: kv::Paths = Rc::new(RefCell::new(HashMap::new()));
         let load = || -> mlua::Result<(Lua, Vec<Plugin>)> {
             let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::default())?;
-            let wayrun = sdk::build(&lua, script, Rc::clone(&scope))?;
+            let wayrun = sdk::build(
+                &lua,
+                script,
+                Rc::clone(&scope),
+                Rc::clone(&active),
+                Rc::clone(&kv_paths),
+            )?;
             let env = script_env(&lua, &wayrun)?;
             let declared: Table = lua
                 .load(source)
@@ -66,15 +78,22 @@ impl Host {
             Ok((lua, plugins))
         };
         let (lua, plugins) = load().map_err(|error| anyhow::anyhow!("{error}"))?;
-        // The declared ids are known only now; the fs scope fills here.
-        *scope.borrow_mut() = plugins
-            .iter()
-            .filter_map(|plugin| sdk::plugin_dir(&plugin.id))
-            .collect();
+        // The declared ids are known only now; the read scope and the kv paths fill here.
+        let mut roots = Vec::new();
+        let mut paths = HashMap::new();
+        for plugin in &plugins {
+            if let Some(dir) = sdk::plugin_dir(&plugin.id) {
+                paths.insert(plugin.id.clone(), dir.join("kv.db"));
+                roots.push(dir);
+            }
+        }
+        *scope.borrow_mut() = roots;
+        *kv_paths.borrow_mut() = paths;
         Ok(Self {
             lua,
             script: script.to_string(),
             plugins,
+            active,
         })
     }
 
@@ -174,6 +193,7 @@ impl Host {
                 format!("plugin {} has no {method} method", plugin.id),
             ));
         };
+        *self.active.borrow_mut() = Some(plugin.id.clone());
         let returned: Value = function.call(arg).map_err(|error| {
             warn(
                 &self.script,
@@ -231,6 +251,7 @@ impl Host {
             let Some(function) = &plugin.forget else {
                 continue;
             };
+            *self.active.borrow_mut() = Some(plugin.id.clone());
             match function.call::<Value>(action.clone()) {
                 Ok(Value::Boolean(true)) => return Ok(json!(true)),
                 Ok(_) => {}
@@ -412,6 +433,28 @@ mod tests {
         assert_eq!(rows[1]["title"], "true", "PATH is readable");
         // The test script path is fabricated, so the fallback parent wins.
         assert_eq!(rows[2]["title"], "/test");
+    }
+
+    #[test]
+    fn which_finds_a_command_on_the_path() {
+        let host = host(
+            r#"
+            return {
+              {
+                id = "demo",
+                search = function()
+                  return {
+                    { title = tostring(wayrun.which("sh") ~= nil) },
+                    { title = tostring(wayrun.which("wayrun-not-a-command") == nil) },
+                  }
+                end,
+              },
+            }
+            "#,
+        );
+        let rows = search(&host, "demo", "x");
+        assert_eq!(rows[0]["title"], "true", "sh is on the PATH");
+        assert_eq!(rows[1]["title"], "true", "an unknown name is nil");
     }
 
     #[test]

@@ -5,6 +5,8 @@ use std::time::UNIX_EPOCH;
 
 use mlua::{Lua, LuaSerdeExt, Table, Value};
 
+use super::fuzzy;
+use super::kv;
 use super::sqlite;
 use super::warn;
 
@@ -42,7 +44,13 @@ fn scoped_read(roots: &[PathBuf], name: &str) -> Result<Option<String>, String> 
     Ok(None)
 }
 
-pub(super) fn build(lua: &Lua, script: &str, scope: Scope) -> mlua::Result<Table> {
+pub(super) fn build(
+    lua: &Lua,
+    script: &str,
+    scope: Scope,
+    active: kv::Active,
+    paths: kv::Paths,
+) -> mlua::Result<Table> {
     let sdk = lua.create_table()?;
     sdk.set(
         "home",
@@ -75,6 +83,13 @@ pub(super) fn build(lua: &Lua, script: &str, scope: Scope) -> mlua::Result<Table
         "env",
         lua.create_function(|_, name: String| Ok(std::env::var(name).ok()))?,
     )?;
+    sdk.set(
+        "which",
+        lua.create_function(|_, name: String| {
+            let path = std::env::var_os("PATH").unwrap_or_default();
+            Ok(crate::system::fs::which_in(path, &name).map(|path| path.display().to_string()))
+        })?,
+    )?;
     let dir = script_dir(script);
     sdk.set(
         "script_dir",
@@ -103,11 +118,13 @@ pub(super) fn build(lua: &Lua, script: &str, scope: Scope) -> mlua::Result<Table
     sdk.set("fs", fs_lib(lua, scope)?)?;
     sdk.set("http", http_lib(lua)?)?;
     sdk.set("sqlite", sqlite::lib(lua)?)?;
+    sdk.set("kv", kv::lib(lua, active, paths)?)?;
+    sdk.set("fuzzy", fuzzy::lib(lua)?)?;
     Ok(sdk)
 }
 
 /// Unix seconds, the host clock a signature or a cache TTL needs.
-fn now_seconds() -> i64 {
+pub(super) fn now_seconds() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|since| since.as_secs() as i64)
