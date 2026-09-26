@@ -39,12 +39,13 @@ pub fn command_stamp(command: &str) -> Option<(u64, u64)> {
 pub struct External {
     meta: Meta,
     command: String,
+    resident: bool,
 }
 
 impl External {
     /// Build from the configured id, host command and discovered identity. A
     /// missing identity degrades to the id as display name.
-    pub fn new(id: &str, command: String, discovered: Option<HostMeta>) -> Self {
+    pub fn new(id: &str, command: String, discovered: Option<HostMeta>, resident: bool) -> Self {
         let (name, icon, ready) = match discovered {
             Some(m) => (m.name, m.icon, m.ready),
             None => (
@@ -63,6 +64,7 @@ impl External {
                 ready,
             },
             command,
+            resident,
         }
     }
 }
@@ -81,7 +83,8 @@ impl Plugin for External {
         let plugin = self.meta.id.to_string();
         let query = query.to_string();
         let icon = self.meta.icon.to_string();
-        Box::pin(async move { query_external(&command, &plugin, &query, &icon).await })
+        let resident = self.resident;
+        Box::pin(async move { query_external(&command, resident, &plugin, &query, &icon).await })
     }
 
     fn default_view(
@@ -90,13 +93,15 @@ impl Plugin for External {
         let command = self.command.clone();
         let plugin = self.meta.id.to_string();
         let icon = self.meta.icon.to_string();
-        Box::pin(async move { query_default(&command, &plugin, &icon).await })
+        let resident = self.resident;
+        Box::pin(async move { query_default(&command, resident, &plugin, &icon).await })
     }
 
     fn forget(&self, command: &Action) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + '_>> {
         let host = self.command.clone();
         let command = command.clone();
-        Box::pin(async move { forget_external(&host, &command).await })
+        let resident = self.resident;
+        Box::pin(async move { forget_external(&host, resident, &command).await })
     }
 }
 
@@ -104,13 +109,23 @@ impl Plugin for External {
 /// session. Discovery holds the registry's init lock until it returns.
 const HOST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// One JSON-RPC round trip against `command`: spawn, write, close stdin, reap,
-/// return the first parseable response line; `None` on a missing/stalled host.
-async fn rpc_call(command: &str, request: &serde_json::Value) -> Option<serde_json::Value> {
-    rpc_call_within(command, request, HOST_TIMEOUT).await
+/// One call against a host: `resident` keeps the process across calls; the
+/// default spawns it fresh, so nothing a host kept outlives the call.
+async fn host_call(
+    command: &str,
+    resident: bool,
+    request: &serde_json::Value,
+    limit: std::time::Duration,
+) -> Option<serde_json::Value> {
+    if resident {
+        super::resident::call(command, request, limit).await
+    } else {
+        rpc_call_within(command, request, limit).await
+    }
 }
 
-/// [`rpc_call`] with an explicit deadline, so the stall path is testable.
+/// One fork-per-call round trip: spawn, write, close stdin, reap, return the
+/// first parseable response line; `None` on a missing or stalled host.
 async fn rpc_call_within(
     command: &str,
     request: &serde_json::Value,
@@ -164,13 +179,13 @@ async fn rpc_call_within(
 
 /// Ask the host who it serves. Empty when the host is missing, stalled or not
 /// self-describing, so a query for it falls through instead of hanging.
-pub async fn discover(command: &str) -> Vec<HostMeta> {
+pub async fn discover(command: &str, resident: bool) -> Vec<HostMeta> {
     let request = serde_json::json!({
         "jsonrpc": "2.0",
         "method": "list_plugins",
         "id": 1,
     });
-    let Some(response) = rpc_call(command, &request).await else {
+    let Some(response) = host_call(command, resident, &request, HOST_TIMEOUT).await else {
         eprintln!(
             "wayrun-core: external host {command} did not answer list_plugins; its plugins stay unregistered"
         );
@@ -232,6 +247,7 @@ fn parse_result_items(
 
 async fn query_external(
     command: &str,
+    resident: bool,
     plugin: &str,
     text: &str,
     icon: &str,
@@ -246,7 +262,7 @@ async fn query_external(
         "params": { "plugin": plugin, "text": text },
         "id": 1,
     });
-    let Some(response) = rpc_call(command, &request).await else {
+    let Some(response) = host_call(command, resident, &request, HOST_TIMEOUT).await else {
         return Ok(Vec::new());
     };
     Ok(parse_result_items(&response, plugin, icon).unwrap_or_default())
@@ -254,14 +270,19 @@ async fn query_external(
 
 /// Ask the host for its default view (its `top` method). `Ok(None)` when it has
 /// no such method, errored, or returned nothing, so the caller shows the card.
-async fn query_default(command: &str, plugin: &str, icon: &str) -> Result<Option<Vec<ResultItem>>> {
+async fn query_default(
+    command: &str,
+    resident: bool,
+    plugin: &str,
+    icon: &str,
+) -> Result<Option<Vec<ResultItem>>> {
     let request = serde_json::json!({
         "jsonrpc": "2.0",
         "method": "top",
         "params": { "plugin": plugin },
         "id": 1,
     });
-    let Some(response) = rpc_call(command, &request).await else {
+    let Some(response) = host_call(command, resident, &request, HOST_TIMEOUT).await else {
         return Ok(None);
     };
     if response.get("error").is_some() {
@@ -298,7 +319,7 @@ fn resolve_command(command: &str) -> String {
 
 /// Relay a row's removal to its host: the command must be a `run` whose first
 /// token is this host's `command`. `true` when the host acknowledged it.
-async fn forget_external(command: &str, row: &Action) -> Result<bool> {
+async fn forget_external(command: &str, resident: bool, row: &Action) -> Result<bool> {
     let Some(argv0) = run_argv0(row) else {
         return Ok(false);
     };
@@ -312,7 +333,7 @@ async fn forget_external(command: &str, row: &Action) -> Result<bool> {
         "params": { "on_click": row },
         "id": 1,
     });
-    let response = rpc_call(command, &request).await;
+    let response = host_call(command, resident, &request, HOST_TIMEOUT).await;
     Ok(response.is_some_and(|reply| reply.get("error").is_none()))
 }
 fn resolve_item_icon(icon: &str, fallback: Option<String>) -> Option<String> {
@@ -414,7 +435,7 @@ mod tests {
     #[tokio::test]
     async fn an_empty_query_never_reaches_the_host() {
         // No host is contacted: an empty text is not a search.
-        let items = query_external("/nonexistent/host", "p", "", "")
+        let items = query_external("/nonexistent/host", false, "p", "", "")
             .await
             .unwrap();
         assert!(items.is_empty());
@@ -426,7 +447,7 @@ mod tests {
         let row = Action::Run {
             cmd: "/bin/other del 1".to_string(),
         };
-        let owned = forget_external("/usr/bin/definitely-not-this", &row)
+        let owned = forget_external("/usr/bin/definitely-not-this", false, &row)
             .await
             .unwrap();
         assert!(!owned);
@@ -439,7 +460,7 @@ mod tests {
         let row = Action::Run {
             cmd: format!("{command} del 1"),
         };
-        let owned = forget_external(&command, &row).await.unwrap();
+        let owned = forget_external(&command, false, &row).await.unwrap();
         assert!(owned, "the host dropped its own data, so the row may leave");
     }
 
@@ -452,7 +473,7 @@ mod tests {
         let row = Action::Run {
             cmd: format!("{command} del 1"),
         };
-        let owned = forget_external(&command, &row).await.unwrap();
+        let owned = forget_external(&command, false, &row).await.unwrap();
         assert!(!owned, "-32601 means the row is not this host's to drop");
     }
 

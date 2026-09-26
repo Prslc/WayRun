@@ -19,6 +19,9 @@ pub struct PluginEntry {
     /// compiled in: it is spawned per call and relays `search` to the host.
     #[serde(default)]
     pub command: Option<String>,
+    /// Keep the host process alive across calls instead of spawning per call.
+    #[serde(default)]
+    pub resident: bool,
 }
 
 const fn default_enabled() -> bool {
@@ -38,6 +41,7 @@ pub struct Meta {
 pub struct PendingHost {
     pub id: String,
     pub command: String,
+    pub resident: bool,
 }
 
 pub(super) struct Entry {

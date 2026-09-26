@@ -98,12 +98,14 @@ fn build_entries(config: &Config) -> Vec<Entry> {
         let pending = meta.is_none().then(|| PendingHost {
             id: p.id.clone(),
             command: command.clone(),
+            resident: p.resident,
         });
         entries.push(Entry {
             plugin: Box::new(crate::provider::external::External::new(
                 &p.id,
                 command.clone(),
                 meta,
+                p.resident,
             )),
             keyword: p.keyword.clone(),
             external: true,
@@ -130,9 +132,9 @@ pub(super) async fn resolve_pending(keyword: Option<&str>) {
         return;
     }
 
-    let mut commands: Vec<String> = pending
+    let mut commands: Vec<(String, bool)> = pending
         .iter()
-        .map(|(_, host)| host.command.clone())
+        .map(|(_, host)| (host.command.clone(), host.resident))
         .collect();
     commands.sort();
     commands.dedup();
@@ -141,24 +143,24 @@ pub(super) async fn resolve_pending(keyword: Option<&str>) {
     // only the rest are forked.
     let mut cache = HostCache::load();
     let mut discovered: HashMap<String, Vec<HostMeta>> = HashMap::default();
-    let mut stale: Vec<String> = Vec::new();
-    for command in commands {
+    let mut stale: Vec<(String, bool)> = Vec::new();
+    for (command, resident) in commands {
         match cache.fresh(&command) {
             Some(metas) => {
                 discovered.insert(command, metas);
             }
-            None => stale.push(command),
+            None => stale.push((command, resident)),
         }
     }
 
     if !stale.is_empty() {
         let permits = std::sync::Arc::new(tokio::sync::Semaphore::new(DISCOVERY_CONCURRENCY));
         let mut hosts = tokio::task::JoinSet::new();
-        for command in stale {
+        for (command, resident) in stale {
             let permits = permits.clone();
             hosts.spawn(async move {
                 let _permit = permits.acquire_owned().await;
-                let metas = crate::provider::external::discover(&command).await;
+                let metas = crate::provider::external::discover(&command, resident).await;
                 (command, metas)
             });
         }
@@ -186,6 +188,7 @@ pub(super) async fn resolve_pending(keyword: Option<&str>) {
             &host.id,
             host.command,
             Some(meta),
+            host.resident,
         ));
         reg[index].pending = None;
     }

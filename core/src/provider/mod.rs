@@ -4,6 +4,7 @@ pub mod clipboard;
 pub mod external;
 pub mod file;
 pub mod firefox;
+mod resident;
 pub mod runner;
 pub mod system_commands;
 pub mod web;

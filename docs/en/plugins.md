@@ -19,6 +19,7 @@ enabled = true
 | `keyword` | yes | The prefix that routes input to this plugin. `""` makes it a **default** provider. |
 | `enabled` | no | Defaults to `true`. `false` disables the plugin without removing the entry. |
 | `command` | no | An external JSON-RPC 2.0 host. See below. |
+| `resident` | no | Defaults to `false`. Keep the host process alive across calls. See below. |
 
 Reorder entries to change priority. An `id` that is neither a built-in nor a host
 is ignored.
@@ -79,6 +80,12 @@ gesture as clearing it. See the `actions` field in
 `PATH` or given as an absolute path. It takes no arguments and no shell syntax,
 so a script needs a shebang and the exec bit. Each call starts the host fresh and
 is bounded by a short timeout, so a stalled host cannot hang the launcher.
+
+`resident = true` keeps one host process alive across calls instead — about a
+millisecond per call against the fresh process's several. An idle host is
+dropped after two minutes; a crash or a stall kills it, and the next call starts
+a new one. The host must be stateless per call either way, but it may now cache
+within its process lifetime.
 
 Both the identity `icon` and each result `icon` must be an absolute path to an
 icon file the host ships itself; the same holds for an action's `icon` and a
