@@ -15,7 +15,7 @@ return {
   {
     id = "demo",                         -- must match the plugins.toml entry
     name = "Demo",                       -- shown in the help cards
-    icon = wayrun.icon("builtin:search"), -- an absolute path, or nil
+    icon = wayrun.icon("builtin:globe"), -- an absolute path, or nil
     description = "Say hello",           -- optional, shown in the help cards
     search = function(text)              -- rows for a routed query, in order
       if text == "" then return {} end

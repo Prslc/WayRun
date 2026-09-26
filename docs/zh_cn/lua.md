@@ -14,7 +14,7 @@ return {
   {
     id = "demo",                          -- 必须与 plugins.toml 条目一致
     name = "Demo",                        -- 显示在帮助卡片中
-    icon = wayrun.icon("builtin:search"), -- 绝对路径，或 nil
+    icon = wayrun.icon("builtin:globe"),  -- 绝对路径，或 nil
     description = "Say hello",            -- 可选，显示在帮助卡片中
     search = function(text)               -- 路由查询的候选行，按序返回
       if text == "" then return {} end
