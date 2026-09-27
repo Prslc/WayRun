@@ -10,6 +10,7 @@ use serde_json::json;
 use crate::wire::ResultItem;
 
 mod fuzzy;
+mod http;
 mod kv;
 mod sdk;
 mod sqlite;

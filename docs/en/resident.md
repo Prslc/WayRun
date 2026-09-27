@@ -59,14 +59,16 @@ The core makes no outbound requests itself; a registered host that fetches does
 launcher's environment, so configure a proxy with `Environment=` in the unit:
 
 ```ini
-# HTTP CONNECT proxy; scheme optional, credentials optional
+# HTTP CONNECT proxy; user:password@ optional
 Environment=https_proxy=http://127.0.0.1:7890
 Environment=http_proxy=http://127.0.0.1:7890
 ```
 
 Then `systemctl --user daemon-reload && systemctl --user restart wayrun-launcher`.
-The lowercase variable is read first, then the uppercase one, as curl reads
-them; the chosen proxy is used for every request. Only HTTP CONNECT proxies are
-supported (`[http://][user[:password]@]host[:port]`, default port 1080); a
-`socks5://` URL is not, and an unusable value is ignored, so the request falls
-back to a direct connection.
+`ALL_PROXY` is read first, then `HTTPS_PROXY`, then `HTTP_PROXY`, each in both
+letter cases; the first usable value wins and an unusable one is skipped, so a
+broken `https_proxy` does not mask a good `http_proxy`. `NO_PROXY` is honoured
+per request, with exact, suffix and wildcard patterns. Write the scheme out:
+`http://` is an HTTP CONNECT proxy on port 80 and `https://` one on 443, while a
+scheme-less value means HTTP rather than SOCKS; `socks5://` is not in the
+shipped build. With no usable value, requests go direct.

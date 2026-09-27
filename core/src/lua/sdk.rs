@@ -6,6 +6,7 @@ use std::time::UNIX_EPOCH;
 use mlua::{Lua, LuaSerdeExt, Table, Value};
 
 use super::fuzzy;
+use super::http;
 use super::kv;
 use super::sqlite;
 use super::warn;
@@ -116,7 +117,7 @@ pub(super) fn build(
     sdk.set("json", json_lib(lua)?)?;
     sdk.set("toml", toml_lib(lua)?)?;
     sdk.set("fs", fs_lib(lua, scope)?)?;
-    sdk.set("http", http_lib(lua)?)?;
+    sdk.set("http", http::lib(lua)?)?;
     sdk.set("sqlite", sqlite::lib(lua)?)?;
     sdk.set("kv", kv::lib(lua, active, paths)?)?;
     sdk.set("fuzzy", fuzzy::lib(lua)?)?;
@@ -228,76 +229,6 @@ fn fs_lib(lua: &Lua, scope: Scope) -> mlua::Result<Table> {
     Ok(fs)
 }
 
-fn http_lib(lua: &Lua) -> mlua::Result<Table> {
-    let http = lua.create_table()?;
-    http.set(
-        "get",
-        lua.create_function(
-            |lua, (url, params, timeout_ms): (String, Option<Table>, Option<u64>)| {
-                let seconds = (timeout_ms.unwrap_or(5_000) / 1_000).max(1);
-                let mut request = minreq::get(&url).with_timeout(seconds);
-                if let Some(params) = params {
-                    for pair in params.pairs::<String, Value>() {
-                        let (name, value) = pair?;
-                        if name == "headers" {
-                            let Value::Table(headers) = value else {
-                                return Err(mlua::Error::RuntimeError(format!(
-                                    "http headers must be a table, got {value:?}"
-                                )));
-                            };
-                            for pair in headers.pairs::<String, String>() {
-                                let (key, value) = pair?;
-                                request = request.with_header(key, value);
-                            }
-                            continue;
-                        }
-                        let value = match value {
-                            Value::Integer(number) => number.to_string(),
-                            Value::Number(number) => number.to_string(),
-                            Value::String(text) => text.to_string_lossy(),
-                            Value::Boolean(flag) => flag.to_string(),
-                            other => {
-                                return Err(mlua::Error::RuntimeError(format!(
-                                    "http params must be scalars, got {other:?}"
-                                )));
-                            }
-                        };
-                        request = request.with_param(name, value);
-                    }
-                }
-                let request = match proxy_from_env() {
-                    Some(proxy) => request.with_proxy(proxy),
-                    None => request,
-                };
-                let response = request.send().map_err(|error| {
-                    mlua::Error::RuntimeError(format!("http.get {url}: {error}"))
-                })?;
-                let body = response.as_str().map_err(|error| {
-                    mlua::Error::RuntimeError(format!("http.get {url}: {error}"))
-                })?;
-                let reply = lua.create_table()?;
-                reply.set("status", response.status_code)?;
-                reply.set("body", body)?;
-                Ok(reply)
-            },
-        )?,
-    )?;
-    Ok(http)
-}
-
-fn proxy_from_env() -> Option<minreq::Proxy> {
-    let spec = ["https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY"]
-        .into_iter()
-        .find_map(|key| std::env::var(key).ok().filter(|value| !value.is_empty()))?;
-    match minreq::Proxy::new(&spec) {
-        Ok(proxy) => Some(proxy),
-        Err(error) => {
-            warn("sdk", &format!("ignoring proxy {spec:?}: {error}"));
-            None
-        }
-    }
-}
-
 /// A script's `wayrun.t(key, args)`: the same tables the core reads, with the
 /// `%{name}` placeholders filled from `args`.
 fn translate(key: &str, args: Option<Table>) -> String {
@@ -342,52 +273,5 @@ mod tests {
         assert!(scoped_read(&roots, "a/../b").is_err());
         assert!(scoped_read(&roots, "/etc/hostname").is_err());
         assert!(scoped_read(&roots, "").is_err());
-    }
-
-    #[test]
-    fn http_get_sends_its_headers_and_answers_status_and_body() {
-        use std::io::{BufRead, BufReader, Write};
-
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut reader = BufReader::new(stream.try_clone().unwrap());
-            let mut head = String::new();
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
-                    break;
-                }
-                head.push_str(&line);
-            }
-            stream
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
-                .unwrap();
-            head
-        });
-
-        let lua = Lua::new();
-        lua.globals().set("http", http_lib(&lua).unwrap()).unwrap();
-        lua.globals()
-            .set("url", format!("http://127.0.0.1:{port}/search"))
-            .unwrap();
-        let (status, body): (u16, String) = lua
-            .load(
-                r#"
-                local res = http.get(url, {
-                    q = "rust lang",
-                    headers = { ["X-Test"] = "yes" },
-                }, 2000)
-                return res.status, res.body
-                "#,
-            )
-            .eval()
-            .unwrap();
-        assert_eq!((status, body.as_str()), (200, "ok"));
-
-        let head = server.join().unwrap();
-        assert!(head.contains("X-Test: yes"), "{head}");
-        assert!(head.contains("q=rust%20lang"), "{head}");
     }
 }
