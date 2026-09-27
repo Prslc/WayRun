@@ -129,10 +129,6 @@ pub(super) fn build(
             Ok(plugin_dir(&id).map(|dir| dir.display().to_string()))
         })?,
     )?;
-    sdk.set(
-        "t",
-        lua.create_function(|_, (key, args): (String, Option<Table>)| Ok(translate(&key, args)))?,
-    )?;
     let name = script.to_string();
     sdk.set(
         "log",
@@ -295,25 +291,6 @@ fn fs_lib(lua: &Lua, scope: Scope, guard: areas::Guard) -> mlua::Result<Table> {
         )?,
     )?;
     Ok(fs)
-}
-
-/// A script's `wayrun.t(key, args)`: the same tables the core reads, with the
-/// `%{name}` placeholders filled from `args`.
-fn translate(key: &str, args: Option<Table>) -> String {
-    let mut message = crate::_rust_i18n_translate(&rust_i18n::locale(), key);
-    if let Some(args) = args {
-        for pair in args.pairs::<String, Value>() {
-            let Ok((name, value)) = pair else { continue };
-            let text = match value {
-                Value::Integer(number) => number.to_string(),
-                Value::Number(number) => number.to_string(),
-                Value::String(text) => text.to_string_lossy(),
-                other => format!("{other:?}"),
-            };
-            message = message.replace(&format!("%{{{name}}}"), &text);
-        }
-    }
-    message
 }
 
 #[cfg(test)]

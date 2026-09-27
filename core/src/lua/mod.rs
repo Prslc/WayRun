@@ -806,24 +806,6 @@ mod tests {
     }
 
     #[test]
-    fn t_fills_placeholders_from_the_core_tables() {
-        let host = host(
-            r#"
-            return {
-              {
-                id = "demo",
-                search = function()
-                  return { { title = wayrun.t("plugin.external.ready", { command = "my-host" }) } }
-                end,
-              },
-            }
-            "#,
-        );
-        let rows = search(&host, "demo", "x");
-        assert_eq!(rows[0]["title"], "External plugin via my-host");
-    }
-
-    #[test]
     fn list_plugins_carries_identity() {
         let host = host(r#"return { { id = "demo", name = "Demo", description = "A demo" } }"#);
         let plugins = call(&host, "list_plugins", json!(null)).unwrap();
