@@ -1,7 +1,4 @@
 target/
 AGENTS.md
-AGENTS.md.bak
 NOTES.md
 scripts/
-# bench-reported output written next to the model it was given
-*.report.json
