@@ -6,6 +6,7 @@ use std::time::UNIX_EPOCH;
 
 use mlua::{Lua, LuaSerdeExt, Table, Value};
 
+use super::areas;
 use super::crypto;
 use super::fuzzy;
 use super::http;
@@ -58,6 +59,7 @@ pub(super) fn build(
     active: kv::Active,
     paths: kv::Paths,
     env_scope: EnvScope,
+    read_areas: areas::Areas,
 ) -> mlua::Result<Table> {
     let sdk = lua.create_table()?;
     sdk.set(
@@ -116,9 +118,10 @@ pub(super) fn build(
         })?,
     )?;
     let dir = script_dir(script);
+    let dir_name = dir.as_ref().map(|dir| dir.display().to_string());
     sdk.set(
         "script_dir",
-        lua.create_function(move |_, ()| Ok(dir.clone()))?,
+        lua.create_function(move |_, ()| Ok(dir_name.clone()))?,
     )?;
     sdk.set(
         "plugin_dir",
@@ -138,9 +141,27 @@ pub(super) fn build(
             Ok(())
         })?,
     )?;
+    let guard: areas::Guard = {
+        let read_areas = Rc::clone(&read_areas);
+        let guard_active = Rc::clone(&active);
+        let script = dir.clone();
+        Rc::new(move |path: &str| {
+            let Some(id) = guard_active.borrow().clone() else {
+                return Err("this read ran outside a plugin call".to_string());
+            };
+            let mut roots = read_areas.borrow().get(&id).cloned().unwrap_or_default();
+            if let Some(own) = plugin_dir(&id) {
+                roots.push(own);
+            }
+            if let Some(dir) = &script {
+                roots.push(dir.clone());
+            }
+            areas::check(&roots, path)
+        })
+    };
     sdk.set("json", json_lib(lua)?)?;
     sdk.set("toml", toml_lib(lua)?)?;
-    sdk.set("fs", fs_lib(lua, scope)?)?;
+    sdk.set("fs", fs_lib(lua, scope, Rc::clone(&guard))?)?;
     let stores: kv::Handle = Rc::new(RefCell::new(kv::Stores::default()));
     sdk.set(
         "http",
@@ -152,7 +173,7 @@ pub(super) fn build(
             Rc::clone(&paths),
         )?,
     )?;
-    sdk.set("sqlite", sqlite::lib(lua)?)?;
+    sdk.set("sqlite", sqlite::lib(lua, guard)?)?;
     sdk.set("kv", kv::lib(lua, stores, active, paths)?)?;
     sdk.set("fuzzy", fuzzy::lib(lua)?)?;
     sdk.set("crypto", crypto::lib(lua)?)?;
@@ -169,9 +190,9 @@ pub(super) fn now_seconds() -> i64 {
 
 /// The script's own directory, so a plugin can ship an icon beside itself; the
 /// host has just read the file, so canonicalize only fails in theory.
-fn script_dir(script: &str) -> Option<String> {
-    let path = std::fs::canonicalize(script).unwrap_or_else(|_| std::path::PathBuf::from(script));
-    path.parent().map(|dir| dir.display().to_string())
+fn script_dir(script: &str) -> Option<PathBuf> {
+    let path = std::fs::canonicalize(script).unwrap_or_else(|_| PathBuf::from(script));
+    path.parent().map(|dir| dir.to_path_buf())
 }
 
 fn json_lib(lua: &Lua) -> mlua::Result<Table> {
@@ -212,11 +233,17 @@ fn toml_lib(lua: &Lua) -> mlua::Result<Table> {
     Ok(toml)
 }
 
-fn fs_lib(lua: &Lua, scope: Scope) -> mlua::Result<Table> {
+fn fs_lib(lua: &Lua, scope: Scope, guard: areas::Guard) -> mlua::Result<Table> {
     let fs = lua.create_table()?;
+    let list_guard = Rc::clone(&guard);
     fs.set(
         "list",
-        lua.create_function(|lua, dir: String| {
+        lua.create_function(move |lua, dir: String| {
+            if let Err(problem) = list_guard(&dir) {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "fs.list {dir:?}: {problem}"
+                )));
+            }
             let Ok(entries) = std::fs::read_dir(&dir) else {
                 return Ok(Value::Nil);
             };
@@ -231,9 +258,15 @@ fn fs_lib(lua: &Lua, scope: Scope) -> mlua::Result<Table> {
             Ok(Value::Table(list))
         })?,
     )?;
+    let stat_guard = Rc::clone(&guard);
     fs.set(
         "stat",
-        lua.create_function(|lua, path: String| {
+        lua.create_function(move |lua, path: String| {
+            if let Err(problem) = stat_guard(&path) {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "fs.stat {path:?}: {problem}"
+                )));
+            }
             let Ok(meta) = std::fs::metadata(&path) else {
                 return Ok(Value::Nil);
             };

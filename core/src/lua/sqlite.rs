@@ -10,22 +10,36 @@ use anyhow::{Context, Result};
 use mlua::{Lua, LuaSerdeExt, Table, Value};
 use serde_json::json;
 
+use super::areas;
+
 /// Open connections kept across a script's calls, so a keystroke is one query
 /// rather than a copy, a connect and a schema parse as well.
 #[derive(Default)]
 struct Snapshots {
     next: u64,
     sources: HashMap<PathBuf, u64>,
-    open: HashMap<u64, (PathBuf, rusqlite::Connection)>,
+    open: HashMap<u64, Open>,
 }
 
-pub(super) fn lib(lua: &Lua) -> mlua::Result<Table> {
+struct Open {
+    source: PathBuf,
+    copy: PathBuf,
+    connection: rusqlite::Connection,
+}
+
+pub(super) fn lib(lua: &Lua, guard: areas::Guard) -> mlua::Result<Table> {
     let sqlite = lua.create_table()?;
     let snapshots = Rc::new(RefCell::new(Snapshots::default()));
     let opener = Rc::clone(&snapshots);
+    let snapshot_guard = Rc::clone(&guard);
     sqlite.set(
         "snapshot",
         lua.create_function(move |_, path: String| {
+            if let Err(problem) = snapshot_guard(&path) {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "sqlite.snapshot {path:?}: {problem}"
+                )));
+            }
             let cache = crate::system::fs::cache_dir().ok_or_else(|| {
                 mlua::Error::RuntimeError("sqlite.snapshot: no cache directory".to_string())
             })?;
@@ -39,13 +53,20 @@ pub(super) fn lib(lua: &Lua) -> mlua::Result<Table> {
         "query",
         lua.create_function(
             move |lua, (id, sql, params): (u64, String, Option<Table>)| {
+                // A handle answers only for a plugin that could have opened its
+                // source itself: a sibling cannot read through another's view.
+                let snapshots = snapshots.borrow();
+                if let Some(source) = snapshots.source(id)
+                    && let Err(problem) = guard(source.to_str().unwrap_or_default())
+                {
+                    return Err(mlua::Error::RuntimeError(format!(
+                        "sqlite.query: {problem}"
+                    )));
+                }
                 let params = sqlite_params(params)?;
-                let rows = snapshots
-                    .borrow()
-                    .query(id, &sql, params)
-                    .map_err(|error| {
-                        mlua::Error::RuntimeError(format!("sqlite.query: {error:#}"))
-                    })?;
+                let rows = snapshots.query(id, &sql, params).map_err(|error| {
+                    mlua::Error::RuntimeError(format!("sqlite.query: {error:#}"))
+                })?;
                 lua.to_value(&serde_json::Value::Array(rows))
             },
         )?,
@@ -60,18 +81,37 @@ impl Snapshots {
         if let Some(&id) = self.sources.get(&source) {
             // A changed source keeps its handle: the id is a live view of the
             // source, and the connection under it follows the newest copy.
-            let unchanged = self.open.get(&id).is_some_and(|(open, _)| *open == copy);
+            let unchanged = self.open.get(&id).is_some_and(|open| open.copy == copy);
             if !unchanged {
                 let connection = open_snapshot(&copy)?;
-                self.open.insert(id, (copy, connection));
+                self.open.insert(
+                    id,
+                    Open {
+                        source,
+                        copy,
+                        connection,
+                    },
+                );
             }
             return Ok(id);
         }
         self.next += 1;
         let connection = open_snapshot(&copy)?;
-        self.open.insert(self.next, (copy, connection));
+        self.open.insert(
+            self.next,
+            Open {
+                source: source.clone(),
+                copy,
+                connection,
+            },
+        );
         self.sources.insert(source, self.next);
         Ok(self.next)
+    }
+
+    /// The file a handle is a view of, for the guard's re-check.
+    fn source(&self, id: u64) -> Option<&Path> {
+        self.open.get(&id).map(|open| open.source.as_path())
     }
 
     fn query(
@@ -80,7 +120,8 @@ impl Snapshots {
         sql: &str,
         params: Vec<rusqlite::types::Value>,
     ) -> Result<Vec<serde_json::Value>> {
-        let (_, connection) = self.open.get(&id).context("unknown sqlite handle")?;
+        let open = self.open.get(&id).context("unknown sqlite handle")?;
+        let connection = &open.connection;
         let mut statement = connection.prepare_cached(sql)?;
         let columns: Vec<String> = statement
             .column_names()

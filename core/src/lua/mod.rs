@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use anyhow::{Context, Result};
@@ -9,6 +10,7 @@ use serde_json::json;
 
 use crate::wire::ResultItem;
 
+mod areas;
 mod crypto;
 mod fuzzy;
 mod http;
@@ -44,6 +46,7 @@ struct Plugin {
     icon: Option<String>,
     description: Option<String>,
     env: Vec<String>,
+    read: Vec<PathBuf>,
     search: Option<Function>,
     top: Option<Function>,
     forget: Option<Function>,
@@ -63,6 +66,7 @@ impl Host {
         let active: kv::Active = Rc::new(RefCell::new(None));
         let kv_paths: kv::Paths = Rc::new(RefCell::new(HashMap::new()));
         let env_scope: sdk::EnvScope = Rc::new(RefCell::new(HashMap::new()));
+        let read_areas: areas::Areas = Rc::new(RefCell::new(HashMap::new()));
         let load = || -> mlua::Result<(Lua, Vec<Plugin>)> {
             let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::default())?;
             let wayrun = sdk::build(
@@ -72,6 +76,7 @@ impl Host {
                 Rc::clone(&active),
                 Rc::clone(&kv_paths),
                 Rc::clone(&env_scope),
+                Rc::clone(&read_areas),
             )?;
             let env = script_env(&lua, &wayrun)?;
             let declared: Table = lua
@@ -83,13 +88,15 @@ impl Host {
             Ok((lua, plugins))
         };
         let (lua, plugins) = load().map_err(|error| anyhow::anyhow!("{error}"))?;
-        // The declared ids are known only now; the read scope, the kv paths and
-        // the readable env names fill here.
+        // The declared ids are known only now; the read scope, the kv paths,
+        // the readable env names and the read areas fill here.
         let mut roots = Vec::new();
         let mut paths = HashMap::new();
         let mut envs = HashMap::new();
+        let mut areas = HashMap::new();
         for plugin in &plugins {
             envs.insert(plugin.id.clone(), plugin.env.clone());
+            areas.insert(plugin.id.clone(), plugin.read.clone());
             if let Some(dir) = sdk::plugin_dir(&plugin.id) {
                 paths.insert(plugin.id.clone(), dir.join("kv.db"));
                 roots.push(dir);
@@ -98,6 +105,7 @@ impl Host {
         *scope.borrow_mut() = roots;
         *kv_paths.borrow_mut() = paths;
         *env_scope.borrow_mut() = envs;
+        *read_areas.borrow_mut() = areas;
         Ok(Self {
             lua,
             script: script.to_string(),
@@ -353,12 +361,29 @@ fn read_plugins(declared: &Table, script: &str) -> mlua::Result<Vec<Plugin>> {
                 )));
             }
         }
+        let mut read = Vec::new();
+        for spec in entry
+            .get::<Option<Vec<String>>>("read")?
+            .unwrap_or_default()
+        {
+            // A pattern would defeat the manifest's point, a plugin naming the
+            // areas it looks at; `expand` already refuses `..` and relatives.
+            match areas::expand(&spec) {
+                Some(path) if !spec.contains('*') => read.push(path),
+                _ => {
+                    return Err(mlua::Error::RuntimeError(format!(
+                        "{script}: plugin {id}: read {spec:?} is not a plain path"
+                    )));
+                }
+            }
+        }
         plugins.push(Plugin {
             id,
             name,
             icon,
             description: entry.get("description")?,
             env,
+            read,
             search: entry.get("search")?,
             top: entry.get("top")?,
             forget: entry.get("forget")?,
@@ -528,6 +553,137 @@ mod tests {
             r#"return { { id = "demo", env = { "YOUDAO_*" }, search = function() return {} end } }"#,
         );
         assert!(loaded.is_err(), "env names are exact");
+    }
+
+    #[test]
+    fn an_undeclared_area_is_refused() {
+        let host = host(
+            r#"
+            return {
+              {
+                id = "demo",
+                search = function()
+                  local list = pcall(wayrun.fs.list, "/etc")
+                  local stat = pcall(wayrun.fs.stat, "/etc/hostname")
+                  local db = pcall(wayrun.sqlite.snapshot, "/etc/hostname")
+                  return { { title = tostring(list) .. tostring(stat) .. tostring(db) } }
+                end,
+              },
+            }
+            "#,
+        );
+        let rows = search(&host, "demo", "x");
+        assert_eq!(rows[0]["title"], "falsefalsefalse");
+    }
+
+    #[test]
+    fn a_declared_area_serves_list_stat_and_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("note.txt"), "hi").unwrap();
+        {
+            let connection = rusqlite::Connection::open(dir.path().join("data.sqlite")).unwrap();
+            connection
+                .execute_batch("CREATE TABLE t (name TEXT); INSERT INTO t VALUES ('row');")
+                .unwrap();
+        }
+        let source = r#"
+            return {
+              {
+                id = "demo",
+                read = { "{{DIR}}" },
+                search = function()
+                  local list = wayrun.fs.list("{{DIR}}") or {}
+                  local stat = wayrun.fs.stat("{{DIR}}/note.txt")
+                  local db = wayrun.sqlite.snapshot("{{DIR}}/data.sqlite")
+                  local rows = wayrun.sqlite.query(db, "SELECT name FROM t")
+                  return {
+                    { title = table.concat(list, ",") },
+                    { title = tostring(stat ~= nil) },
+                    { title = rows[1].name },
+                  }
+                end,
+              },
+            }
+            "#
+        .replace("{{DIR}}", &dir.path().display().to_string());
+        let host = host(&source);
+        let rows = search(&host, "demo", "x");
+        assert_eq!(rows[0]["title"], "data.sqlite,note.txt");
+        assert_eq!(rows[1]["title"], "true");
+        assert_eq!(rows[2]["title"], "row");
+    }
+
+    #[test]
+    fn a_sibling_cannot_query_another_plugins_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let connection = rusqlite::Connection::open(dir.path().join("data.sqlite")).unwrap();
+            connection
+                .execute_batch("CREATE TABLE t (name TEXT); INSERT INTO t VALUES ('row');")
+                .unwrap();
+        }
+        let source = r#"
+            return {
+              {
+                id = "owner",
+                read = { "{{DIR}}" },
+                search = function()
+                  return { { title = tostring(wayrun.sqlite.snapshot("{{DIR}}/data.sqlite")) } }
+                end,
+              },
+              {
+                id = "sibling",
+                search = function()
+                  local ok = pcall(wayrun.sqlite.query, 1, "SELECT name FROM t")
+                  return { { title = tostring(ok) } }
+                end,
+              },
+              {
+                id = "same-area",
+                read = { "{{DIR}}" },
+                search = function()
+                  local handle = wayrun.sqlite.snapshot("{{DIR}}/data.sqlite")
+                  local rows = wayrun.sqlite.query(handle, "SELECT name FROM t")
+                  return { { title = rows[1].name } }
+                end,
+              },
+            }
+            "#
+        .replace("{{DIR}}", &dir.path().display().to_string());
+        let host = host(&source);
+        assert_eq!(
+            search(&host, "owner", "x")[0]["title"],
+            "1",
+            "the owner opens handle 1"
+        );
+        assert_eq!(
+            search(&host, "sibling", "x")[0]["title"],
+            "false",
+            "a plugin without the area cannot borrow the view"
+        );
+        assert_eq!(
+            search(&host, "same-area", "x")[0]["title"],
+            "row",
+            "a plugin declaring the same area shares the handle"
+        );
+    }
+
+    #[test]
+    fn a_load_time_area_read_is_refused() {
+        let loaded = Host::new(
+            "/test/script.lua",
+            r#"local _ = wayrun.fs.list("/etc") return { { id = "demo", search = function() return {} end } }"#,
+        );
+        assert!(loaded.is_err(), "the read has no plugin to attribute");
+    }
+
+    #[test]
+    fn a_read_pattern_is_refused_at_load() {
+        let loaded = Host::new(
+            "/test/script.lua",
+            r#"return { { id = "demo", read = { "~/Documents/*" }, search = function() return {} end } }"#,
+        );
+        assert!(loaded.is_err(), "areas are exact paths");
     }
 
     #[test]
