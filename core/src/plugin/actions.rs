@@ -1,7 +1,6 @@
 use std::sync::{Mutex, PoisonError};
 
-use super::model::Entry;
-use super::registry::{REGISTRY, ensure_loaded};
+use super::registry::{Entry, REGISTRY, ensure_loaded};
 use crate::system::icon::find_icon_spec;
 use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
 use rust_i18n::t;

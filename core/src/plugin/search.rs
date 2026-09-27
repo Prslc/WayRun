@@ -1,8 +1,8 @@
 use std::cmp::Reverse;
 use std::time::Duration;
 
+use super::Meta;
 use super::actions::{decorate, pin_scope};
-use super::model::Meta;
 use super::rank::Rank;
 use super::registry::{REGISTRY, ensure_loaded, resolve_pending};
 use crate::provider::SHOW_CAP;

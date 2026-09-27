@@ -1,16 +1,15 @@
+use std::borrow::Cow;
 use std::future::Future;
 use std::pin::Pin;
 
 use crate::wire::{Action, ResultItem};
 
 mod actions;
-mod model;
 mod rank;
 mod registry;
 mod search;
 
 pub use actions::{decorate, drop_remembered, forget_row, pin_row};
-pub use model::Meta;
 /// The ranking vocabulary providers and the dispatcher share.
 pub use rank::{
     Match, Rank, Ranked, classify, classify_bytes_confident, classify_ci, classify_ci_confident,
@@ -18,6 +17,15 @@ pub use rank::{
 };
 pub use registry::{list_plugins, print_list, reload, reload_if_changed};
 pub use search::dispatch;
+
+pub struct Meta {
+    /// Borrowed for a built-in, owned for a discovered host, so a host's
+    /// identity needs no lifetime extension.
+    pub id: Cow<'static, str>,
+    pub name: String,
+    pub icon: Cow<'static, str>,
+    pub ready: String,
+}
 
 pub trait Plugin: Send + Sync {
     fn meta(&self) -> &Meta;
