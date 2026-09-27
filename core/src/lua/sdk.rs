@@ -117,9 +117,19 @@ pub(super) fn build(
     sdk.set("json", json_lib(lua)?)?;
     sdk.set("toml", toml_lib(lua)?)?;
     sdk.set("fs", fs_lib(lua, scope)?)?;
-    sdk.set("http", http::lib(lua)?)?;
+    let stores: kv::Handle = Rc::new(RefCell::new(kv::Stores::default()));
+    sdk.set(
+        "http",
+        http::lib(
+            lua,
+            script,
+            Rc::clone(&stores),
+            Rc::clone(&active),
+            Rc::clone(&paths),
+        )?,
+    )?;
     sdk.set("sqlite", sqlite::lib(lua)?)?;
-    sdk.set("kv", kv::lib(lua, active, paths)?)?;
+    sdk.set("kv", kv::lib(lua, stores, active, paths)?)?;
     sdk.set("fuzzy", fuzzy::lib(lua)?)?;
     Ok(sdk)
 }

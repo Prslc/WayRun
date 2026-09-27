@@ -107,7 +107,7 @@ impl Plugin for External {
 
 /// Ceiling for one host call: a stalled host must cost seconds, never the
 /// session. Discovery holds the registry's init lock until it returns.
-const HOST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+pub(crate) const HOST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// One call against a host: `resident` keeps the process across calls; the
 /// default spawns it fresh, so nothing a host kept outlives the call.

@@ -15,14 +15,17 @@ pub(super) type Active = Rc<RefCell<Option<String>>>;
 /// Every declared plugin's `kv.db` path, filled once the script's ids are known.
 pub(super) type Paths = Rc<RefCell<HashMap<String, PathBuf>>>;
 
+/// The one store handle a host's tables share, so a plugin's own keys and the
+/// http cache it stores live on one connection.
+pub(super) type Handle = Rc<RefCell<Stores>>;
+
 #[derive(Default)]
-struct Stores {
+pub(super) struct Stores {
     open: HashMap<String, rusqlite::Connection>,
 }
 
-pub(super) fn lib(lua: &Lua, active: Active, paths: Paths) -> mlua::Result<Table> {
+pub(super) fn lib(lua: &Lua, stores: Handle, active: Active, paths: Paths) -> mlua::Result<Table> {
     let kv = lua.create_table()?;
-    let stores = Rc::new(RefCell::new(Stores::default()));
 
     let get_stores = Rc::clone(&stores);
     let get_active = Rc::clone(&active);
@@ -79,7 +82,10 @@ pub(super) fn lib(lua: &Lua, active: Active, paths: Paths) -> mlua::Result<Table
     Ok(kv)
 }
 
-fn database(active: &Active, paths: &Paths) -> std::result::Result<(String, PathBuf), String> {
+pub(super) fn database(
+    active: &Active,
+    paths: &Paths,
+) -> std::result::Result<(String, PathBuf), String> {
     let Some(id) = active.borrow().clone() else {
         return Err("no plugin in the call context".to_string());
     };
@@ -108,7 +114,13 @@ impl Stores {
         Ok(self.open.get(id).expect("just inserted"))
     }
 
-    fn get(&mut self, id: &str, path: &Path, key: &str, now: i64) -> Result<Option<String>> {
+    pub(super) fn get(
+        &mut self,
+        id: &str,
+        path: &Path,
+        key: &str,
+        now: i64,
+    ) -> Result<Option<String>> {
         if !path.is_file() {
             return Ok(None);
         }
@@ -130,7 +142,7 @@ impl Stores {
         }
     }
 
-    fn set(
+    pub(super) fn set(
         &mut self,
         id: &str,
         path: &Path,
@@ -176,7 +188,16 @@ mod tests {
                 .collect(),
         ));
         lua.globals()
-            .set("kv", lib(&lua, Rc::clone(&active), paths).unwrap())
+            .set(
+                "kv",
+                lib(
+                    &lua,
+                    Rc::new(RefCell::new(Stores::default())),
+                    Rc::clone(&active),
+                    paths,
+                )
+                .unwrap(),
+            )
             .unwrap();
         (lua, active)
     }
