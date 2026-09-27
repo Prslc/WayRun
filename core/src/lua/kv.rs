@@ -79,7 +79,66 @@ pub(super) fn lib(lua: &Lua, stores: Handle, active: Active, paths: Paths) -> ml
         })?,
     )?;
 
+    let keys_stores = Rc::clone(&stores);
+    let keys_active = Rc::clone(&active);
+    let keys_paths = Rc::clone(&paths);
+    kv.set(
+        "keys",
+        lua.create_function(move |lua, prefix: Option<String>| {
+            let found = enumerate(&keys_stores, &keys_active, &keys_paths, prefix, "kv.keys")?;
+            let list = lua.create_table()?;
+            for (at, (key, _)) in found.into_iter().enumerate() {
+                list.set(at + 1, key)?;
+            }
+            Ok(list)
+        })?,
+    )?;
+
+    let pairs_stores = Rc::clone(&stores);
+    let pairs_active = Rc::clone(&active);
+    let pairs_paths = Rc::clone(&paths);
+    kv.set(
+        "pairs",
+        lua.create_function(move |lua, prefix: Option<String>| {
+            let found = enumerate(
+                &pairs_stores,
+                &pairs_active,
+                &pairs_paths,
+                prefix,
+                "kv.pairs",
+            )?;
+            let list = lua.create_table()?;
+            for (at, (key, value)) in found.into_iter().enumerate() {
+                let record = lua.create_table()?;
+                record.set("key", key)?;
+                record.set("value", value)?;
+                list.set(at + 1, record)?;
+            }
+            Ok(list)
+        })?,
+    )?;
+
     Ok(kv)
+}
+
+fn enumerate(
+    stores: &Handle,
+    active: &Active,
+    paths: &Paths,
+    prefix: Option<String>,
+    method: &str,
+) -> mlua::Result<Vec<(String, String)>> {
+    let (id, path) = database(active, paths)
+        .map_err(|problem| mlua::Error::RuntimeError(format!("{method}: {problem}")))?;
+    stores
+        .borrow_mut()
+        .scan(
+            &id,
+            &path,
+            prefix.as_deref().unwrap_or(""),
+            super::sdk::now_seconds(),
+        )
+        .map_err(|error| mlua::Error::RuntimeError(format!("{method}: {error:#}")))
 }
 
 pub(super) fn database(
@@ -172,6 +231,34 @@ impl Stores {
         connection.execute("DELETE FROM kv WHERE key = ?1", [key])?;
         Ok(())
     }
+
+    /// Every unexpired key under `prefix`, with its value, ordered by key.
+    fn scan(
+        &mut self,
+        id: &str,
+        path: &Path,
+        prefix: &str,
+        now: i64,
+    ) -> Result<Vec<(String, String)>> {
+        if !path.is_file() {
+            return Ok(Vec::new());
+        }
+        let connection = self.connection(id, path)?;
+        // `substr` rather than LIKE, so a `%` or `_` in the prefix is literal.
+        let mut statement = connection.prepare_cached(
+            "SELECT key, value FROM kv
+             WHERE substr(key, 1, length(?1)) = ?1 AND (expires_at IS NULL OR expires_at > ?2)
+             ORDER BY key",
+        )?;
+        let rows = statement.query_map(rusqlite::params![prefix, now], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut pairs = Vec::new();
+        for row in rows {
+            pairs.push(row?);
+        }
+        Ok(pairs)
+    }
 }
 
 #[cfg(test)]
@@ -242,6 +329,11 @@ mod tests {
         let (lua, _) = lua_with_kv(dir.path());
         let value: Option<String> = lua.load(r#"return kv.get("k")"#).eval().unwrap();
         assert_eq!(value, None);
+        let (keys, pairs): (i64, i64) = lua
+            .load(r#"return #kv.keys(), #kv.pairs()"#)
+            .eval()
+            .unwrap();
+        assert_eq!((keys, pairs), (0, 0));
         assert!(!dir.path().join("demo").exists(), "nothing was created");
     }
 
@@ -271,5 +363,61 @@ mod tests {
         *active.borrow_mut() = Some("demo".to_string());
         let demo: Option<String> = lua.load(r#"return kv.get("k")"#).eval().unwrap();
         assert_eq!(demo.as_deref(), Some("demo's"));
+    }
+
+    #[test]
+    fn keys_and_pairs_enumerate_a_prefix_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lua, _) = lua_with_kv(dir.path());
+        let (keys, pair, all): (String, String, i64) = lua
+            .load(
+                r#"
+                kv.set("b/one", "1")
+                kv.set("b/two", "2")
+                kv.set("a/three", "3")
+                local first = kv.pairs("b/")[1]
+                return table.concat(kv.keys("b/"), ","), first.key .. "=" .. first.value,
+                       #kv.keys()
+                "#,
+            )
+            .eval()
+            .unwrap();
+        assert_eq!(keys, "b/one,b/two");
+        assert_eq!(pair, "b/one=1");
+        assert_eq!(all, 3);
+    }
+
+    #[test]
+    fn an_expired_key_is_absent_from_enumeration() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lua, _) = lua_with_kv(dir.path());
+        let (keys, pairs): (i64, i64) = lua
+            .load(
+                r#"
+                kv.set("gone", "x", 0)
+                kv.set("kept", "y", 60)
+                return #kv.keys(), #kv.pairs()
+                "#,
+            )
+            .eval()
+            .unwrap();
+        assert_eq!((keys, pairs), (1, 1));
+    }
+
+    #[test]
+    fn a_prefix_matches_literally() {
+        let dir = tempfile::tempdir().unwrap();
+        let (lua, _) = lua_with_kv(dir.path());
+        let keys: String = lua
+            .load(
+                r#"
+                kv.set("50%", "x")
+                kv.set("500", "y")
+                return table.concat(kv.keys("50%"), ",")
+                "#,
+            )
+            .eval()
+            .unwrap();
+        assert_eq!(keys, "50%");
     }
 }
