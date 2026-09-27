@@ -6,7 +6,7 @@ use crate::system::xdg;
 
 /// The row box is 22-30px, so a 48px source gives crisp downscale headroom.
 const TARGET_SIZE: u16 = 48;
-pub(super) const ICON_EXTS: &[&str] = &["svg", "png"];
+const ICON_EXTS: &[&str] = &["svg", "png"];
 
 /// One directory a theme's `index.theme` declares.
 struct ThemeDir {

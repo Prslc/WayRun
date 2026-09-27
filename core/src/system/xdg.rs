@@ -79,62 +79,6 @@ fn icon_theme_name(text: &str) -> Option<String> {
     })
 }
 
-fn find_up_from_bin(sub_path: &str) -> Option<String> {
-    let mut dir = env::current_exe().ok()?.parent()?.to_path_buf();
-    loop {
-        let candidate = dir.join(sub_path);
-        if candidate.exists() {
-            return Some(candidate.to_string_lossy().into_owned());
-        }
-        if !dir.pop() {
-            break;
-        }
-    }
-    None
-}
-
-fn find_in_xdg_data(sub_path: &str) -> Option<String> {
-    for dir in data_subdirs("wayrun") {
-        let candidate = dir.join(sub_path);
-        if candidate.exists() {
-            return Some(candidate.to_string_lossy().into_owned());
-        }
-    }
-    None
-}
-
-/// A file shipped with the project (plugin identity icons, the default icon),
-/// found next to the executable, under an XDG data dir, or in the dev tree.
-pub fn resource_path(sub_path: &str) -> Option<String> {
-    if let Ok(dir) = env::var("WAYRUN_RESOURCE_DIR") {
-        let p = PathBuf::from(dir).join(sub_path);
-        if p.exists() {
-            return Some(p.to_string_lossy().into_owned());
-        }
-    }
-
-    if let Some(p) = find_up_from_bin(sub_path) {
-        return Some(p);
-    }
-
-    if let Some(p) = find_in_xdg_data(sub_path) {
-        return Some(p);
-    }
-
-    // relative to the Cargo workspace root, debug builds only
-    #[cfg(debug_assertions)]
-    {
-        let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()?
-            .join(sub_path);
-        if dev.exists() {
-            return Some(dev.to_string_lossy().into_owned());
-        }
-    }
-
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,13 +105,5 @@ mod tests {
             assert_eq!(dirs.first(), Some(&home.join("icons")));
         }
         assert!(!dirs.is_empty());
-    }
-
-    #[test]
-    fn a_bundled_resource_is_found_up_from_the_binary() {
-        // The test binary lives under the workspace's target dir, so the
-        // `images/` tree at the root is reachable by walking up from it.
-        let p = resource_path("images/logo.svg");
-        assert!(p.is_some_and(|p| p.ends_with("images/logo.svg")));
     }
 }

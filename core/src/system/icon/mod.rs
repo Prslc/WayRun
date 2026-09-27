@@ -6,11 +6,9 @@ mod theme;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use crate::system::xdg;
-
 use self::builtin::builtin_icon;
 use self::papirus::find_papirus;
-use self::theme::{ICON_EXTS, find_pixmap_icon, find_theme_icon};
+use self::theme::{find_pixmap_icon, find_theme_icon};
 
 pub use self::mime::content_type_icon;
 pub use self::theme::warn_if_no_icon_theme;
@@ -79,13 +77,6 @@ fn lookup(name: &str) -> Option<String> {
     }
     if let Some(p) = find_pixmap_icon(name) {
         return Some(p);
-    }
-
-    // a bundled image in the resource dir, named directly
-    for ext in ICON_EXTS {
-        if let Some(p) = xdg::resource_path(&format!("images/{name}.{ext}")) {
-            return Some(p);
-        }
     }
 
     None
