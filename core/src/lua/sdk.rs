@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::UNIX_EPOCH;
@@ -15,6 +16,10 @@ use super::warn;
 /// The plugin directories this script may read from, one per declared id;
 /// filled after the script is read, resolved by the bindings at call time.
 pub(super) type Scope = Rc<RefCell<Vec<PathBuf>>>;
+
+/// Every declared plugin's readable environment names, by plugin id; filled
+/// after the script is read, refused for a name the calling plugin omits.
+pub(super) type EnvScope = Rc<RefCell<HashMap<String, Vec<String>>>>;
 
 /// `<home>/.config/wayrun/plugins/<id>`, the directory a plugin reads its own
 /// files from; the user places them, nothing here is created for the script.
@@ -52,6 +57,7 @@ pub(super) fn build(
     scope: Scope,
     active: kv::Active,
     paths: kv::Paths,
+    env_scope: EnvScope,
 ) -> mlua::Result<Table> {
     let sdk = lua.create_table()?;
     sdk.set(
@@ -81,9 +87,26 @@ pub(super) fn build(
         lua.create_function(|_, ()| Ok(crate::config::web_search_engine()))?,
     )?;
     sdk.set("time", lua.create_function(|_, ()| Ok(now_seconds()))?)?;
+    let env_active = Rc::clone(&active);
     sdk.set(
         "env",
-        lua.create_function(|_, name: String| Ok(std::env::var(name).ok()))?,
+        lua.create_function(move |_, name: String| {
+            let Some(id) = env_active.borrow().clone() else {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "env {name}: this read ran outside a plugin call"
+                )));
+            };
+            let allowed = env_scope
+                .borrow()
+                .get(&id)
+                .is_some_and(|names| names.contains(&name));
+            if !allowed {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "env {name}: plugin {id} does not declare it"
+                )));
+            }
+            Ok(std::env::var(name).ok())
+        })?,
     )?;
     sdk.set(
         "which",

@@ -43,6 +43,7 @@ struct Plugin {
     name: String,
     icon: Option<String>,
     description: Option<String>,
+    env: Vec<String>,
     search: Option<Function>,
     top: Option<Function>,
     forget: Option<Function>,
@@ -61,6 +62,7 @@ impl Host {
         let scope: sdk::Scope = Rc::new(RefCell::new(Vec::new()));
         let active: kv::Active = Rc::new(RefCell::new(None));
         let kv_paths: kv::Paths = Rc::new(RefCell::new(HashMap::new()));
+        let env_scope: sdk::EnvScope = Rc::new(RefCell::new(HashMap::new()));
         let load = || -> mlua::Result<(Lua, Vec<Plugin>)> {
             let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::default())?;
             let wayrun = sdk::build(
@@ -69,6 +71,7 @@ impl Host {
                 Rc::clone(&scope),
                 Rc::clone(&active),
                 Rc::clone(&kv_paths),
+                Rc::clone(&env_scope),
             )?;
             let env = script_env(&lua, &wayrun)?;
             let declared: Table = lua
@@ -80,10 +83,13 @@ impl Host {
             Ok((lua, plugins))
         };
         let (lua, plugins) = load().map_err(|error| anyhow::anyhow!("{error}"))?;
-        // The declared ids are known only now; the read scope and the kv paths fill here.
+        // The declared ids are known only now; the read scope, the kv paths and
+        // the readable env names fill here.
         let mut roots = Vec::new();
         let mut paths = HashMap::new();
+        let mut envs = HashMap::new();
         for plugin in &plugins {
+            envs.insert(plugin.id.clone(), plugin.env.clone());
             if let Some(dir) = sdk::plugin_dir(&plugin.id) {
                 paths.insert(plugin.id.clone(), dir.join("kv.db"));
                 roots.push(dir);
@@ -91,6 +97,7 @@ impl Host {
         }
         *scope.borrow_mut() = roots;
         *kv_paths.borrow_mut() = paths;
+        *env_scope.borrow_mut() = envs;
         Ok(Self {
             lua,
             script: script.to_string(),
@@ -336,11 +343,22 @@ fn read_plugins(declared: &Table, script: &str) -> mlua::Result<Vec<Plugin>> {
             }
             None => None,
         };
+        let env: Vec<String> = entry.get::<Option<Vec<String>>>("env")?.unwrap_or_default();
+        for name in &env {
+            // Names are exact: a pattern would defeat the manifest's point, a
+            // plugin naming the secrets it reads.
+            if name.is_empty() || name.contains('*') {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "{script}: plugin {id}: env {name:?} is not a plain name"
+                )));
+            }
+        }
         plugins.push(Plugin {
             id,
             name,
             icon,
             description: entry.get("description")?,
+            env,
             search: entry.get("search")?,
             top: entry.get("top")?,
             forget: entry.get("forget")?,
@@ -418,6 +436,7 @@ mod tests {
             return {
               {
                 id = "demo",
+                env = { "PATH" },
                 search = function()
                   local path = wayrun.env("PATH")
                   return {
@@ -432,9 +451,83 @@ mod tests {
         );
         let rows = search(&host, "demo", "x");
         assert_eq!(rows[0]["title"], "true", "time is a number");
-        assert_eq!(rows[1]["title"], "true", "PATH is readable");
+        assert_eq!(rows[1]["title"], "true", "a declared PATH is readable");
         // The test script path is fabricated, so the fallback parent wins.
         assert_eq!(rows[2]["title"], "/test");
+    }
+
+    #[test]
+    fn an_undeclared_env_name_is_refused() {
+        let host = host(
+            r#"
+            return {
+              {
+                id = "demo",
+                env = { "PATH" },
+                search = function()
+                  local ok = pcall(wayrun.env, "HOME")
+                  return { { title = tostring(ok) } }
+                end,
+              },
+            }
+            "#,
+        );
+        let rows = search(&host, "demo", "x");
+        assert_eq!(rows[0]["title"], "false", "an undeclared name raises");
+    }
+
+    #[test]
+    fn each_plugin_reads_only_its_own_env() {
+        let host = host(
+            r#"
+            return {
+              {
+                id = "one",
+                env = { "PATH" },
+                search = function()
+                  return { { title = tostring(wayrun.env("PATH") ~= nil) } }
+                end,
+              },
+              {
+                id = "two",
+                search = function()
+                  local ok = pcall(wayrun.env, "PATH")
+                  return { { title = tostring(ok) } }
+                end,
+              },
+            }
+            "#,
+        );
+        assert_eq!(search(&host, "one", "x")[0]["title"], "true");
+        assert_eq!(
+            search(&host, "two", "x")[0]["title"],
+            "false",
+            "a sibling plugin's declaration does not carry over"
+        );
+    }
+
+    #[test]
+    fn an_env_read_while_the_script_loads_is_refused() {
+        let loaded = Host::new(
+            "/test/script.lua",
+            r#"
+            wayrun.env("PATH")
+            return { { id = "demo", search = function() return {} end } }
+            "#,
+        );
+        assert!(
+            loaded.is_err(),
+            "a load-time read has no plugin to attribute it to"
+        );
+    }
+
+    #[test]
+    fn an_env_pattern_is_refused_at_load() {
+        let loaded = Host::new(
+            "/test/script.lua",
+            r#"return { { id = "demo", env = { "YOUDAO_*" }, search = function() return {} end } }"#,
+        );
+        assert!(loaded.is_err(), "env names are exact");
     }
 
     #[test]
