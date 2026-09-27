@@ -5,6 +5,7 @@ use std::time::UNIX_EPOCH;
 
 use mlua::{Lua, LuaSerdeExt, Table, Value};
 
+use super::crypto;
 use super::fuzzy;
 use super::http;
 use super::kv;
@@ -131,6 +132,7 @@ pub(super) fn build(
     sdk.set("sqlite", sqlite::lib(lua)?)?;
     sdk.set("kv", kv::lib(lua, stores, active, paths)?)?;
     sdk.set("fuzzy", fuzzy::lib(lua)?)?;
+    sdk.set("crypto", crypto::lib(lua)?)?;
     Ok(sdk)
 }
 

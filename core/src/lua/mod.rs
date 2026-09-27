@@ -9,6 +9,7 @@ use serde_json::json;
 
 use crate::wire::ResultItem;
 
+mod crypto;
 mod fuzzy;
 mod http;
 mod kv;
