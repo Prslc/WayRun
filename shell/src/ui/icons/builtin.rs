@@ -1,8 +1,8 @@
-use std::path::Path;
+use wayrun_core::wire::BUILTIN_FALLBACK;
 
-/// UI glyphs compiled in and referenced as `builtin:<name>`, so panel, badges and
-/// plugin identities never depend on a theme; the NOTICE sits beside them.
-const BUILTIN_ICONS: &[(&str, &[u8])] = &[
+/// The glyphs compiled in from `assets/icons/`, keyed by the bare name a
+/// `builtin:` spec carries; the NOTICE sits beside them.
+pub(super) const GLYPHS: &[(&str, &[u8])] = &[
     ("app", include_bytes!("../../../assets/icons/app.svg")),
     (
         "bookmark",
@@ -41,57 +41,51 @@ const BUILTIN_ICONS: &[(&str, &[u8])] = &[
     ("window", include_bytes!("../../../assets/icons/window.svg")),
 ];
 
-/// Write `bytes` as `name` under `dir`, replacing a stale copy, and return the
-/// path the shell reads; a glyph's bytes change with the binary, so compare first.
-fn write_cached(dir: &Path, name: &str, bytes: &[u8]) -> Option<String> {
-    std::fs::create_dir_all(dir).ok()?;
-    let target = dir.join(name);
-    if std::fs::read(&target).ok().as_deref() != Some(bytes) {
-        crate::system::fs::write_atomic(&target, bytes).ok()?;
-    }
-    Some(target.to_string_lossy().into_owned())
-}
-
-/// A `builtin:<name>` glyph written into the cache.
-pub(super) fn builtin_icon(name: &str) -> Option<String> {
-    let (name, bytes) = BUILTIN_ICONS.iter().find(|(n, _)| *n == name)?;
-    let dir = crate::system::fs::cache_dir()?.join("builtin");
-    write_cached(&dir, &format!("{name}.svg"), bytes)
+/// The bytes for `name`, falling back to the app glyph so every row draws one.
+pub(super) fn glyph(name: &str) -> &'static [u8] {
+    let bytes = |name: &str| GLYPHS.iter().find(|(n, _)| *n == name).map(|(_, b)| *b);
+    let app = BUILTIN_FALLBACK
+        .strip_prefix("builtin:")
+        .unwrap_or(BUILTIN_FALLBACK);
+    bytes(name).or_else(|| bytes(app)).unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
+    use wayrun_core::wire::BUILTIN_GLYPHS;
+
     use super::*;
 
     #[test]
-    fn a_stale_cached_glyph_is_replaced() {
-        let dir = std::env::temp_dir().join(format!("wayrun-glyph-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("pin.svg"), b"stale").unwrap();
-
-        let path = write_cached(&dir, "pin.svg", b"fresh").unwrap();
-        assert_eq!(std::fs::read(&path).unwrap(), b"fresh");
-
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn every_builtin_is_a_colourful_svg() {
-        for (name, bytes) in BUILTIN_ICONS {
+    fn every_glyph_is_a_colourful_svg() {
+        for (name, bytes) in GLYPHS {
             let text = std::str::from_utf8(bytes).unwrap();
             assert!(
                 text.contains("<svg") && !text.contains("currentColor"),
                 "{name} is not a colourful svg"
             );
         }
-        assert!(builtin_icon("definitely-not-a-glyph").is_none());
     }
 
     #[test]
-    fn the_notice_names_every_builtin() {
+    fn an_unknown_name_falls_back_to_the_app_glyph() {
+        assert_eq!(glyph("definitely-not-a-glyph"), glyph("app"));
+    }
+
+    #[test]
+    fn every_wire_glyph_has_bytes() {
+        for name in BUILTIN_GLYPHS {
+            assert!(
+                GLYPHS.iter().any(|(n, _)| n == name),
+                "{name} has no compiled bytes"
+            );
+        }
+    }
+
+    #[test]
+    fn the_notice_names_every_glyph() {
         let notice = include_str!("../../../assets/icons/NOTICE");
-        for (name, _) in BUILTIN_ICONS {
+        for (name, _) in GLYPHS {
             assert!(
                 notice
                     .lines()

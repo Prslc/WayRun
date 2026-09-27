@@ -56,8 +56,8 @@ pub enum PanelAction {
 pub struct ActionItem {
     pub title: String,
     pub action: PanelAction,
-    /// The icon spec; the core resolves it to an absolute path before emitting,
-    /// like a row's `icon`.
+    /// The icon spec; the core resolves system lookups and passes a `builtin:`
+    /// glyph through, like a row's `icon`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     /// The stable action kind (`reveal`, `terminal`, …) a remembered default
@@ -91,7 +91,7 @@ pub struct ResultItem {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<ActionItem>,
     /// A small status glyph shown at the row's right edge (a pin for a pinned
-    /// row), resolved to an absolute path like `icon`.
+    /// row), resolved like `icon`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub badge: Option<String>,
 }
@@ -115,3 +115,32 @@ pub struct ThemeConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<String>,
 }
+
+/// The glyphs a `builtin:<name>` icon spec can name, bare; the shell renders
+/// each from its own compiled copy of the SVGs.
+pub const BUILTIN_GLYPHS: &[&str] = &[
+    "app",
+    "bookmark",
+    "calculator",
+    "clipboard",
+    "clock",
+    "copy",
+    "file",
+    "folder",
+    "globe",
+    "lock",
+    "logout",
+    "open",
+    "pin",
+    "power",
+    "reboot",
+    "remove",
+    "reveal",
+    "suspend",
+    "terminal",
+    "unpin",
+    "window",
+];
+
+/// The spec a missing icon falls back to; its name is in [`BUILTIN_GLYPHS`].
+pub const BUILTIN_FALLBACK: &str = "builtin:app";

@@ -1,4 +1,3 @@
-mod builtin;
 mod mime;
 mod papirus;
 mod theme;
@@ -6,15 +5,13 @@ mod theme;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use self::builtin::builtin_icon;
+use crate::wire::{BUILTIN_FALLBACK, BUILTIN_GLYPHS};
+
 use self::papirus::find_papirus;
 use self::theme::{find_pixmap_icon, find_theme_icon};
 
 pub use self::mime::content_type_icon;
 pub use self::theme::warn_if_no_icon_theme;
-
-/// The glyph a miss falls back to, so a row always has an icon.
-const APP_ICON: &str = "builtin:app";
 
 static CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
 
@@ -22,8 +19,8 @@ fn cache() -> &'static Mutex<HashMap<String, Option<String>>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::default()))
 }
 
-/// A real icon file for `name`, or `None` on a miss; cached, because a miss
-/// scans the whole theme space, and the row stays iconless for the identity fill.
+/// A renderable icon for `name` — an absolute path, or a `builtin:` glyph the shell
+/// draws — or `None` (unknown glyphs included); cached, as a miss scans the theme space.
 pub fn resolve(name: &str) -> Option<String> {
     if let Ok(cache) = cache().lock()
         && let Some(cached) = cache.get(name)
@@ -40,18 +37,21 @@ pub fn resolve(name: &str) -> Option<String> {
     result
 }
 
-pub fn find_icon_path(name: &str) -> Option<String> {
-    resolve(name).or_else(|| resolve(APP_ICON))
+pub fn find_icon_spec(name: &str) -> Option<String> {
+    resolve(name).or_else(|| resolve(BUILTIN_FALLBACK))
 }
 
-/// An external host's icon: only an absolute path to a file the host ships is
-/// accepted; the core offers hosts no icon namespace.
-pub fn host_icon_path(spec: &str) -> Option<String> {
-    spec.starts_with('/').then(|| spec.to_string())
+/// An external host's icon: an absolute path to a file the host ships, or a
+/// compiled `builtin:` glyph; the theme's own namespace stays out of reach.
+pub fn host_icon_spec(spec: &str) -> Option<String> {
+    let known_glyph = spec
+        .strip_prefix("builtin:")
+        .is_some_and(|glyph| BUILTIN_GLYPHS.contains(&glyph));
+    (spec.starts_with('/') || known_glyph).then(|| spec.to_string())
 }
 
-/// The first name in `names` that resolves to a real icon file, without the
-/// bundled default: a MIME type's themed-icon list is a priority chain.
+/// The first name in `names` that resolves, without the bundled default: a MIME
+/// type's themed-icon list is a priority chain.
 pub fn find_first_icon_path<'a>(names: impl IntoIterator<Item = &'a str>) -> Option<String> {
     names.into_iter().find_map(resolve)
 }
@@ -64,12 +64,12 @@ fn lookup(name: &str) -> Option<String> {
         return Some(name.to_string());
     }
     // `papirus:<name>` (or `papirus:<category>/<name>`) is an explicit Papirus
-    // reference; resolve it here, the UI renders only absolute paths.
+    // reference, resolved here; the shell walks no theme.
     if let Some(spec) = name.strip_prefix("papirus:") {
         return find_papirus(spec);
     }
-    if let Some(builtin) = name.strip_prefix("builtin:") {
-        return builtin_icon(builtin);
+    if let Some(glyph) = name.strip_prefix("builtin:") {
+        return BUILTIN_GLYPHS.contains(&glyph).then(|| name.to_string());
     }
 
     if let Some(p) = find_theme_icon(name) {
@@ -91,34 +91,39 @@ mod tests {
         // An absolute path must short-circuit, or it re-enters the theme
         // search and falls back to the default placeholder.
         let p = "/usr/share/icons/Papirus/48x48/apps/github.svg";
-        assert_eq!(find_icon_path(p), Some(p.to_string()));
+        assert_eq!(find_icon_spec(p), Some(p.to_string()));
     }
 
     #[test]
-    fn resolve_leaves_a_miss_empty_and_find_icon_path_fills_it() {
+    fn resolve_leaves_a_miss_empty_and_find_icon_spec_fills_it() {
         assert!(resolve("definitely-not-an-icon-xyz").is_none());
-        let path = find_icon_path("definitely-not-an-icon-xyz").unwrap();
-        assert!(path.ends_with("builtin/app.svg"), "{path}");
+        assert!(resolve("builtin:definitely-not-a-glyph").is_none());
+        let path = find_icon_spec("definitely-not-an-icon-xyz").unwrap();
+        assert_eq!(path, "builtin:app");
     }
 
     #[test]
     fn the_first_resolving_name_in_a_chain_wins() {
         let path = find_first_icon_path(["definitely-not-an-icon-xyz", "/tmp/icon.svg"]).unwrap();
         assert_eq!(path, "/tmp/icon.svg");
-        // The app glyph is a `find_icon_path` concern, not a chain entry.
+        // The app glyph is a `find_icon_spec` concern, not a chain entry.
         assert!(find_first_icon_path(["definitely-not-an-icon-xyz"]).is_none());
     }
 
     #[test]
-    fn host_icon_path_accepts_only_absolute_paths() {
+    fn host_icon_spec_takes_files_and_known_glyphs() {
         assert_eq!(
-            host_icon_path("/usr/share/icons/x.svg").as_deref(),
+            host_icon_spec("/usr/share/icons/x.svg").as_deref(),
             Some("/usr/share/icons/x.svg")
         );
-        // the core's own namespace is not offered to external hosts
-        assert!(host_icon_path("builtin:power").is_none());
-        assert!(host_icon_path("papirus:folder-open").is_none());
-        assert!(host_icon_path("firefox").is_none());
-        assert!(host_icon_path("").is_none());
+        assert_eq!(
+            host_icon_spec("builtin:power").as_deref(),
+            Some("builtin:power")
+        );
+        // the theme namespace and unknown glyphs stay out of reach for hosts
+        assert!(host_icon_spec("builtin:not-a-glyph").is_none());
+        assert!(host_icon_spec("papirus:folder-open").is_none());
+        assert!(host_icon_spec("firefox").is_none());
+        assert!(host_icon_spec("").is_none());
     }
 }

@@ -86,10 +86,11 @@ crashes or stalls; the next call starts a new one. The host must be stateless
 per call either way, but it may cache within its process lifetime.
 
 Both the identity `icon` and each result `icon` must be an absolute path to an
-icon file the host ships itself; the same holds for an action's `icon` and a
-row's `badge`. A theme icon name, a `papirus:` spec or a `builtin:` glyph counts
-as no icon. A result whose own icon is missing falls back to the plugin's
-identity icon, and the built-in placeholder answers when that is missing too.
+icon file the host ships itself, or a `builtin:` glyph from the launcher's
+compiled set (`wayrun.icon()` returns either); the same holds for an action's
+`icon` and a row's `badge`. A theme icon name or a `papirus:` spec counts as no
+icon. A result whose own icon is missing falls back to the plugin's identity
+icon, and the built-in placeholder answers when that is missing too.
 
 Hosts can be written by hand. The
 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace ships a

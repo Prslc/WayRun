@@ -135,4 +135,4 @@ WayRun 采用双许可证，可任选其一：
 - **Apache-2.0** —— [LICENSE-APACHE](../../LICENSE-APACHE)
 
 内置 UI 字形为 Google Material Symbols，采用 Apache License 2.0；
-署名与许可证全文见 [core/assets/icons/NOTICE](../../core/assets/icons/NOTICE)。
+署名与许可证全文见 [shell/assets/icons/NOTICE](../../shell/assets/icons/NOTICE)。

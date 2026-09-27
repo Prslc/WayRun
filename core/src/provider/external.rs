@@ -6,7 +6,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 use crate::plugin::{Meta, Plugin};
-use crate::system::icon::host_icon_path;
+use crate::system::icon::host_icon_spec;
 use crate::wire::{Action, ResultItem};
 use rust_i18n::t;
 
@@ -54,8 +54,9 @@ impl External {
                 t!("plugin.external.ready", command = command),
             ),
         };
-        // A symbolic identity icon is a miss: a host ships its own absolute paths.
-        let icon = host_icon_path(&icon).unwrap_or_default();
+        // An unrenderable identity icon is a miss: a host names a file it ships
+        // or a compiled glyph, nothing else.
+        let icon = host_icon_spec(&icon).unwrap_or_default();
         Self {
             meta: Meta {
                 id: id.to_string().into(),
@@ -236,14 +237,14 @@ fn parse_result_items(
         .into_iter()
         .filter_map(|item| serde_json::from_value(item).ok())
         .collect();
-    let identity = host_icon_path(icon);
+    let identity = host_icon_spec(icon);
     let owner = plugin.to_string();
     for item in &mut parsed {
         let spec = item.icon.as_deref().unwrap_or("");
         item.icon = resolve_item_icon(spec, identity.clone());
-        item.badge = item.badge.as_deref().and_then(host_icon_path);
+        item.badge = item.badge.as_deref().and_then(host_icon_spec);
         for action in &mut item.actions {
-            action.icon = action.icon.as_deref().and_then(host_icon_path);
+            action.icon = action.icon.as_deref().and_then(host_icon_spec);
             // The core owns this field; whatever the host sent is ignored.
             action.plugin = Some(owner.clone());
         }
@@ -343,7 +344,7 @@ async fn forget_external(command: &str, resident: bool, row: &Action) -> Result<
     Ok(response.is_some_and(|reply| reply.get("error").is_none()))
 }
 fn resolve_item_icon(icon: &str, fallback: Option<String>) -> Option<String> {
-    host_icon_path(icon).or(fallback)
+    host_icon_spec(icon).or(fallback)
 }
 #[cfg(test)]
 mod tests {
@@ -375,15 +376,23 @@ mod tests {
     }
 
     #[test]
-    fn a_symbolic_spec_is_no_icon_for_a_host() {
+    fn a_theme_or_papirus_spec_is_no_icon_for_a_host() {
         // the core resolves these for its own rows, but not for an external host
         assert_eq!(resolve_item_icon("papirus:folder-open", None), None);
-        assert_eq!(resolve_item_icon("builtin:power", None), None);
         assert_eq!(resolve_item_icon("firefox", None), None);
     }
 
     #[test]
-    fn a_hosts_action_and_badge_icons_must_be_absolute() {
+    fn a_known_glyph_is_an_icon_for_a_host() {
+        assert_eq!(
+            resolve_item_icon("builtin:power", None),
+            Some("builtin:power".into())
+        );
+        assert_eq!(resolve_item_icon("builtin:not-a-glyph", None), None);
+    }
+
+    #[test]
+    fn a_hosts_action_and_badge_icons_take_paths_and_glyphs() {
         let response = serde_json::json!({
             "result": [{
                 "title": "r",
@@ -392,21 +401,23 @@ mod tests {
                 "actions": [
                     {"title":"a", "action":{"type":"execute","command":{"type":"run","cmd":"y"}}, "icon": "builtin:open"},
                     {"title":"b", "action":{"type":"execute","command":{"type":"run","cmd":"z"}}, "icon": "/tmp/a.svg"},
+                    {"title":"c", "action":{"type":"execute","command":{"type":"run","cmd":"w"}}, "icon": "firefox"},
                 ],
             }]
         });
         let items = parse_result_items(response, "system-search", "").unwrap();
-        assert!(items[0].badge.is_none(), "a symbolic badge is dropped");
+        assert_eq!(items[0].badge.as_deref(), Some("builtin:pin"));
         assert_eq!(
             items[0].actions[0].plugin.as_deref(),
             Some("system-search"),
             "the host owns the actions it attaches"
         );
-        assert!(
-            items[0].actions[0].icon.is_none(),
-            "a symbolic action icon is dropped"
-        );
+        assert_eq!(items[0].actions[0].icon.as_deref(), Some("builtin:open"));
         assert_eq!(items[0].actions[1].icon.as_deref(), Some("/tmp/a.svg"));
+        assert!(
+            items[0].actions[2].icon.is_none(),
+            "a theme name is no host icon"
+        );
     }
 
     #[test]

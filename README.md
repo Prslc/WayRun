@@ -152,5 +152,5 @@ Dual licensed under either of the following, at your option:
 - **Apache-2.0** — [LICENSE-APACHE](LICENSE-APACHE)
 
 The built-in UI glyphs are Google Material Symbols under the Apache License 2.0;
-see [core/assets/icons/NOTICE](core/assets/icons/NOTICE) for the attribution and
+see [shell/assets/icons/NOTICE](shell/assets/icons/NOTICE) for the attribution and
 the full license text.

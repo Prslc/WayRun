@@ -2,7 +2,7 @@ use std::sync::{Mutex, PoisonError};
 
 use super::model::Entry;
 use super::registry::{REGISTRY, ensure_loaded};
-use crate::system::icon::find_icon_path;
+use crate::system::icon::find_icon_spec;
 use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
 use rust_i18n::t;
 
@@ -160,7 +160,7 @@ fn attach_actions(
     let (owner, mut plugin_actions) = plugin_actions;
     let is_pinned = pinned.iter().any(|pin| pin == &on_click);
     if is_pinned {
-        item.badge = find_icon_path("builtin:pin");
+        item.badge = find_icon_spec("builtin:pin");
     }
 
     let mut actions: Vec<ActionItem> = Vec::new();
@@ -251,7 +251,7 @@ fn attach_actions(
             .icon
             .as_deref()
             .filter(|spec| !spec.is_empty())
-            .and_then(find_icon_path);
+            .and_then(find_icon_spec);
     }
 
     item.actions = actions;

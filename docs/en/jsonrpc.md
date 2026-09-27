@@ -101,7 +101,7 @@ Called on the core's stdin, it answers with the current registry:
 |-----|------|---------|
 | `id` | string | plugin id, matches the `plugins.toml` entry |
 | `name` | string | display name |
-| `icon` | string | icon absolute path |
+| `icon` | string | the identity icon spec: absolute path or `builtin:` glyph |
 | `keyword` | string | trigger prefix (empty = default) |
 | `enabled` | bool | whether the plugin is active |
 
@@ -117,7 +117,7 @@ response `result` is an array of objects:
 |-----|------|---------|
 | `id` | string (required) | plugin id — must match the `plugins.toml` entry id, or the identity is ignored |
 | `name` | string | display name (empty → falls back to the configured id) |
-| `icon` | string | absolute path to an icon the host ships (see [Icon specs](#icon-specs)) |
+| `icon` | string | an icon the host ships, or a `builtin:` glyph (see [Icon specs](#icon-specs)) |
 | `description` | string | ready hint shown in the `?` list and the keyword+space hint |
 
 A host with no `list_plugins`, or with no id matching its entry, still works —
@@ -165,7 +165,7 @@ and `actions`/`badge` only when set:
 | `title` | string | primary label (app name, command, file name, …) |
 | `summary` | string \| null | secondary line (command, path, description, …) |
 | `on_click` | [`Action`](#actions) \| null | action bound to Enter |
-| `icon` | string \| null | absolute path to an icon image; see [Icon specs](#icon-specs) |
+| `icon` | string \| null | the icon spec, an absolute path or a `builtin:` glyph; see [Icon specs](#icon-specs) |
 | `ephemeral` | bool | when true, selecting this row is not recorded in usage history |
 | `actions` | array | optional secondary commands for the `Shift+Enter` action panel |
 | `badge` | string \| null | optional status glyph at the row's right edge (a pin for a pinned row) |
@@ -202,12 +202,13 @@ value is the copied text, not a target to re-open).
 
 ### Icon specs
 
-Every `icon` is an absolute path. **External plugin hosts** (a `plugins.toml`
-entry with `command`) must return an absolute path to an icon file the host
-ships itself: in any result-item `icon` field (`search` results and `top`
+Every `icon` is an absolute path, or a `builtin:<name>` glyph the launcher
+draws from its compiled set. **External plugin hosts** (a `plugins.toml` entry
+with `command`) return an icon file the host ships itself, or a known
+`builtin:` glyph — in any result-item `icon` field (`search` results and `top`
 default views alike), in an action's `icon`, in the row's `badge`, and in the
-`list_plugins` identity `icon`. A theme icon name, a `papirus:` spec or a
-`builtin:` glyph counts as no icon.
+`list_plugins` identity `icon`. A theme icon name or a `papirus:` spec counts
+as no icon.
 
 A row icon that is missing or symbolic falls back to the plugin's identity icon;
 when that is missing too, the bundled placeholder is drawn.
