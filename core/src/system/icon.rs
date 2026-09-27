@@ -13,6 +13,10 @@ use self::theme::{find_pixmap_icon, find_theme_icon};
 pub use self::mime::content_type_icon;
 pub use self::theme::warn_if_no_icon_theme;
 
+/// Distinct specs kept before the map is dropped whole; a host's `wayrun.icon()`
+/// can mint arbitrary keys, and tiny values need a bound, not an eviction order.
+const CACHE_MAX: usize = 4096;
+
 static CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
 
 fn cache() -> &'static Mutex<HashMap<String, Option<String>>> {
@@ -31,10 +35,17 @@ pub fn resolve(name: &str) -> Option<String> {
     let result = lookup(name);
 
     if let Ok(mut cache) = cache().lock() {
-        cache.insert(name.to_string(), result.clone());
+        remember(&mut cache, name, &result);
     }
 
     result
+}
+
+fn remember(cache: &mut HashMap<String, Option<String>>, name: &str, result: &Option<String>) {
+    if cache.len() >= CACHE_MAX {
+        cache.clear();
+    }
+    cache.insert(name.to_string(), result.clone());
 }
 
 pub fn find_icon_spec(name: &str) -> Option<String> {
@@ -100,6 +111,19 @@ mod tests {
         assert!(resolve("builtin:definitely-not-a-glyph").is_none());
         let path = find_icon_spec("definitely-not-an-icon-xyz").unwrap();
         assert_eq!(path, "builtin:app");
+    }
+
+    #[test]
+    fn the_resolve_cache_is_bounded() {
+        let mut map = HashMap::default();
+        for at in 0..CACHE_MAX {
+            remember(&mut map, &at.to_string(), &None);
+        }
+        assert_eq!(map.len(), CACHE_MAX);
+
+        remember(&mut map, "one-over", &None);
+        assert!(map.contains_key("one-over"));
+        assert_eq!(map.len(), 1, "the map is dropped whole at capacity");
     }
 
     #[test]
