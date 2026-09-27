@@ -39,14 +39,14 @@ pub struct PendingHost {
 }
 
 pub(super) struct Entry {
-    pub(super) plugin: Box<dyn super::Plugin>,
-    pub(super) keyword: String,
+    pub plugin: Box<dyn super::Plugin>,
+    pub keyword: String,
     /// An external host forks a process per call, so the default chain bounds it
     /// with a deadline; a built-in answers off its own lists and is never cut off.
-    pub(super) external: bool,
+    pub external: bool,
     /// Set while an external plugin runs on its placeholder identity, so startup
     /// forks nothing; `resolve_pending` clears it on first use.
-    pub(super) pending: Option<PendingHost>,
+    pub pending: Option<PendingHost>,
 }
 
 pub(super) type PluginMap = std::collections::HashMap<&'static str, Box<dyn super::Plugin>>;

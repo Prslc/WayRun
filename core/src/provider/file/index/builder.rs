@@ -16,10 +16,10 @@ use crate::provider::push_lowered;
 /// The tables an image is assembled from: the record bytes the walk and the
 /// incremental update produce, plus the name and path blobs their offsets index.
 pub(super) struct Tables {
-    pub(super) dirs: Vec<DirOut>,
-    pub(super) files: Vec<FileOut>,
-    pub(super) names: Vec<u8>,
-    pub(super) paths: Vec<u8>,
+    pub dirs: Vec<DirOut>,
+    pub files: Vec<FileOut>,
+    pub names: Vec<u8>,
+    pub paths: Vec<u8>,
 }
 
 impl Tables {
@@ -94,8 +94,8 @@ impl Tables {
 /// One directory's kept entries in readdir order: the child directories and the
 /// files, with hidden names and `[files] exclude` filtered out.
 pub(super) struct DirEntries {
-    pub(super) dirs: Vec<OsString>,
-    pub(super) files: Vec<OsString>,
+    pub dirs: Vec<OsString>,
+    pub files: Vec<OsString>,
 }
 
 pub(super) fn read_dir_entries(path: &Path, exclude: &[String]) -> Option<DirEntries> {
@@ -184,10 +184,10 @@ pub(super) fn walk_pool(threads: u32) -> Option<rayon::ThreadPool> {
 /// Where a walk starts: the directory, the slot its record goes in (`u32::MAX`
 /// for the image's own root), its depth and its lowered path.
 pub(super) struct Root<'a> {
-    pub(super) path: &'a Path,
-    pub(super) parent: u32,
-    pub(super) depth: u32,
-    pub(super) lower: &'a str,
+    pub path: &'a Path,
+    pub parent: u32,
+    pub depth: u32,
+    pub lower: &'a str,
 }
 
 /// Walk `root`'s subtree into `tables`. `cap` bounds the tables' entries; `None`

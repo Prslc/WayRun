@@ -42,33 +42,33 @@ pub(super) const DIR_BLOOM: usize = 16;
 /// DFS pre-order and the file table is sorted by `dir`, which queries rely on.
 #[derive(Clone, Copy)]
 pub(super) struct Index<'a> {
-    pub(super) bytes: &'a [u8],
+    pub bytes: &'a [u8],
     // bytes, not `str`: `$HOME` need not be UTF-8
-    pub(super) home: &'a [u8],
+    pub home: &'a [u8],
     dirs: usize,
     files: usize,
     file_blooms: usize,
     dir_blooms: usize,
     names: usize,
     paths: usize,
-    pub(super) dir_count: u32,
-    pub(super) file_count: u32,
-    pub(super) exclude_hash: u64,
+    pub dir_count: u32,
+    pub file_count: u32,
+    pub exclude_hash: u64,
 }
 
 #[derive(Clone, Copy)]
 pub(super) struct DirRec<'a> {
-    pub(super) parent: u32,
-    pub(super) depth: u32,
-    pub(super) mtime_ns: i64,
-    pub(super) name: &'a [u8],
-    pub(super) path_lower: &'a str,
+    pub parent: u32,
+    pub depth: u32,
+    pub mtime_ns: i64,
+    pub name: &'a [u8],
+    pub path_lower: &'a str,
 }
 
 #[derive(Clone, Copy)]
 pub(super) struct FileRec<'a> {
-    pub(super) dir: u32,
-    pub(super) name: &'a [u8],
+    pub dir: u32,
+    pub name: &'a [u8],
 }
 
 impl<'a> Index<'a> {
@@ -254,14 +254,14 @@ pub(super) fn layout_ok(index: &Index) -> bool {
 }
 
 pub(super) struct DirOut {
-    pub(super) parent: u32,
-    pub(super) name_off: u32,
-    pub(super) name_len: u32,
-    pub(super) depth: u32,
-    pub(super) mtime_ns: i64,
-    pub(super) path_off: u32,
-    pub(super) path_len: u32,
-    pub(super) path_bloom: [u8; DIR_BLOOM],
+    pub parent: u32,
+    pub name_off: u32,
+    pub name_len: u32,
+    pub depth: u32,
+    pub mtime_ns: i64,
+    pub path_off: u32,
+    pub path_len: u32,
+    pub path_bloom: [u8; DIR_BLOOM],
 }
 
 impl DirOut {
@@ -280,10 +280,10 @@ impl DirOut {
 }
 
 pub(super) struct FileOut {
-    pub(super) dir: u32,
-    pub(super) name_off: u32,
-    pub(super) name_len: u32,
-    pub(super) name_bloom: [u8; FILE_BLOOM],
+    pub dir: u32,
+    pub name_off: u32,
+    pub name_len: u32,
+    pub name_bloom: [u8; FILE_BLOOM],
 }
 
 impl FileOut {

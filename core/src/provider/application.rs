@@ -21,10 +21,10 @@ use self::score::{action_score, score_app};
 /// One constant match surface — a name, comment, keyword or generic — with the
 /// forms a query needs precomputed, so scoring never re-lowers or re-tokenizes.
 pub(super) struct Field {
-    pub(super) lower: String,
-    pub(super) chars: Vec<char>,
+    pub lower: String,
+    pub chars: Vec<char>,
     /// `(start, end)` char spans of the tokens in `lower`, split on ` `, `-` and `_`.
-    pub(super) word_spans: Vec<(usize, usize)>,
+    pub word_spans: Vec<(usize, usize)>,
 }
 
 impl Field {
@@ -59,8 +59,8 @@ impl Field {
 
 /// The lowercased query with its tokens and char form, built once per search.
 pub(super) struct Query {
-    pub(super) lower: String,
-    pub(super) chars: Vec<char>,
+    pub lower: String,
+    pub chars: Vec<char>,
 }
 
 impl Query {
@@ -74,35 +74,35 @@ impl Query {
 /// `GenericName` + `Keywords` from the app's `.desktop` file, localised through
 /// its own `Key[locale]=` entries. gio's `AppInfo` does not expose them.
 pub(super) struct DesktopMeta {
-    pub(super) generic: Option<Field>,
-    pub(super) keywords: Vec<Field>,
-    pub(super) actions: Vec<DesktopAction>,
+    pub generic: Option<Field>,
+    pub keywords: Vec<Field>,
+    pub actions: Vec<DesktopAction>,
 }
 
 /// One `[Desktop Action <id>]` group, surfaced as its own row (DMS-style).
 pub(super) struct DesktopAction {
-    pub(super) id: String,
-    pub(super) name: String,
-    pub(super) name_lower: String,
+    pub id: String,
+    pub name: String,
+    pub name_lower: String,
 }
 
 /// One installed application, precomputed at first search and reused for the
 /// process lifetime; the `Field`s carry every match form a query needs.
 pub(super) struct CachedApp {
-    pub(super) id: String,
-    pub(super) title: String,
-    pub(super) title_field: Field,
-    pub(super) comment: Option<String>,
-    pub(super) comment_field: Option<Field>,
-    pub(super) icon_spec: Option<String>,
+    pub id: String,
+    pub title: String,
+    pub title_field: Field,
+    pub comment: Option<String>,
+    pub comment_field: Option<Field>,
+    pub icon_spec: Option<String>,
     /// Basename of the entry's `Exec=`, so the runner can match a PATH hit to a
     /// desktop app without reading every `.desktop` file again.
-    pub(super) exec: Option<String>,
+    pub exec: Option<String>,
     /// `Terminal=` of the entry, read here so the runner never reopens it.
-    pub(super) terminal: bool,
-    pub(super) meta: Option<DesktopMeta>,
+    pub terminal: bool,
+    pub meta: Option<DesktopMeta>,
     /// The id without its `.desktop` suffix, the last-resort match surface.
-    pub(super) id_field: Field,
+    pub id_field: Field,
 }
 
 impl CachedApp {
