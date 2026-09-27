@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::provider::file::index::build::build;
+use crate::provider::file::index::builder::build;
 use crate::provider::file::index::format::{Index, layout_ok};
 use crate::wire::ResultItem;
 
