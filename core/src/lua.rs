@@ -341,13 +341,18 @@ fn read_plugins(declared: &Table, script: &str) -> mlua::Result<Vec<Plugin>> {
             .unwrap_or_else(|| id.clone());
         let icon: Option<String> = entry.get("icon")?;
         let icon = match icon {
-            Some(spec) if spec.starts_with('/') => Some(spec),
             Some(spec) => {
-                warn(
-                    script,
-                    &format!("plugin {id}: icon {spec:?} is not an absolute path; dropped"),
-                );
-                None
+                let kept = crate::system::icon::host_icon_spec(&spec);
+                if kept.is_none() {
+                    warn(
+                        script,
+                        &format!(
+                            "plugin {id}: icon {spec:?} is neither an absolute path nor a \
+                             known builtin: glyph; dropped"
+                        ),
+                    );
+                }
+                kept
             }
             None => None,
         };
@@ -451,6 +456,27 @@ mod tests {
             assert(print == nil, "print leaked")
             return { { id = "demo", search = function() return {} end } }
             "#,
+        );
+    }
+
+    #[test]
+    fn a_manifest_icon_may_be_a_known_glyph_or_a_file() {
+        let host = host(
+            r#"
+            return {
+              { id = "glyph", icon = wayrun.icon("builtin:globe"),
+                search = function() return {} end },
+              { id = "file", icon = "/tmp/x.svg", search = function() return {} end },
+              { id = "theme", icon = "firefox", search = function() return {} end },
+              { id = "unknown", icon = "builtin:not-a-glyph",
+                search = function() return {} end },
+            }
+            "#,
+        );
+        let icons: Vec<_> = host.plugins.iter().map(|p| p.icon.as_deref()).collect();
+        assert_eq!(
+            icons,
+            [Some("builtin:globe"), Some("/tmp/x.svg"), None, None]
         );
     }
 
