@@ -47,7 +47,7 @@ help.line_default: "%{usage} - %{ready} · Enter: %{action}"
 
 window.untitled: Untitled
 
-field.placeholder: Search apps, files, web...
+field.placeholder: Type to search...
 
 footer.launch: Launch
 footer.actions: Actions

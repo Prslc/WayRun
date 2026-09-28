@@ -46,7 +46,7 @@ help.line_default: "%{usage} - %{ready} · Enter: %{action}"
 
 window.untitled: 无标题
 
-field.placeholder: 搜索应用、文件、网页…
+field.placeholder: 输入以搜索…
 
 footer.launch: 打开
 footer.actions: 动作
