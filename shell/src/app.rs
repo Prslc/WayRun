@@ -166,7 +166,7 @@ impl State {
         }
 
         let elapsed = now.saturating_duration_since(self.card_at).as_secs_f32() * 1000.0;
-        let t = (elapsed / self.appearance.reflow_ms as f32).clamp(0.0, 1.0);
+        let t = (elapsed / self::appearance::REFLOW_MS as f32).clamp(0.0, 1.0);
         self.card_from + (to - self.card_from) * ease_out_cubic(t)
     }
 

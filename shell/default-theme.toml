@@ -4,16 +4,7 @@
 # primary = "#7aa2f7"        # accent: selection tint, accent bar, panel header
 # fg = "#c0caf5"             # text, icons and hint tints
 # container = "#24283b"      # card fill
-# follow_system = false      # true ignores every override and tracks the system palette
-# card = "#24283bb8"         # card fill (container at 0.72; surfaces take #RRGGBBAA)
-# selection = "#7aa2f726"    # selected row tint (primary at 0.15)
-# hover = "#7aa2f714"        # hovered row tint (primary at 0.08)
-# hairline = "#ffffff59"     # 1px card border
-# muted = "#c0caf58c"        # placeholder, magnifier and hints (fg at 0.55)
-# summary = "#c0caf5b3"      # row summary (fg at 0.70)
-# footer = "#c0caf580"       # footer hint text (fg at 0.50)
-# accent = "#7aa2f7"         # selected row accent bar (primary)
-# dim = "#0000004d"          # backdrop dim
+# dim = "#0000004d"          # backdrop dim (this surface takes #RRGGBBAA)
 
 [colors.dark]
 # fg = "#c0caf5"             # dark-only override, layered on [colors]
@@ -25,24 +16,14 @@
 # enabled = true             # declare the card's rounded rect as a blur region
 
 [layout]
+# width = 730.0              # card width in pixels; a narrower output shrinks it
 # radius = 16.0              # card corner radius; 0 is square corners
-# row_radius = 8.0           # inner radii; each follows the card radius down
-# hairline_width = 1.0       # card border width
-# accent_width = 3.0         # selected row accent bar width
-# accent_height = 28.0
-# width_ratio = 0.38         # card width as a fraction of the output width
-# width_min = 560.0
-# width_max = 760.0
-# top_ratio = 0.28           # card top as a fraction of the output height
-# align = "center"           # left / center / right
-# offset_x = 0.0             # nudge after the width and anchor resolve
-# offset_y = 0.0
+# top_ratio = 0.28           # the card's top edge, as a fraction of the output height
+# align = "center"           # horizontal anchor: left / center / right
 # max_rows = 5               # visible result rows
 
 [font]
 # size = 14.0                # interface size; roles scale by their shipped ratio
 
 [motion]
-# entrance_ms = 240          # opacity fade when shown
-# reflow_ms = 150            # card height animation
 # reduced = false            # start both animations at their end state

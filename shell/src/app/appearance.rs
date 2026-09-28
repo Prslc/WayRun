@@ -5,6 +5,11 @@ use crate::ui::theme::{Surfaces, Theme};
 
 use super::State;
 
+/// The entrance fade's duration: a flat pixmap cannot scale, so a show fades in.
+pub const ENTRANCE_MS: u64 = 240;
+/// The card-height reflow's duration.
+pub const REFLOW_MS: u64 = 150;
+
 impl State {
     /// The `theme.toml` config changed. Recompute the theme and the derived
     /// geometry; the caller repaints the whole frame.
@@ -62,7 +67,7 @@ impl State {
         }
 
         let elapsed = now.saturating_duration_since(self.shown_at).as_secs_f32() * 1000.0;
-        ease_out_quint((elapsed / self.appearance.entrance_ms as f32).clamp(0.0, 1.0))
+        ease_out_quint((elapsed / ENTRANCE_MS as f32).clamp(0.0, 1.0))
     }
 
     /// A card-content colour at `alpha`, scaled by the entrance fade: the whole
@@ -86,10 +91,9 @@ impl State {
             return false;
         }
 
-        let entrance = now.saturating_duration_since(self.shown_at)
-            < Duration::from_millis(self.appearance.entrance_ms);
-        let reflow = now.saturating_duration_since(self.card_at)
-            < Duration::from_millis(self.appearance.reflow_ms);
+        let entrance =
+            now.saturating_duration_since(self.shown_at) < Duration::from_millis(ENTRANCE_MS);
+        let reflow = now.saturating_duration_since(self.card_at) < Duration::from_millis(REFLOW_MS);
         entrance || reflow
     }
 

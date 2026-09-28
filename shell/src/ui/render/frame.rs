@@ -3,6 +3,7 @@ use std::time::Instant;
 use tiny_skia::Pixmap;
 
 use crate::app::State;
+use crate::ui::geom;
 use crate::ui::icons::IconCache;
 use crate::ui::text::TextEngine;
 
@@ -93,7 +94,7 @@ pub fn draw(
             h: card.h - 1.0,
         },
         layout.hairline_radius(),
-        layout.hairline_width,
+        geom::HAIRLINE_W,
         state.fade_rgba(state.surfaces.hairline, now),
     );
 

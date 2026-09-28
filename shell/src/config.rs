@@ -17,8 +17,8 @@ macro_rules! assign {
     };
 }
 
-/// The base roles are RGB; every surface takes a colour with inline alpha, and
-/// the type is also the `[colors]` table, a bad colour dropped like an absent key.
+/// This is also the `[colors]` table itself: the base roles are `#rrggbb` and
+/// `dim` takes inline alpha, a bad colour dropped like an absent key.
 #[derive(serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct ColorOverrides {
     #[serde(default, deserialize_with = "lenient_rgb")]
@@ -28,26 +28,7 @@ pub struct ColorOverrides {
     #[serde(default, deserialize_with = "lenient_rgb")]
     pub container: Option<[u8; 3]>,
     #[serde(default, deserialize_with = "lenient_rgba")]
-    pub card: Option<[u8; 4]>,
-    #[serde(default, deserialize_with = "lenient_rgba")]
-    pub selection: Option<[u8; 4]>,
-    #[serde(default, deserialize_with = "lenient_rgba")]
-    pub hover: Option<[u8; 4]>,
-    #[serde(default, deserialize_with = "lenient_rgba")]
-    pub hairline: Option<[u8; 4]>,
-    #[serde(default, deserialize_with = "lenient_rgba")]
-    pub muted: Option<[u8; 4]>,
-    #[serde(default, deserialize_with = "lenient_rgba")]
-    pub summary: Option<[u8; 4]>,
-    #[serde(default, deserialize_with = "lenient_rgba")]
-    pub footer: Option<[u8; 4]>,
-    #[serde(default, deserialize_with = "lenient_rgba")]
-    pub accent: Option<[u8; 4]>,
-    #[serde(default, deserialize_with = "lenient_rgba")]
     pub dim: Option<[u8; 4]>,
-    /// Ignore every override in this section and follow the system palette.
-    #[serde(default)]
-    pub follow_system: bool,
 }
 
 /// A hand-written `#rrggbb` role.
@@ -110,16 +91,7 @@ impl ColorConfig {
             primary: mode.primary.or(self.shared.primary),
             fg: mode.fg.or(self.shared.fg),
             container: mode.container.or(self.shared.container),
-            card: mode.card.or(self.shared.card),
-            selection: mode.selection.or(self.shared.selection),
-            hover: mode.hover.or(self.shared.hover),
-            hairline: mode.hairline.or(self.shared.hairline),
-            muted: mode.muted.or(self.shared.muted),
-            summary: mode.summary.or(self.shared.summary),
-            footer: mode.footer.or(self.shared.footer),
-            accent: mode.accent.or(self.shared.accent),
             dim: mode.dim.or(self.shared.dim),
-            follow_system: self.shared.follow_system || mode.follow_system,
         }
     }
 }
@@ -166,8 +138,6 @@ pub struct AppearanceConfig {
     pub blur: bool,
     pub font: FontConfig,
     pub layout: Layout,
-    pub entrance_ms: u64,
-    pub reflow_ms: u64,
     pub reduced: bool,
 }
 
@@ -178,8 +148,6 @@ impl Default for AppearanceConfig {
             blur: true,
             font: FontConfig::default(),
             layout: Layout::default(),
-            entrance_ms: 240,
-            reflow_ms: 150,
             reduced: false,
         }
     }
@@ -207,17 +175,9 @@ struct BlurFile {
 #[derive(serde::Deserialize, Default)]
 struct LayoutFile {
     radius: Option<f32>,
-    row_radius: Option<f32>,
-    width_ratio: Option<f32>,
-    width_min: Option<f32>,
-    width_max: Option<f32>,
+    width: Option<f32>,
     top_ratio: Option<f32>,
     align: Option<String>,
-    offset_x: Option<f32>,
-    offset_y: Option<f32>,
-    hairline_width: Option<f32>,
-    accent_width: Option<f32>,
-    accent_height: Option<f32>,
     max_rows: Option<usize>,
 }
 
@@ -228,8 +188,6 @@ struct FontFile {
 
 #[derive(serde::Deserialize, Default)]
 struct MotionFile {
-    entrance_ms: Option<u64>,
-    reflow_ms: Option<u64>,
     reduced: Option<bool>,
 }
 
@@ -268,47 +226,18 @@ impl AppearanceConfig {
             self.layout.radius,
             layout.radius.filter(|v| v.is_finite()).map(|v| v.max(0.0))
         );
-        self.layout.row_radius = non_negative(layout.row_radius);
         assign!(
-            self.layout.width_ratio,
-            layout.width_ratio.filter(|v| v.is_finite() && *v > 0.0)
-        );
-        assign!(
-            self.layout.width_min,
-            layout.width_min.filter(|v| v.is_finite() && *v > 0.0)
-        );
-        assign!(
-            self.layout.width_max,
-            layout.width_max.filter(|v| v.is_finite() && *v > 0.0)
+            self.layout.width,
+            layout.width.filter(|v| v.is_finite() && *v > 0.0)
         );
         assign!(self.layout.top_ratio, layout.top_ratio.and_then(clamp01));
         assign!(
             self.layout.align,
             layout.align.as_deref().and_then(parse_align)
         );
-        assign!(self.layout.offset_x, finite(layout.offset_x));
-        assign!(self.layout.offset_y, finite(layout.offset_y));
-        assign!(
-            self.layout.hairline_width,
-            finite(layout.hairline_width).map(|v| v.clamp(0.0, 8.0))
-        );
-        assign!(
-            self.layout.accent_width,
-            finite(layout.accent_width).map(|v| v.clamp(0.0, 40.0))
-        );
-        assign!(
-            self.layout.accent_height,
-            finite(layout.accent_height).map(|v| v.clamp(0.0, 200.0))
-        );
         assign!(self.layout.max_rows, layout.max_rows.map(|v| v.clamp(1, 8)));
 
-        assign!(self.entrance_ms, motion.entrance_ms.filter(|v| *v > 0));
-        assign!(self.reflow_ms, motion.reflow_ms.filter(|v| *v > 0));
         assign!(self.reduced, motion.reduced);
-
-        if self.layout.width_min > self.layout.width_max {
-            self.layout.width_min = self.layout.width_max;
-        }
     }
 }
 
@@ -319,15 +248,6 @@ fn parse_align(value: &str) -> Option<Align> {
         "right" => Some(Align::Right),
         _ => None,
     }
-}
-
-fn finite(v: Option<f32>) -> Option<f32> {
-    v.filter(|v| v.is_finite())
-}
-
-/// A finite, non-negative value, else `None` so the base is kept.
-fn non_negative(v: Option<f32>) -> Option<f32> {
-    v.filter(|v| v.is_finite()).map(|v| v.max(0.0))
 }
 
 /// A finite, positive value clamped into `(0, max]`, else `None`.
@@ -404,6 +324,7 @@ mod tests {
 
             [layout]
             radius = 20.0
+            width = 800.0
             max_rows = 3
 
             [motion]
@@ -414,11 +335,12 @@ mod tests {
         assert_eq!(config.colors.shared.fg, None);
         assert!(!config.blur);
         assert_eq!(config.layout.radius, 20.0);
+        assert_eq!(config.layout.width, 800.0);
         assert_eq!(config.layout.max_rows, 3);
         assert!(config.reduced);
         // untouched defaults survive
         assert_eq!(config.font.size, 14.0);
-        assert_eq!(config.layout.width_ratio, 0.38);
+        assert_eq!(config.layout.top_ratio, 0.28);
     }
 
     #[test]
@@ -437,32 +359,44 @@ mod tests {
 
             [layout]
             max_rows = 99
-
-            [motion]
-            entrance_ms = 0
             "#,
         );
         assert_eq!(config.font.size, 96.0);
         assert_eq!(config.layout.max_rows, 8);
-        assert_eq!(config.entrance_ms, 240);
     }
 
     #[test]
-    fn a_surface_colour_carries_its_own_alpha() {
+    fn an_inline_alpha_parses_on_dim() {
+        let config = parse(
+            r##"
+            [colors]
+            dim = "#00000080"
+            primary = "#112233"
+            "##,
+        );
+        assert_eq!(config.colors.shared.dim, Some([0, 0, 0, 0x80]));
+        assert_eq!(config.colors.shared.primary, Some([0x11, 0x22, 0x33]));
+    }
+
+    #[test]
+    fn dropped_keys_are_inert() {
         let config = parse(
             r##"
             [colors]
             card = "#11223380"
-            muted = "#445566"
-            dim = "#000000"
-            accent = "nonsense"
-            follow_system = false
+            follow_system = true
+
+            [layout]
+            hairline_width = 2.0
+            offset_x = 12.0
+            row_radius = 3.0
+            width_ratio = 0.5
+
+            [motion]
+            entrance_ms = 100
             "##,
         );
-        assert_eq!(config.colors.shared.card, Some([0x11, 0x22, 0x33, 0x80]));
-        assert_eq!(config.colors.shared.muted, Some([0x44, 0x55, 0x66, 255]));
-        assert_eq!(config.colors.shared.dim, Some([0, 0, 0, 255]));
-        assert_eq!(config.colors.shared.accent, None);
+        assert_eq!(config, AppearanceConfig::default());
     }
 
     #[test]
@@ -479,39 +413,27 @@ mod tests {
             [colors]
             primary = "#7aa2f7"
             fg = "#c0caf5"
-            card = "#24283b80"
+            dim = "#00000080"
 
             [colors.dark]
             fg = "#111111"
-            muted = "#222222"
 
             [colors.light]
             fg = "#eeeeee"
+            container = "#222222"
             "##,
         );
 
         let dark = config.colors.for_mode(Mode::Dark);
         assert_eq!(dark.primary, Some([0x7a, 0xa2, 0xf7]));
         assert_eq!(dark.fg, Some([0x11, 0x11, 0x11]));
-        assert_eq!(dark.muted, Some([0x22, 0x22, 0x22, 255]));
-        // the shared surface survives both modes
-        assert_eq!(dark.card, Some([0x24, 0x28, 0x3b, 0x80]));
+        // a key the dark table does not set keeps the shared value
+        assert_eq!(dark.dim, Some([0, 0, 0, 0x80]));
 
         let light = config.colors.for_mode(Mode::Light);
         assert_eq!(light.fg, Some([0xee, 0xee, 0xee]));
+        assert_eq!(light.container, Some([0x22, 0x22, 0x22]));
         assert_eq!(light.primary, Some([0x7a, 0xa2, 0xf7]));
-        // a key the light table does not set keeps the shared value
-        assert_eq!(light.muted, None);
-    }
-
-    #[test]
-    fn follow_system_from_either_level_wins() {
-        let shared = parse("[colors]\nfollow_system = true\n[colors.dark]\nfg = \"#111111\"");
-        assert!(shared.colors.for_mode(Mode::Dark).follow_system);
-        // a mode flag follows through too, and the other level stays quiet
-        let mode = parse("[colors.light]\nfollow_system = true");
-        assert!(mode.colors.for_mode(Mode::Light).follow_system);
-        assert!(!mode.colors.for_mode(Mode::Dark).follow_system);
     }
 
     #[test]
@@ -520,16 +442,6 @@ mod tests {
         assert_eq!(Mode::from_wire(Some("dark")), Mode::Dark);
         assert_eq!(Mode::from_wire(None), Mode::Dark);
         assert_eq!(Mode::from_wire(Some("sepia")), Mode::Dark);
-    }
-
-    #[test]
-    fn follow_system_is_a_plain_flag() {
-        assert!(
-            parse("[colors]\nfollow_system = true")
-                .colors
-                .shared
-                .follow_system
-        );
     }
 
     #[test]
@@ -547,26 +459,9 @@ mod tests {
     }
 
     #[test]
-    fn align_offsets_and_stroke_sizes_apply() {
-        let config = parse(
-            r#"
-            [layout]
-            align = "left"
-            offset_x = 12.0
-            offset_y = -8.0
-            row_radius = 3.0
-            hairline_width = 2.0
-            accent_width = 5.0
-            accent_height = 20.0
-            "#,
-        );
+    fn align_is_parsed_and_an_unknown_value_keeps_the_default() {
+        let config = parse("[layout]\nalign = \"left\"");
         assert_eq!(config.layout.align, Align::Left);
-        assert_eq!(config.layout.offset_x, 12.0);
-        assert_eq!(config.layout.offset_y, -8.0);
-        assert_eq!(config.layout.row_radius, Some(3.0));
-        assert_eq!(config.layout.hairline_width, 2.0);
-        assert_eq!(config.layout.accent_width, 5.0);
-        assert_eq!(config.layout.accent_height, 20.0);
 
         let unknown = parse("[layout]\nalign = \"diagonal\"");
         assert_eq!(unknown.layout.align, Align::Center);

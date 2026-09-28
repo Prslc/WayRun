@@ -43,11 +43,9 @@ impl Theme {
         }
     }
 
-    /// The system theme with `theme.toml`'s per-field overrides on top.
+    /// The system theme with `theme.toml`'s per-field overrides on top; a key
+    /// the file does not set keeps tracking the system.
     pub fn overlay(system: Self, colors: &ColorOverrides) -> Self {
-        if colors.follow_system {
-            return system;
-        }
         Self {
             primary: colors.primary.unwrap_or(system.primary),
             fg: colors.fg.unwrap_or(system.fg),
@@ -84,37 +82,10 @@ pub struct Surfaces {
 }
 
 impl Surfaces {
-    /// `follow_system` ignores every override, so the surfaces track the system
-    /// palette the way the base roles do.
+    /// The surfaces derived from the theme, with `[colors].dim`'s own override
+    /// on top; every other surface follows its role.
     pub fn resolve(theme: Theme, colors: &ColorOverrides) -> Self {
         let mut surfaces = Self::derive(theme);
-        if colors.follow_system {
-            return surfaces;
-        }
-        if let Some(color) = colors.card {
-            surfaces.card = color;
-        }
-        if let Some(color) = colors.selection {
-            surfaces.selection = color;
-        }
-        if let Some(color) = colors.hover {
-            surfaces.hover = color;
-        }
-        if let Some(color) = colors.hairline {
-            surfaces.hairline = color;
-        }
-        if let Some(color) = colors.muted {
-            surfaces.muted = color;
-        }
-        if let Some(color) = colors.summary {
-            surfaces.summary = color;
-        }
-        if let Some(color) = colors.footer {
-            surfaces.footer = color;
-        }
-        if let Some(color) = colors.accent {
-            surfaces.accent = color;
-        }
         if let Some(color) = colors.dim {
             surfaces.dim = color;
         }
@@ -248,27 +219,7 @@ mod tests {
     }
 
     #[test]
-    fn follow_system_ignores_every_override() {
-        let system = Theme {
-            primary: [1, 2, 3],
-            fg: [4, 5, 6],
-            container: [7, 8, 9],
-        };
-        let colors = ColorOverrides {
-            primary: Some([0xaa, 0xbb, 0xcc]),
-            fg: Some([0x11, 0x22, 0x33]),
-            container: Some([0x44, 0x55, 0x66]),
-            card: Some([0, 0, 0, 0]),
-            follow_system: true,
-            ..ColorOverrides::default()
-        };
-        assert_eq!(Theme::overlay(system, &colors), system);
-        let surfaces = Surfaces::resolve(system, &colors);
-        assert_eq!(surfaces.card, tint(system.container, CARD_ALPHA));
-    }
-
-    #[test]
-    fn a_surface_derives_from_its_role_or_takes_the_override() {
+    fn a_surface_derives_from_its_role_except_dim() {
         let theme = Theme::default();
         let derived = Surfaces::resolve(theme, &ColorOverrides::default());
         assert_eq!(derived.card, tint(theme.container, CARD_ALPHA));
@@ -277,14 +228,12 @@ mod tests {
         assert_eq!(derived.dim, DEFAULT_DIM);
 
         let colors = ColorOverrides {
-            card: parse_color("#010203cc"),
-            accent: parse_color("#040506"),
+            dim: parse_color("#010203cc"),
             ..ColorOverrides::default()
         };
         let overridden = Surfaces::resolve(theme, &colors);
-        assert_eq!(overridden.card, [1, 2, 3, 0xcc]);
-        assert_eq!(overridden.accent, [4, 5, 6, 255]);
-        // an untouched surface still derives
-        assert_eq!(overridden.selection, tint(theme.primary, SELECTION_ALPHA));
+        assert_eq!(overridden.dim, [1, 2, 3, 0xcc]);
+        // every other surface still derives
+        assert_eq!(overridden.card, tint(theme.container, CARD_ALPHA));
     }
 }

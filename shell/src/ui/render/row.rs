@@ -4,6 +4,7 @@ use cosmic_text::Weight;
 use tiny_skia::Pixmap;
 
 use crate::app::State;
+use crate::ui::geom;
 use crate::ui::icons::IconCache;
 use crate::ui::text::TextEngine;
 
@@ -36,9 +37,9 @@ fn draw_row_chrome(
             pixmap,
             Rect {
                 x: rect.x + 3.0,
-                y: rect.center_y() - layout.accent_height / 2.0,
-                w: layout.accent_width,
-                h: layout.accent_height,
+                y: rect.center_y() - geom::ACCENT_H / 2.0,
+                w: geom::ACCENT_W,
+                h: geom::ACCENT_H,
             },
             layout.accent_radius(),
             state.fade_rgba(state.surfaces.accent, now),
