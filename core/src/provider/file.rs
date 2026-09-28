@@ -312,8 +312,7 @@ fn do_search(query: &str, want_dir: bool, by_name: bool) -> Vec<ResultItem> {
 /// Not a config key: with the index on (the default) it has no effect at all.
 const FALLBACK_DEPTH: usize = 3;
 
-/// The fallback when no index is available: the four roots, [`FALLBACK_DEPTH`]
-/// levels.
+/// The fallback when no index is available: the four roots, [`FALLBACK_DEPTH`] levels.
 fn quick_search(
     home: &Path,
     query_lower: &str,

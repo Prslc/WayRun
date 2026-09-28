@@ -303,8 +303,7 @@ fn refresh(home: &Path) {
     let exclude = &config.files.exclude;
 
     // The sweep that decided this refresh is reused when it still describes the
-    // image on disk: sweeping every recorded directory twice would cost as much
-    // as the patch it decided on.
+    // image on disk: sweeping every directory twice costs as much as the patch.
     let swept = lock()
         .swept
         .take()

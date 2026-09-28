@@ -16,9 +16,8 @@ pub struct PluginEntry {
     pub keyword: String,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    /// External JSON-RPC 2.0 host (resolved on PATH). When set, the plugin is
-    /// not compiled in: a fresh process answers its `search` per call, or a
-    /// kept one when `resident`.
+    /// External JSON-RPC 2.0 host (resolved on PATH): not compiled in, a fresh
+    /// process answers its `search` per call, or a kept one when `resident`.
     #[serde(default)]
     pub command: Option<String>,
     /// Keep the host process alive across calls; dropped on dismissal and
