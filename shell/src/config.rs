@@ -30,8 +30,6 @@ pub struct ColorOverrides {
     #[serde(default, deserialize_with = "lenient_rgba")]
     pub card: Option<[u8; 4]>,
     #[serde(default, deserialize_with = "lenient_rgba")]
-    pub field: Option<[u8; 4]>,
-    #[serde(default, deserialize_with = "lenient_rgba")]
     pub selection: Option<[u8; 4]>,
     #[serde(default, deserialize_with = "lenient_rgba")]
     pub hover: Option<[u8; 4]>,
@@ -113,7 +111,6 @@ impl ColorConfig {
             fg: mode.fg.or(self.shared.fg),
             container: mode.container.or(self.shared.container),
             card: mode.card.or(self.shared.card),
-            field: mode.field.or(self.shared.field),
             selection: mode.selection.or(self.shared.selection),
             hover: mode.hover.or(self.shared.hover),
             hairline: mode.hairline.or(self.shared.hairline),
@@ -210,7 +207,6 @@ struct BlurFile {
 #[derive(serde::Deserialize, Default)]
 struct LayoutFile {
     radius: Option<f32>,
-    field_radius: Option<f32>,
     row_radius: Option<f32>,
     chip_radius: Option<f32>,
     width_ratio: Option<f32>,
@@ -273,7 +269,6 @@ impl AppearanceConfig {
             self.layout.radius,
             layout.radius.filter(|v| v.is_finite()).map(|v| v.max(0.0))
         );
-        self.layout.field_radius = non_negative(layout.field_radius);
         self.layout.row_radius = non_negative(layout.row_radius);
         self.layout.chip_radius = non_negative(layout.chip_radius);
         assign!(
@@ -561,7 +556,6 @@ mod tests {
             align = "left"
             offset_x = 12.0
             offset_y = -8.0
-            field_radius = 4.0
             row_radius = 3.0
             chip_radius = 2.0
             hairline_width = 2.0
@@ -572,7 +566,6 @@ mod tests {
         assert_eq!(config.layout.align, Align::Left);
         assert_eq!(config.layout.offset_x, 12.0);
         assert_eq!(config.layout.offset_y, -8.0);
-        assert_eq!(config.layout.field_radius, Some(4.0));
         assert_eq!(config.layout.row_radius, Some(3.0));
         assert_eq!(config.layout.chip_radius, Some(2.0));
         assert_eq!(config.layout.hairline_width, 2.0);

@@ -8,9 +8,8 @@ use crate::ui::geom;
 /// and input 8); the IME needs it to place the caret rectangle.
 pub const TEXT_INSET: f32 = geom::PAD + 22.0 + 12.0 + 8.0;
 
-/// The clear button and the return hint use the covered `×`/`⏎` forms rather
-/// than `✕`/`↵`, which the shaping family may lack and then fall back widely.
-pub const CLEAR_GLYPH: &str = "×";
+/// The return hint uses the covered `⏎` form rather than `↵`, which the shaping
+/// family may lack and then fall back widely.
 pub const ENTER_GLYPH: &str = "⏎";
 
 /// Everything logical→physical scaling goes through here.

@@ -26,7 +26,6 @@ pub struct Layout {
     pub offset_y: f32,
     pub radius: f32,
     // Explicit inner radii; `None` keeps the base each one derives from.
-    pub field_radius: Option<f32>,
     pub row_radius: Option<f32>,
     pub chip_radius: Option<f32>,
     pub hairline_width: f32,
@@ -46,7 +45,6 @@ impl Default for Layout {
             offset_x: 0.0,
             offset_y: 0.0,
             radius: 16.0,
-            field_radius: None,
             row_radius: None,
             chip_radius: None,
             hairline_width: 1.0,
@@ -95,14 +93,6 @@ impl Layout {
         (self.card_x(surface) + PAD, self.card_w(surface) - 2.0 * PAD)
     }
 
-    /// The ✕ button's circle in logical pixels: centre x, centre y, radius. The
-    /// toolbar draws it and `State::clear_hit` claims it.
-    pub fn clear_circle(&self, surface: (u32, u32)) -> (f32, f32, f32) {
-        let right = self.card_x(surface) + self.card_w(surface) - PAD - 8.0;
-        let center_y = self.card_top(surface) + PAD + SEARCH_H / 2.0;
-        (right - 13.0, center_y, 13.0)
-    }
-
     /// The y of the first list row: the card's padding, the search field and the
     /// column's spacing.
     pub fn rows_top(&self, surface: (u32, u32)) -> f32 {
@@ -122,6 +112,12 @@ impl Layout {
         } else {
             base + GAP + self.list_h(rows)
         }
+    }
+
+    /// The card with only the search field: what a pristine show rests at,
+    /// with no gap, footer band or list to reserve.
+    pub fn empty_h(&self) -> f32 {
+        PAD + SEARCH_H + PAD
     }
 
     /// The action panel's header band: the parent row's title, above the actions offered.
@@ -270,10 +266,6 @@ impl Layout {
             .max(0.0)
     }
 
-    pub fn field_radius(&self) -> f32 {
-        self.inner(9.0, self.field_radius)
-    }
-
     pub fn row_radius(&self) -> f32 {
         self.inner(8.0, self.row_radius)
     }
@@ -351,7 +343,9 @@ mod tests {
         let l = Layout::default();
         assert_eq!(l.content_h(0), 118.0);
         assert_eq!(l.content_h(5), 448.0);
-        assert_eq!(l.field_radius(), 9.0);
+        // the pristine card drops the gap and the footer band
+        assert_eq!(l.empty_h(), 80.0);
+        assert_eq!(l.row_radius(), 8.0);
         assert_eq!(l.row_radius(), 8.0);
         assert_eq!(l.chip_radius(), 6.0);
         assert_eq!(l.hairline_radius(), 15.5);
@@ -394,7 +388,6 @@ mod tests {
             radius: 8.0,
             ..Layout::default()
         };
-        assert_eq!(l.field_radius(), 7.0);
         assert_eq!(l.row_radius(), 7.0);
         assert_eq!(l.chip_radius(), 6.0);
         assert_eq!(l.hairline_radius(), 7.5);
@@ -435,12 +428,10 @@ mod tests {
     fn an_explicit_inner_radius_is_pulled_inside_the_card() {
         let l = Layout {
             radius: 10.0,
-            field_radius: Some(20.0),
-            row_radius: Some(4.0),
+            row_radius: Some(20.0),
             ..Layout::default()
         };
-        assert_eq!(l.field_radius(), 9.0);
-        assert_eq!(l.row_radius(), 4.0);
+        assert_eq!(l.row_radius(), 9.0);
         assert_eq!(l.accent_radius(), 1.5);
     }
 }

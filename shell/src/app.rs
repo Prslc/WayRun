@@ -98,7 +98,7 @@ impl State {
         let mode = Mode::default();
         let colors = appearance.colors.for_mode(mode);
         let surfaces = Surfaces::resolve(theme, &colors);
-        let card = appearance.layout.content_h(0);
+        let card = appearance.layout.empty_h();
         Self {
             query: String::new(),
             caret: 0,
@@ -147,11 +147,15 @@ impl State {
         self.fractional.is_some()
     }
 
-    /// The card's resting height (panel when open, else the list). The footer,
-    /// blur region and reflow all read it, so they agree with the drawn frame.
+    /// The card's resting height (panel when open, the field alone while the
+    /// query is untouched, else the list). The footer, blur region and reflow all
+    /// read it, so they agree with the drawn frame.
     pub fn content_height(&self) -> f32 {
         match &self.menu {
             Some(menu) => self.appearance.layout.panel_h(menu.actions.len()),
+            None if self.rows.is_empty() && self.query.is_empty() => {
+                self.appearance.layout.empty_h()
+            }
             None => self.appearance.layout.content_h(self.rows.len()),
         }
     }

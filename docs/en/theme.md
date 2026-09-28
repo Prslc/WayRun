@@ -41,7 +41,7 @@ pair being its alpha. An unparseable value is skipped and the default stays.
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `primary` | system palette | Accent: selection tint, accent bar, panel header. |
-| `fg` | system palette | Text, icons, field and hint tints. |
+| `fg` | system palette | Text, icons and hint tints. |
 | `container` | system palette | Card fill. |
 | `follow_system` | `false` | Ignore the base roles **and** every surface below; track the system palette entirely. |
 
@@ -54,11 +54,10 @@ that surface on purpose, alpha included.
 | Key | Derives from | Default (alpha) |
 | --- | --- | --- |
 | `card` | `container` | `#24283bb8` (0.72) card fill |
-| `field` | `fg` | `#c0caf514` (0.08) search field |
 | `selection` | `primary` | `#7aa2f726` (0.15) selected row tint |
 | `hover` | `primary` | `#7aa2f714` (0.08) hovered row tint |
 | `hairline` | white | `#ffffff59` (0.35) 1px card border |
-| `muted` | `fg` | `#c0caf58c` (0.55) placeholder, magnifier, ✕ and hints |
+| `muted` | `fg` | `#c0caf58c` (0.55) placeholder, magnifier and hints |
 | `summary` | `fg` | `#c0caf5b3` (0.70) row summary |
 | `footer` | `fg` | `#c0caf580` (0.50) footer hint text |
 | `accent` | `primary` | `#7aa2f7` (1.0) selected row accent bar |
@@ -135,7 +134,6 @@ layerrule = blur, WayRun
 | Key | Type | Default | Range | Meaning |
 | --- | --- | --- | --- | --- |
 | `radius` | float | `16.0` | ≥ 0 | Card corner radius; `0` gives square corners, and the inner radii shrink with it. |
-| `field_radius` | float | derived (9.0) | ≥ 0 | Field corner radius; defaults to the `radius`-derived 9 and is still capped by the card. |
 | `row_radius` | float | derived (8.0) | ≥ 0 | Row tint radius. |
 | `chip_radius` | float | derived (6.0) | ≥ 0 | Keyword chip radius. |
 | `hairline_width` | float | `1.0` | 0–8 | Card border stroke width. |

@@ -57,7 +57,6 @@ impl Theme {
 }
 
 const CARD_ALPHA: f32 = 0.72;
-const FIELD_ALPHA: f32 = 0.08;
 const SELECTION_ALPHA: f32 = 0.15;
 const HOVER_ALPHA: f32 = 0.08;
 const HAIRLINE_ALPHA: f32 = 0.35;
@@ -74,7 +73,6 @@ pub const DEFAULT_DIM: [u8; 4] = [0, 0, 0, alpha_u8(0.3)];
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Surfaces {
     pub card: [u8; 4],
-    pub field: [u8; 4],
     pub selection: [u8; 4],
     pub hover: [u8; 4],
     pub hairline: [u8; 4],
@@ -95,9 +93,6 @@ impl Surfaces {
         }
         if let Some(color) = colors.card {
             surfaces.card = color;
-        }
-        if let Some(color) = colors.field {
-            surfaces.field = color;
         }
         if let Some(color) = colors.selection {
             surfaces.selection = color;
@@ -129,7 +124,6 @@ impl Surfaces {
     fn derive(theme: Theme) -> Self {
         Self {
             card: tint(theme.container, CARD_ALPHA),
-            field: tint(theme.fg, FIELD_ALPHA),
             selection: tint(theme.primary, SELECTION_ALPHA),
             hover: tint(theme.primary, HOVER_ALPHA),
             hairline: [255, 255, 255, alpha_u8(HAIRLINE_ALPHA)],
@@ -291,6 +285,6 @@ mod tests {
         assert_eq!(overridden.card, [1, 2, 3, 0xcc]);
         assert_eq!(overridden.accent, [4, 5, 6, 255]);
         // an untouched surface still derives
-        assert_eq!(overridden.field, tint(theme.fg, FIELD_ALPHA));
+        assert_eq!(overridden.selection, tint(theme.primary, SELECTION_ALPHA));
     }
 }

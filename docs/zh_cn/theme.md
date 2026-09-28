@@ -37,7 +37,7 @@ WayRun 的配色方式，以及 `~/.config/wayrun/theme.toml` 控制的内容。
 | 键 | 默认值 | 含义 |
 | --- | --- | --- |
 | `primary` | 系统调色板 | 强调色：选中底色、强调条、面板标题。 |
-| `fg` | 系统调色板 | 文字、图标、搜索框与提示的底色。 |
+| `fg` | 系统调色板 | 文字、图标与提示的底色。 |
 | `container` | 系统调色板 | 卡片填充。 |
 | `follow_system` | `false` | 忽略基础角色**及**下面全部表面，完全跟随系统调色板。 |
 
@@ -48,11 +48,10 @@ WayRun 的配色方式，以及 `~/.config/wayrun/theme.toml` 控制的内容。
 | 键 | 派生自 | 默认值（alpha） |
 | --- | --- | --- |
 | `card` | `container` | `#24283bb8`（0.72）卡片填充 |
-| `field` | `fg` | `#c0caf514`（0.08）搜索框 |
 | `selection` | `primary` | `#7aa2f726`（0.15）选中行底色 |
 | `hover` | `primary` | `#7aa2f714`（0.08）悬停行底色 |
 | `hairline` | 白色 | `#ffffff59`（0.35）1px 卡片描边 |
-| `muted` | `fg` | `#c0caf58c`（0.55）占位符、放大镜、✕ 与提示 |
+| `muted` | `fg` | `#c0caf58c`（0.55）占位符、放大镜与提示 |
 | `summary` | `fg` | `#c0caf5b3`（0.70）结果行摘要 |
 | `footer` | `fg` | `#c0caf580`（0.50）底部提示文字 |
 | `accent` | `primary` | `#7aa2f7`（1.0）选中行强调条 |
@@ -120,7 +119,6 @@ layerrule = blur, WayRun
 | 键 | 类型 | 默认值 | 范围 | 含义 |
 | --- | --- | --- | --- | --- |
 | `radius` | float | `16.0` | ≥ 0 | 卡片圆角；`0` 即直角，内层圆角随之收缩。 |
-| `field_radius` | float | 派生（9.0） | ≥ 0 | 搜索框圆角；默认由 `radius` 派生，仍受卡片圆角限制。 |
 | `row_radius` | float | 派生（8.0） | ≥ 0 | 结果行底色圆角。 |
 | `chip_radius` | float | 派生（6.0） | ≥ 0 | 关键词 chip 圆角。 |
 | `hairline_width` | float | `1.0` | 0–8 | 卡片描边宽度。 |

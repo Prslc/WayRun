@@ -150,7 +150,7 @@ mod tests {
         assert_eq!(state.theme.fg, [0x10, 0x20, 0x30]);
         assert_eq!(state.theme.container, [7, 8, 9]);
         assert_eq!(state.surfaces.dim, crate::ui::theme::DEFAULT_DIM);
-        assert_eq!(state.card_to, state.appearance.layout.content_h(0));
+        assert_eq!(state.card_to, state.appearance.layout.empty_h());
     }
 
     #[test]

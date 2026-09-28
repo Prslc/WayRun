@@ -155,12 +155,6 @@ impl State {
         self.caret = self.query.len();
     }
 
-    pub fn clear_query(&mut self) {
-        self.query.clear();
-        self.caret = 0;
-        self.anchor = None;
-    }
-
     /// The text before the caret, which is what the IME wants as surrounding
     /// text (only its byte length is reported, since nothing tracks it).
     pub fn before_caret(&self) -> &str {
@@ -247,9 +241,6 @@ mod tests {
         state.right();
         state.right();
         assert_eq!(state.caret, "文".len());
-
-        state.clear_query();
-        assert!(state.query.is_empty() && state.caret == 0);
     }
 
     #[test]
@@ -332,9 +323,6 @@ mod tests {
         assert_eq!(state.selection(), None);
 
         // anchored in the middle, extending the other way flips the ends
-        state.clear_query();
-        state.insert("abc");
-        state.home();
         state.right();
         state.right();
         state.extend_home();

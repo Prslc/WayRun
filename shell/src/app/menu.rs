@@ -84,10 +84,6 @@ impl State {
         true
     }
 
-    pub fn close_actions(&mut self) {
-        self.menu = None;
-    }
-
     /// Remember the panel's row and highlighted entry, so the re-emit the action
     /// is about to trigger brings the panel back instead of dropping it.
     pub fn keep_panel(&mut self, action: &ActionItem) {
@@ -349,7 +345,7 @@ mod tests {
         // the panel is taller than the one-row list it replaced
         assert_eq!(state.content_height(), state.appearance.layout.panel_h(1));
 
-        state.close_actions();
+        state.menu = None;
         assert!(state.menu.is_none());
         assert_eq!(state.content_height(), state.appearance.layout.content_h(2));
     }

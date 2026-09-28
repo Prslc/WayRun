@@ -9,7 +9,7 @@ use wayrun_core::wire::{Action, ActionItem};
 use super::Shell;
 
 impl Shell {
-    /// Every editing path — typing, paste, IME, ✕ — funnels here into one search
+    /// Every editing path — typing, paste, IME — funnels here into one search
     /// line, and cancels a panel resume before its reply re-opens the panel.
     pub(super) fn query_changed(&mut self) {
         self.app.cancel_panel_resume();

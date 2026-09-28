@@ -341,17 +341,6 @@ impl PointerHandler for Shell {
                         // only BTN_LEFT is a click
                         continue;
                     }
-                    if self
-                        .app
-                        .clear_hit(event.position.0 as f32, event.position.1 as f32)
-                    {
-                        self.app.clear_query();
-                        self.app.close_actions();
-                        self.redraw();
-                        self.query_changed();
-                        return;
-                    }
-
                     if self.app.menu.is_some() {
                         let (first, count) = self
                             .app

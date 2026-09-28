@@ -369,7 +369,7 @@ mod tests {
         // the panel's own Enter runs the highlighted action, so the row hint goes
         assert!(state.open_actions());
         assert_eq!(effective_label(&state), None);
-        state.close_actions();
+        state.menu = None;
 
         // a default that runs the row's own command is not a different outcome
         row.actions[0].action = Action::Open { uri: uri.into() };

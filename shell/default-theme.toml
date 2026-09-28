@@ -2,15 +2,14 @@
 
 [colors]
 # primary = "#7aa2f7"        # accent: selection tint, accent bar, panel header
-# fg = "#c0caf5"             # text, icons, field and hint tints
+# fg = "#c0caf5"             # text, icons and hint tints
 # container = "#24283b"      # card fill
 # follow_system = false      # true ignores every override and tracks the system palette
 # card = "#24283bb8"         # card fill (container at 0.72; surfaces take #RRGGBBAA)
-# field = "#c0caf514"        # search field (fg at 0.08)
 # selection = "#7aa2f726"    # selected row tint (primary at 0.15)
 # hover = "#7aa2f714"        # hovered row tint (primary at 0.08)
 # hairline = "#ffffff59"     # 1px card border
-# muted = "#c0caf58c"        # placeholder, magnifier, ✕ and hints (fg at 0.55)
+# muted = "#c0caf58c"        # placeholder, magnifier and hints (fg at 0.55)
 # summary = "#c0caf5b3"      # row summary (fg at 0.70)
 # footer = "#c0caf580"       # footer hint text (fg at 0.50)
 # accent = "#7aa2f7"         # selected row accent bar (primary)
@@ -27,8 +26,7 @@
 
 [layout]
 # radius = 16.0              # card corner radius; 0 is square corners
-# field_radius = 9.0         # inner radii; each follows the card radius down
-# row_radius = 8.0
+# row_radius = 8.0           # inner radii; each follows the card radius down
 # chip_radius = 6.0
 # hairline_width = 1.0       # card border width
 # accent_width = 3.0         # selected row accent bar width
