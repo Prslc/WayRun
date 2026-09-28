@@ -17,10 +17,11 @@ impl Shell {
     }
 
     /// Re-send the current query, leaving a pending panel resume in place.
-    fn resend_query(&self) {
+    fn resend_query(&mut self) {
         if self.app.query.is_empty() {
-            // an empty query means the usage-ranked history
-            backend::top();
+            // No query is no result set: the list clears in place.
+            self.app.apply_results(Vec::new(), Instant::now());
+            self.redraw();
         } else {
             backend::search(&self.app.query);
         }
@@ -45,8 +46,8 @@ impl Shell {
         self.schedule_dismiss(now);
     }
 
-    /// Record a row in usage history, unless the command about to run is a
-    /// clipboard write: a copy is no re-launchable target and stays out of history.
+    /// Record a row in the usage counts, unless the command about to run is a
+    /// clipboard write: a copy is no re-launchable target.
     fn record_row_for(&self, launch: &app::Launch, runs: &Action) {
         if matches!(runs, Action::Copy { .. }) {
             return;
@@ -122,22 +123,14 @@ impl Shell {
         self.keep_panel(&action);
     }
 
-    /// One action-panel command: the default re-search keeps the panel on the
-    /// changed entry; the rest launch and dismiss; `forget` drops its row.
+    /// One action-panel command: record the row, run the action and dismiss.
     fn execute_action(&mut self, action: &ActionItem, now: Instant) {
-        match &action.action {
-            PanelAction::Execute { command } => {
-                if let Some(launch) = self.app.selected_row() {
-                    self.record_row_for(&launch, command);
-                }
-                backend::command(command);
-                self.schedule_dismiss(now);
-            }
-            PanelAction::Forget { on_click } => {
-                backend::forget_row(on_click);
-                self.close_panel(now);
-            }
+        let PanelAction::Execute { command } = &action.action;
+        if let Some(launch) = self.app.selected_row() {
+            self.record_row_for(&launch, command);
         }
+        backend::command(command);
+        self.schedule_dismiss(now);
     }
 
     /// Re-send the query with the panel held open on `action`, so the reply

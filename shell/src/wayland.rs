@@ -300,7 +300,7 @@ impl Shell {
             }
             BackendEvent::Results(items) => {
                 // A payload landing after a dismissal must not repopulate the rows
-                // the dismissal dropped; a show always asks again.
+                // the dismissal dropped.
                 if self.layer.is_none() {
                     return;
                 }
@@ -330,13 +330,6 @@ impl Shell {
                             self.icons.warm_tinted(path, icon_size, fg);
                         }
                     }
-                }
-            }
-            // A confirmed forget is the only thing that removes a row; a provider
-            // without `forget` answers `false` and the list is left alone.
-            BackendEvent::Forgotten { key, forgotten } => {
-                if forgotten {
-                    self.app.remove_row(&key, Instant::now());
                 }
             }
             BackendEvent::CoreExited => self.exit = true,

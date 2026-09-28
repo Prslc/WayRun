@@ -26,7 +26,6 @@ pub(super) const GLYPHS: &[(&str, &[u8])] = &[
     ("open", include_bytes!("../../../assets/icons/open.svg")),
     ("power", include_bytes!("../../../assets/icons/power.svg")),
     ("reboot", include_bytes!("../../../assets/icons/reboot.svg")),
-    ("remove", include_bytes!("../../../assets/icons/remove.svg")),
     ("reveal", include_bytes!("../../../assets/icons/reveal.svg")),
     (
         "suspend",

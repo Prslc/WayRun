@@ -60,11 +60,9 @@ instead; they then keep no cache.
 A result row can carry secondary commands, shown in the `Shift+Enter` panel. They
 differ by result type: `file-search`/`path-search` offer "Open in terminal",
 "Reveal in file manager" and "Copy path", `app-search` lists the entry's
-`[Desktop Action …]` groups, an external host's rows carry whatever `actions` it
-attaches (the workspace's `web.lua` offers "Copy URL"), and a row the empty-query
-history sourced gets the launcher-level "Remove from history". The row's own
-command leads the panel, an external host's own `actions` follow the plugin's,
-and the launcher's entry comes last.
+`[Desktop Action …]` groups, and an external host's rows carry whatever `actions`
+it attaches (the workspace's `web.lua` offers "Copy URL"). The row's own command
+leads the panel, and an external host's own `actions` follow the plugin's.
 
 Give an action an `id` to let the user make it the default `Enter` action with
 `Alt+Enter`; the panel's **Open** entry — the row's own command — takes the
@@ -95,4 +93,4 @@ Hosts can be written by hand. The
 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace ships a
 Python framework, Lua and Python examples and templates (`template/`,
 `template.lua`), and the host protocol is the JSON-RPC subset documented in
-[jsonrpc.md](jsonrpc.md): `search`, `top`, `forget`, `list_plugins`.
+[jsonrpc.md](jsonrpc.md): `search`, `top`, `list_plugins`.

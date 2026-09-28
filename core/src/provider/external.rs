@@ -7,7 +7,7 @@ use tokio::process::Command;
 
 use crate::plugin::{Meta, Plugin};
 use crate::system::icon::host_icon_spec;
-use crate::wire::{Action, ResultItem};
+use crate::wire::ResultItem;
 use rust_i18n::t;
 
 /// Identity of one plugin as described by an external host's `list_plugins`.
@@ -96,13 +96,6 @@ impl Plugin for External {
         let icon = self.meta.icon.to_string();
         let resident = self.resident;
         Box::pin(async move { query_default(&command, resident, &plugin, &icon).await })
-    }
-
-    fn forget(&self, command: &Action) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + '_>> {
-        let host = self.command.clone();
-        let command = command.clone();
-        let resident = self.resident;
-        Box::pin(async move { forget_external(&host, resident, &command).await })
     }
 }
 
@@ -298,15 +291,6 @@ async fn query_default(
     Ok(parse_result_items(response, plugin, icon))
 }
 
-/// First shell token of a `run` command (argv0), or `None` for any other
-/// variant; hosts emit single-token commands, so a whitespace split suffices.
-fn run_argv0(command: &Action) -> Option<&str> {
-    let Action::Run { cmd } = command else {
-        return None;
-    };
-    cmd.split_whitespace().next()
-}
-
 /// Resolve a plugins.toml `command` to an absolute path when it is a bare
 /// name (PATH lookup); absolute paths pass through unchanged.
 fn resolve_command(command: &str) -> String {
@@ -324,31 +308,13 @@ fn resolve_command(command: &str) -> String {
     command.to_string()
 }
 
-/// Relay a row's removal to its host: the command must be a `run` whose first
-/// token is this host's `command`. `true` when the host acknowledged it.
-async fn forget_external(command: &str, resident: bool, row: &Action) -> Result<bool> {
-    let Some(argv0) = run_argv0(row) else {
-        return Ok(false);
-    };
-    let resolved = resolve_command(command);
-    if argv0 != command && argv0 != resolved {
-        return Ok(false);
-    }
-    let request = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "forget",
-        "params": { "on_click": row },
-        "id": 1,
-    });
-    let response = host_call(command, resident, &request, HOST_TIMEOUT).await;
-    Ok(response.is_some_and(|reply| reply.get("error").is_none()))
-}
 fn resolve_item_icon(icon: &str, fallback: Option<String>) -> Option<String> {
     host_icon_spec(icon).or(fallback)
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wire::Action;
 
     #[test]
     fn empty_icon_falls_back_to_plugin_icon() {
@@ -511,22 +477,6 @@ mod tests {
         );
     }
 
-    /// A host that answers the way a plugin framework does: it consumes the
-    /// request and prints one response line.
-    fn host(dir: &tempfile::TempDir, reply: &str) -> String {
-        use std::io::Write;
-        let path = dir.path().join("host.sh");
-        let mut file = std::fs::File::create(&path).unwrap();
-        writeln!(file, "#!/bin/sh").unwrap();
-        writeln!(file, "cat >/dev/null").unwrap();
-        writeln!(file, "printf '%s\\n' '{reply}'").unwrap();
-        drop(file);
-        let mut perms = std::fs::metadata(&path).unwrap().permissions();
-        std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
-        std::fs::set_permissions(&path, perms).unwrap();
-        path.display().to_string()
-    }
-
     #[tokio::test]
     async fn an_empty_query_never_reaches_the_host() {
         // No host is contacted: an empty text is not a search.
@@ -534,42 +484,6 @@ mod tests {
             .await
             .unwrap();
         assert!(items.is_empty());
-    }
-
-    #[tokio::test]
-    async fn a_row_another_command_owns_is_left_alone() {
-        // No host is contacted: the on_click's command is not this one.
-        let row = Action::Run {
-            cmd: "/bin/other del 1".to_string(),
-        };
-        let owned = forget_external("/usr/bin/definitely-not-this", false, &row)
-            .await
-            .unwrap();
-        assert!(!owned);
-    }
-
-    #[tokio::test]
-    async fn a_host_that_answers_owns_the_row() {
-        let dir = tempfile::tempdir().unwrap();
-        let command = host(&dir, r#"{"jsonrpc":"2.0","result":null,"id":1}"#);
-        let row = Action::Run {
-            cmd: format!("{command} del 1"),
-        };
-        let owned = forget_external(&command, false, &row).await.unwrap();
-        assert!(owned, "the host dropped its own data, so the row may leave");
-    }
-
-    #[tokio::test]
-    async fn a_host_without_a_forget_method_disowns_the_row() {
-        let dir = tempfile::tempdir().unwrap();
-        let reply =
-            r#"{"jsonrpc":"2.0","error":{"code":-32601,"message":"Method not found"},"id":1}"#;
-        let command = host(&dir, reply);
-        let row = Action::Run {
-            cmd: format!("{command} del 1"),
-        };
-        let owned = forget_external(&command, false, &row).await.unwrap();
-        assert!(!owned, "-32601 means the row is not this host's to drop");
     }
 
     /// A host that never answers must cost the deadline, not the session.

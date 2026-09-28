@@ -14,12 +14,10 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 | Method | Params | Result |
 |--------|--------|--------|
 | `search` | `{"text"}` | array of result items; sent as a notification, streams a `results` notification |
-| `top` | — | most-used items; sent as a notification, streams a `results` notification |
 | `dismiss` | — | `null` (the launcher closed: drops any search still in flight) |
 | `select` | item object | `null` (records usage; `ephemeral` and `copy` rows are not) |
 | `command` | an [`Action`](#actions) object | `null` (runs one row or panel command) |
 | `default` | `{"scope","action_id"}` | `null` (remembers the default Enter action for a plugin; a null `action_id` clears it) |
-| `forget` | `{"on_click": Action}` | `{"forgotten": bool}` |
 | `list_plugins` | — | plugin metadata; see [schema](#plugin-metadata-list_plugins) |
 | `theme` | — | theme colors |
 | `ping` | — | `"pong"` |
@@ -37,9 +35,9 @@ The core also pushes JSON-RPC notifications (no `id`):
 | `theme` | theme colors | the resolved theme, on connect and on every palette change |
 | `results` | array of result items | a search payload |
 
-`search` and `top` sent **without** an `id` are streaming: the core aborts any
-pending search, then answers with a `results` notification. Sent **with** an
-`id` they answer synchronously with the array, for one-shot clients.
+`search` sent **without** an `id` is streaming: the core aborts any pending
+search, then answers with a `results` notification. Sent **with** an `id` it
+answers synchronously with the array, for one-shot clients.
 
 ## Actions
 
@@ -66,17 +64,7 @@ survive; a `Terminal=true` handler is started inside a terminal.
 
 `search` takes an object with a `text` key (a non-empty string). An absent
 `params`, an empty `text`, a bare string, `{"query": …}`, or a non-string `text`
-returns `-32602`. Use `top` for the most-used items — `search` does not serve a
-default view.
-
-`forget` drops a row from usage history. When the `on_click` is a `run` action
-whose first token is a registered external host's `command`, the core also relays
-a `forget` request to that host so it can delete its own data — e.g. the todo
-plugin removes the todo. The answer says whether anything was really dropped:
-`true` when a history row was deleted **or** a host that owns the row answered
-without an error, `false` otherwise. A host without a `forget` method answers
-`-32601`, which counts as "not mine" — the launcher keeps such a row in the list
-rather than claiming a deletion nobody made.
+returns `-32602`.
 
 ## Plugin metadata (`list_plugins`)
 
@@ -126,12 +114,10 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 # -> {"jsonrpc":"2.0","result":[{"title":…,"summary":…,"on_click":…,"icon":…}],"id":1}
 ```
 
-This `top` call is a core → host request — distinct from the core's own `top`
-RPC (most-used usage history), which serves the empty-launcher view. A host
-declares a default view by serving `top` (registering it via the plugin
-framework's `@plugin.method("top")`); the response `result` is an array of
-result items with the same [schema](#result-items) as `search`, icons
-included.
+This `top` call is a core → host request: a host declares a default view by
+serving `top` (registering it via the plugin framework's
+`@plugin.method("top")`); the response `result` is an array of result items with
+the same [schema](#result-items) as `search`, icons included.
 
 When the host returns a non-empty default view it is shown instead of the
 keyword+space identity hint. Otherwise — a host without `top` (unknown method
@@ -145,9 +131,9 @@ identity and its rows.
 
 ## Result items
 
-`search` and `top` return an array of items. Every item is an object with these
-keys — the first five are always present (`null` for an absent optional field),
-and `actions`/`badge` only when set:
+`search`, and a host's `top`, return an array of items. Every item is an object
+with these keys — the first five are always present (`null` for an absent
+optional field), and `actions`/`badge` only when set:
 
 | Key | Type | Meaning |
 |-----|------|---------|
@@ -171,20 +157,17 @@ A `PanelAction` is one of:
 | `type` | Fields | Meaning |
 |--------|--------|---------|
 | `execute` | `command` | run that [`Action`](#actions) |
-| `forget` | `on_click` | drop the command from usage history |
 
-The core attaches history removal to a row it sourced from the empty-query
-history that could have been recorded (not `ephemeral`, not `copy`); the owning
-built-in provider adds its type-specific ones (a file reveal, copy path or open
-in terminal, a `[Desktop Action …]` group, a copy-link), and a host's own
-entries are kept after them.
+The owning built-in provider adds its type-specific entries (a file reveal, copy
+path or open in terminal, a `[Desktop Action …]` group, a copy-link), and a
+host's own entries are kept after them.
 
 An item without `on_click` is non-interactive (display only).
 
-Selecting an item records it in usage history — the list behind an empty query
-(`top`). Two kinds of row are exempt: one the host marked `ephemeral: true` (a
-one-shot search hit, say), and one whose `on_click` is a `copy` action (its
-value is the copied text, not a target to re-open).
+Selecting an item records it in the usage counts that rank results. Two kinds of
+row are exempt: one the host marked `ephemeral: true` (a one-shot search hit,
+say), and one whose `on_click` is a `copy` action (its value is the copied text,
+not a target to re-open).
 
 ### Icon specs
 

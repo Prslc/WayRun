@@ -196,8 +196,7 @@ impl State {
         // The surface is gone, so nothing is composing on it any more.
         self.preedit = None;
         self.preedit_active = false;
-        // With a long history the payload is megabytes, and the rest of a
-        // dismissal already frees what a hidden launcher holds.
+        // A show starts from an empty list: an empty query fetches nothing.
         self.rows = Vec::new();
     }
 

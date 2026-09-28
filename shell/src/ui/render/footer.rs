@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn the_footer_separates_no_results_from_an_untouched_field() {
-        // an empty field is the history view, not a failed search
+        // an empty field has no query to blame for the empty list
         assert_eq!(
             footer_hints(0, true, false, false, false, false),
             hints().help.as_slice()

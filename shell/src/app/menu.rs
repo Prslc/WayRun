@@ -26,26 +26,17 @@ pub(super) enum PanelKey {
 }
 
 impl PanelKey {
-    fn of(action: &ActionItem) -> Option<Self> {
-        match &action.action {
-            PanelAction::Execute { .. } => Some(match action.id.clone() {
-                Some(id) => PanelKey::Id(id),
-                None => PanelKey::Primary,
-            }),
-            // Removal takes the row the panel is about, so there is nothing to
-            // come back to.
-            PanelAction::Forget { .. } => None,
+    fn of(action: &ActionItem) -> Self {
+        match action.id.clone() {
+            Some(id) => PanelKey::Id(id),
+            None => PanelKey::Primary,
         }
     }
 
     fn matches(&self, action: &ActionItem) -> bool {
         match self {
             PanelKey::Id(id) => action.id.as_deref() == Some(id.as_str()),
-            // The row's own command is the panel's leading entry, owned by a
-            // plugin or not: a host's row has no plugin to hang it on.
-            PanelKey::Primary => {
-                action.id.is_none() && matches!(action.action, PanelAction::Execute { .. })
-            }
+            PanelKey::Primary => action.id.is_none(),
         }
     }
 }
@@ -76,9 +67,7 @@ pub fn marked_entry(row: &ResultItem) -> Option<usize> {
 /// a remembered default changes.
 pub fn effective_action(row: &ResultItem) -> Option<&ActionItem> {
     let action = row.actions.iter().find(|action| action.default)?;
-    let PanelAction::Execute { command } = &action.action else {
-        return None;
-    };
+    let PanelAction::Execute { command } = &action.action;
     (row.on_click.as_ref() != Some(command)).then_some(action)
 }
 
@@ -106,9 +95,7 @@ impl State {
     /// Remember the panel's row and highlighted entry, so the re-emit the action
     /// is about to trigger brings the panel back instead of dropping it.
     pub fn keep_panel(&mut self, action: &ActionItem) {
-        let Some(key) = PanelKey::of(action) else {
-            return;
-        };
+        let key = PanelKey::of(action);
         let Some(parent) = self.menu.as_ref().map(|menu| menu.parent) else {
             return;
         };

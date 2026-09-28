@@ -1,22 +1,10 @@
 use super::registry::{Entry, REGISTRY, ensure_loaded};
 use crate::system::icon::find_icon_spec;
-use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
+use crate::wire::{ActionItem, PanelAction, ResultItem};
 use rust_i18n::t;
 
-/// Drop a row across the registry. `true` when an external host owned and dropped
-/// it, so `forget` answers truthfully instead of claiming a deletion.
-pub async fn forget_row(command: &Action) -> bool {
-    ensure_loaded().await;
-    let reg = REGISTRY.read().await;
-    let mut owned = false;
-    for entry in reg.iter() {
-        owned |= entry.plugin.forget(command).await.unwrap_or(false);
-    }
-    owned
-}
-
 /// Attach each row's action panel.
-pub async fn decorate(items: Vec<ResultItem>, history: bool) -> Vec<ResultItem> {
+pub async fn decorate(items: Vec<ResultItem>) -> Vec<ResultItem> {
     ensure_loaded().await;
     // The shared connection stays off the runtime's workers.
     let defaults = tokio::task::spawn_blocking(crate::system::db::defaults::all)
@@ -37,7 +25,7 @@ pub async fn decorate(items: Vec<ResultItem>, history: bool) -> Vec<ResultItem> 
         } else {
             (None, Vec::new())
         };
-        attach_actions(item, history, &defaults, plugin_actions);
+        attach_actions(item, &defaults, plugin_actions);
     }
     out
 }
@@ -54,11 +42,10 @@ fn plugin_actions(entries: &[Entry], item: &ResultItem) -> (Option<String>, Vec<
     (None, Vec::new())
 }
 
-/// The launcher-level entries an actionable row gets (history removal only on a
-/// recordable history row), after its type and host actions.
+/// The panel an actionable row gets: what its plugins declare, then the row's
+/// own command leading.
 fn attach_actions(
     item: &mut ResultItem,
-    history: bool,
     defaults: &std::collections::HashMap<String, String>,
     plugin_actions: (Option<String>, Vec<ActionItem>),
 ) {
@@ -88,21 +75,6 @@ fn attach_actions(
             .as_deref()
             .and_then(|plugin| defaults.get(plugin))
             .is_some_and(|id| action.id.as_deref() == Some(id.as_str()));
-    }
-
-    // The history entry comes last: it is launcher state rather than what the
-    // row offers, and the first slot belongs to the row's own command.
-    if history && crate::system::db::usage::is_recordable(item.ephemeral, Some(&on_click)) {
-        actions.push(ActionItem {
-            title: t!("action.remove_history"),
-            action: PanelAction::Forget {
-                on_click: on_click.clone(),
-            },
-            icon: Some("builtin:remove".to_string()),
-            id: None,
-            plugin: None,
-            default: false,
-        });
     }
 
     // The row's own command leads the panel: Enter runs it while no default is
@@ -140,6 +112,7 @@ fn attach_actions(
 mod tests {
     use super::*;
     use crate::plugin::item;
+    use crate::wire::Action;
     use std::collections::HashMap;
 
     fn run(cmd: &str) -> Action {
@@ -149,7 +122,7 @@ mod tests {
     }
 
     #[test]
-    fn the_row_command_leads_and_launcher_entries_trail() {
+    fn the_row_command_leads_the_panel() {
         let mut row = item(
             "a.txt",
             Action::Open {
@@ -170,7 +143,6 @@ mod tests {
         };
         attach_actions(
             &mut row,
-            true,
             &HashMap::new(),
             (Some("file-search".to_string()), vec![reveal]),
         );
@@ -182,60 +154,23 @@ mod tests {
             .collect();
         assert_eq!(
             titles,
-            [
-                t!("action.open"),
-                "Reveal in file manager".to_string(),
-                t!("action.remove_history")
-            ]
+            [t!("action.open"), "Reveal in file manager".to_string()]
         );
     }
 
     #[test]
-    fn launcher_entries_trail_the_row() {
-        fn titles(row: &ResultItem) -> Vec<&str> {
-            row.actions.iter().map(|a| a.title.as_str()).collect()
-        }
-
-        let mut history = item(
+    fn a_lone_row_command_shows_no_panel() {
+        let mut row = item(
             "Firefox",
             Action::Launch {
                 desktop_id: "firefox.desktop".to_string(),
             },
         );
-        attach_actions(&mut history, true, &HashMap::new(), (None, Vec::new()));
-        assert_eq!(
-            titles(&history),
-            [t!("action.open"), t!("action.remove_history")]
-        );
-
-        // a fresh search result is not sourced from the history view
-        let mut search = item(
-            "Firefox",
-            Action::Launch {
-                desktop_id: "firefox.desktop".to_string(),
-            },
-        );
-        attach_actions(&mut search, false, &HashMap::new(), (None, Vec::new()));
+        attach_actions(&mut row, &HashMap::new(), (None, Vec::new()));
         assert!(
-            titles(&search).is_empty(),
+            row.actions.is_empty(),
             "a row with nothing else to offer has no panel"
         );
-
-        // an ephemeral row is never recorded, so it has no history entry
-        let mut one_shot = item("window", run("wctl activate 1"));
-        one_shot.ephemeral = true;
-        attach_actions(&mut one_shot, true, &HashMap::new(), (None, Vec::new()));
-        assert!(titles(&one_shot).is_empty());
-
-        // a copy row is not recorded either
-        let mut copy = item(
-            "translated",
-            Action::Copy {
-                text: "hi".to_string(),
-            },
-        );
-        attach_actions(&mut copy, true, &HashMap::new(), (None, Vec::new()));
-        assert!(titles(&copy).is_empty());
     }
 
     #[test]
@@ -258,7 +193,7 @@ mod tests {
         }];
         let mut defaults = HashMap::new();
         defaults.insert("todo".to_string(), "done".to_string());
-        attach_actions(&mut row, false, &defaults, (None, Vec::new()));
+        attach_actions(&mut row, &defaults, (None, Vec::new()));
 
         let titles: Vec<&str> = row.actions.iter().map(|a| a.title.as_str()).collect();
         assert_eq!(titles, [t!("action.open"), "Mark done".to_string()]);
@@ -292,7 +227,6 @@ mod tests {
         defaults.insert("todo".to_string(), "done".to_string());
         attach_actions(
             &mut row,
-            false,
             &defaults,
             (
                 Some("file-search".to_string()),
@@ -355,7 +289,6 @@ mod tests {
         defaults.insert("file-search".to_string(), "terminal".to_string());
         attach_actions(
             &mut row,
-            false,
             &defaults,
             (Some("file-search".to_string()), actions),
         );
@@ -390,7 +323,6 @@ mod tests {
         );
         attach_actions(
             &mut row,
-            false,
             &HashMap::new(),
             (
                 Some("file-search".to_string()),

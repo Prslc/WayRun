@@ -2,14 +2,13 @@ use std::borrow::Cow;
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::wire::{Action, ResultItem};
+use crate::wire::ResultItem;
 
 mod actions;
 mod rank;
 mod registry;
 mod search;
 
-pub use actions::{decorate, forget_row};
 /// The ranking vocabulary providers and the dispatcher share.
 pub use rank::{
     Match, Rank, Ranked, classify, classify_bytes_confident, classify_ci, classify_ci_confident,
@@ -61,15 +60,6 @@ pub trait Plugin: Send + Sync {
         Box::pin(async { Ok(None) })
     }
 
-    /// Drop a row's data (best effort, from `forget`); usage history is the
-    /// caller's. `true` means this provider owned the row and dropped it.
-    fn forget(
-        &self,
-        _command: &Action,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send + '_>> {
-        Box::pin(async { Ok(false) })
-    }
-
     /// Type-specific commands for one of this plugin's rows, shown in the action
     /// panel; the core leads the panel with the row's own command.
     fn actions(&self, _item: &ResultItem) -> Vec<crate::wire::ActionItem> {
@@ -78,7 +68,7 @@ pub trait Plugin: Send + Sync {
 }
 
 #[cfg(test)]
-fn item(title: &str, command: Action) -> ResultItem {
+fn item(title: &str, command: crate::wire::Action) -> ResultItem {
     ResultItem {
         title: title.to_string(),
         summary: None,

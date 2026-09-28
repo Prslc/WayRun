@@ -49,7 +49,6 @@ struct Plugin {
     read: Vec<PathBuf>,
     search: Option<Function>,
     top: Option<Function>,
-    forget: Option<Function>,
 }
 
 struct Host {
@@ -172,10 +171,6 @@ impl Host {
                 let plugin = self.plugin(params)?;
                 self.call(plugin, "top", plugin.top.as_ref(), ())
             }
-            Some("forget") => match params.and_then(|params| params.get("on_click")) {
-                Some(action) => self.forget(action),
-                None => Err((-32602, "forget needs an on_click action".to_string())),
-            },
             Some(other) => Err((-32601, format!("unknown method {other:?}"))),
             None => Err((-32600, "missing method".to_string())),
         }
@@ -252,33 +247,6 @@ impl Host {
             }
         }
         json!(rows)
-    }
-
-    /// `forget` carries no plugin id, so every plugin answers for the row and
-    /// the first claim wins; none is an error, which the core reads as "not ours".
-    fn forget(
-        &self,
-        action: &serde_json::Value,
-    ) -> std::result::Result<serde_json::Value, (i64, String)> {
-        let action = self
-            .lua
-            .to_value(action)
-            .map_err(|error| (-32000, format!("unreadable action: {error}")))?;
-        for plugin in &self.plugins {
-            let Some(function) = &plugin.forget else {
-                continue;
-            };
-            *self.active.borrow_mut() = Some(plugin.id.clone());
-            match function.call::<Value>(action.clone()) {
-                Ok(Value::Boolean(true)) => return Ok(json!(true)),
-                Ok(_) => {}
-                Err(error) => warn(
-                    &self.script,
-                    &format!("plugin {} forget: {error}", plugin.id),
-                ),
-            }
-        }
-        Err((-32000, "no plugin owns the row".to_string()))
     }
 }
 
@@ -391,7 +359,6 @@ fn read_plugins(declared: &Table, script: &str) -> mlua::Result<Vec<Plugin>> {
             read,
             search: entry.get("search")?,
             top: entry.get("top")?,
-            forget: entry.get("forget")?,
         });
     }
     if plugins.is_empty() {

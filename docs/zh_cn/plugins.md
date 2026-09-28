@@ -54,9 +54,8 @@ enabled = true
 结果行可以携带次级命令，显示在 `Shift+Enter` 二级菜单中。不同类型的菜单各不相同：
 `file-search`/`path-search` 提供“在终端中打开”“在文件管理器中显示”与“复制路径”，
 `app-search` 列出该条目的 `[Desktop Action …]`，外部主机的行则按所带的 `actions`
-提供（工作区的 `web.lua` 提供“复制链接”），空查询历史来源的行还会得到启动器级别的
-“从历史中移除”。菜单最前是行自身的命令，外部主机自带的动作排在插件自身动作之后，
-启动器条目在最后。
+提供（工作区的 `web.lua` 提供“复制链接”）。菜单最前是行自身的命令，外部主机自带的
+动作排在插件自身动作之后。
 
 给动作填上 `id`，用户就能用 `Alt+Enter` 把它设为默认 Enter 动作；菜单里的 **打开**（行原本的
 命令）在这个手势下表示取消默认。见 [jsonrpc.md](jsonrpc.md#结果项) 的 `actions` 字段。
@@ -79,4 +78,4 @@ enabled = true
 主机可以手写。[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区提供了一套
 Python 框架、Lua 与 Python 示例及模板（`template/`、`template.lua`），可复制起步。
 主机协议是 [jsonrpc.md](jsonrpc.md)
-中记录的 JSON-RPC 子集：`search`、`top`、`forget`、`list_plugins`。
+中记录的 JSON-RPC 子集：`search`、`top`、`list_plugins`。

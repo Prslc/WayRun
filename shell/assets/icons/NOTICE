@@ -24,7 +24,6 @@ logout        logout
 open          open-in-new
 power         power-settings-new
 reboot        restart-alt
-remove        delete
 reveal        folder-open
 suspend       bedtime
 terminal      terminal

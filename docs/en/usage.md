@@ -2,7 +2,8 @@
 
 Type to search: the first word selects a plugin's keyword when one owns it,
 otherwise the whole input is an app/command query (see
-[plugins.md](plugins.md)). `Enter` acts on the highlighted row.
+[plugins.md](plugins.md)). `Enter` acts on the highlighted row; an empty query
+shows no rows.
 
 ## Prefixes
 
@@ -17,7 +18,6 @@ otherwise the whole input is an app/command query (see
 | `?` | show keyword modes, default functions, hints and each plugin's remembered default action |
 | `lock` / `reboot` / `shutdown` | system commands |
 | `2 + 3` | inline calculator |
-| _(empty)_ | show most-used items |
 
 Some prefixes need an optional component: `w` a compositor backend, `c`
 cliphist, and copy/paste `wl-clipboard`. Without it, the keyword returns no
@@ -54,9 +54,8 @@ points.
 commands that type of result offers. It leads with the row's own command
 (**Open**), then the actions its plugin adds for that type — a file row offers
 "Open in terminal", "Reveal in file manager" and "Copy path", an application row
-lists its `[Desktop Action …]` groups — then anything an external host attached,
-and last **Remove from history** on a row the empty-query history sourced. The
-dot marks the entry `Enter` runs, so **Open** carries it until a default is
+lists its `[Desktop Action …]` groups — then anything an external host attached.
+The dot marks the entry `Enter` runs, so **Open** carries it until a default is
 remembered. A row with no command to offer has no panel at all, so the footer
 hides its actions hint.
 
@@ -70,9 +69,8 @@ you put it.
 `Enter` on later rows of that plugin runs it; the row's own command stays
 available in the panel as **Open**. The remembered action carries a dot and the
 footer shows the `Alt+Enter` hint; `Alt+Enter` on **Open** — or on the action
-that is already the default — clears it, so `Enter` opens normally again.
-**Remove from history** cannot be made default; a plugin's own actions, and a
-host's, can.
+that is already the default — clears it, so `Enter` opens normally again. A
+plugin's own actions, and a host's, can be made default.
 
 While a default is in effect the row-level footer names the action `Enter` will
 run (`⏎ Open in terminal`) instead of `⏎ Launch`, and the row carries the same

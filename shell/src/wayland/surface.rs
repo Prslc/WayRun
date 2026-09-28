@@ -72,9 +72,6 @@ impl Shell {
 
         self.app.shown(now);
         ipc::VISIBLE.store(true, Ordering::Relaxed);
-        // An empty query means the usage-ranked history, so a show never
-        // displays the previous query's payload.
-        backend::top();
         self.open_at = Some(now);
         self.last_present = None;
         // Allocate the frame buffers here rather than on the first present, so

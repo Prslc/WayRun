@@ -40,13 +40,11 @@ impl Action {
     }
 }
 
-/// A row's panel command: the row's own `Action`, or a launcher-level
-/// history operation the shell turns into its own RPC call.
+/// A row's panel command: the action it executes.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PanelAction {
     Execute { command: Action },
-    Forget { on_click: Action },
 }
 
 /// One action-panel entry of a row, never run by Enter unless it is the default.
@@ -130,7 +128,6 @@ pub const BUILTIN_GLYPHS: &[&str] = &[
     "open",
     "power",
     "reboot",
-    "remove",
     "reveal",
     "suspend",
     "terminal",

@@ -8,15 +8,6 @@ pub fn record(item_json: &str) -> Result<()> {
     with_db(|conn| record_with(conn, item_json))
 }
 
-/// Drop one history entry by its command key, reporting whether a row was there.
-pub fn forget(key: &str) -> Result<bool> {
-    with_db(|conn| forget_with(conn, key))
-}
-
-pub fn get_top(limit: i32) -> Result<Vec<ResultItem>> {
-    with_db(|conn| get_top_with(conn, limit))
-}
-
 /// The usage counts behind the given action keys, for a caller ordering a whole
 /// payload at once: one query, not one per row.
 pub fn counts(keys: &[String]) -> std::collections::HashMap<String, u32> {
@@ -88,33 +79,6 @@ fn record_with(conn: &Connection, item_json: &str) -> Result<()> {
     Ok(())
 }
 
-/// Drop one history entry by its command key, resolved through the row's title so
-/// a merged row (same title, several actions) is removed whole. `true` if deleted.
-fn forget_with(conn: &Connection, key: &str) -> Result<bool> {
-    let title: Option<String> = conn
-        .prepare_cached("SELECT key FROM usage WHERE on_click = ?1 LIMIT 1")?
-        .query_row([key], |r| r.get(0))
-        .ok();
-    let deleted = conn
-        .prepare_cached("DELETE FROM usage WHERE key = ?1")?
-        .execute([title.as_deref().unwrap_or(key)])?;
-    Ok(deleted > 0)
-}
-
-fn get_top_with(conn: &Connection, limit: i32) -> Result<Vec<ResultItem>> {
-    let mut stmt = conn.prepare_cached(
-        "SELECT item_json FROM usage ORDER BY count DESC, last_used_at DESC LIMIT ?1",
-    )?;
-    let rows = stmt.query_map([limit], |row| row.get::<_, String>(0))?;
-
-    // A corrupt row, or one with no `title`, is skipped rather than emitted as
-    // `null`: `title` is required on the wire, and one bad entry rejects all.
-    Ok(rows
-        .filter_map(Result::ok)
-        .filter_map(|json| serde_json::from_str::<ResultItem>(&json).ok())
-        .collect())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,15 +99,18 @@ mod tests {
     }
 
     #[test]
-    fn record_and_get_top() {
+    fn record_accumulates_a_count() {
         let conn = test_conn();
         let json = item("Firefox", run("firefox"));
         record_with(&conn, &json).unwrap();
         record_with(&conn, &json).unwrap();
 
-        let items = get_top_with(&conn, 10).unwrap();
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].title, "Firefox");
+        let count: i64 = conn
+            .query_row("SELECT count FROM usage WHERE key = 'Firefox'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 2);
     }
 
     #[test]
@@ -165,56 +132,6 @@ mod tests {
 
         assert_eq!(counts.len(), COUNT_BATCH + 3);
         assert!(counts.values().all(|count| *count == 1));
-    }
-
-    #[test]
-    fn a_corrupt_or_titleless_row_does_not_poison_the_history() {
-        let conn = test_conn();
-        record_with(&conn, &item("Good", run("good"))).unwrap();
-        conn.execute(
-            "INSERT INTO usage (key, on_click, item_json) VALUES ('bad', 'x', 'not json')",
-            [],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO usage (key, on_click, item_json) VALUES ('empty', 'x', '{\"on_click\":{}}')",
-            [],
-        )
-        .unwrap();
-
-        let items = get_top_with(&conn, 10).unwrap();
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].title, "Good");
-    }
-
-    #[test]
-    fn forget_removes_entry() {
-        let conn = test_conn();
-        record_with(&conn, &item("A", run("a"))).unwrap();
-        assert_eq!(get_top_with(&conn, 10).unwrap().len(), 1);
-
-        let key = Action::Run {
-            cmd: "a".to_string(),
-        }
-        .key();
-        assert!(forget_with(&conn, &key).unwrap(), "a row was there");
-        assert!(get_top_with(&conn, 10).unwrap().is_empty());
-        assert!(
-            !forget_with(&conn, &key).unwrap(),
-            "nothing left to drop, so `forget` answers false"
-        );
-    }
-
-    #[test]
-    fn top_is_sorted_by_count() {
-        let conn = test_conn();
-        record_with(&conn, &item("A", run("a"))).unwrap();
-        record_with(&conn, &item("B", run("b"))).unwrap();
-        record_with(&conn, &item("B", run("b"))).unwrap();
-
-        let items = get_top_with(&conn, 10).unwrap();
-        assert_eq!(items[0].title, "B");
-        assert_eq!(items[1].title, "A");
     }
 
     #[test]
@@ -240,31 +157,6 @@ mod tests {
             })
             .unwrap();
         assert_eq!(count, 3);
-
-        let items = get_top_with(&conn, 10).unwrap();
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].title, "Telegram");
-        // the merged entry keeps the most recently used command
-        assert!(matches!(items[0].on_click, Some(Action::Launch { .. })));
-    }
-
-    #[test]
-    fn forget_removes_merged_siblings() {
-        let conn = test_conn();
-        record_with(&conn, &item("Telegram", run("Telegram --"))).unwrap();
-        let launch = serde_json::json!({
-            "type": "launch",
-            "desktop_id": "org.telegram.desktop.desktop",
-        });
-        record_with(&conn, &item("Telegram", launch.clone())).unwrap();
-
-        // `forget` passes the current command, dropping the whole merged entry
-        let key = Action::Launch {
-            desktop_id: "org.telegram.desktop.desktop".to_string(),
-        }
-        .key();
-        forget_with(&conn, &key).unwrap();
-        assert!(get_top_with(&conn, 10).unwrap().is_empty());
     }
 
     #[test]
@@ -272,7 +164,10 @@ mod tests {
         let conn = test_conn();
         record_with(&conn, &item("", run("a"))).unwrap();
         record_with(&conn, &item("", run("b"))).unwrap();
-        assert_eq!(get_top_with(&conn, 10).unwrap().len(), 2);
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM usage", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 2);
     }
 
     #[test]
@@ -317,12 +212,9 @@ mod tests {
             record_with(&conn, &item(title, command)).unwrap();
         }
 
-        let mut titles: Vec<String> = get_top_with(&conn, 10)
-            .unwrap()
-            .iter()
-            .map(|item| item.title.clone())
-            .collect();
-        titles.sort();
-        assert_eq!(titles, ["Firefox", "New Window", "Prslc/WayRun", "btop"]);
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM usage", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 4, "only the recordable rows landed");
     }
 }

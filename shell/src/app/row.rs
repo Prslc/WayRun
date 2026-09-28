@@ -38,9 +38,9 @@ impl State {
             .actions
             .iter()
             .find(|action| action.default)
-            .and_then(|action| match &action.action {
-                PanelAction::Execute { command } => Some(command.clone()),
-                _ => None,
+            .map(|action| {
+                let PanelAction::Execute { command } = &action.action;
+                command.clone()
             })
             .unwrap_or_else(|| target.clone());
         Some(Launch {
@@ -51,26 +51,6 @@ impl State {
             effective,
             ephemeral: row.ephemeral,
         })
-    }
-
-    /// Drop a row the core confirmed it forgot, looked up by its command key
-    /// because the payload may have been replaced while the reply was in flight.
-    pub fn remove_row(&mut self, key: &str, now: Instant) -> bool {
-        let Some(index) = self.rows.iter().position(|row| {
-            row.on_click
-                .as_ref()
-                .is_some_and(|command| command.key() == key)
-        }) else {
-            return false;
-        };
-
-        self.rows.remove(index);
-        self.cursor.selected = self.cursor.selected.min(self.rows.len().saturating_sub(1));
-        // The panel was about the list that just changed under it.
-        self.menu = None;
-        self.contain();
-        self.retarget_height(now);
-        true
     }
 
     pub fn apply_results(&mut self, items: Vec<ResultItem>, now: Instant) {
@@ -138,57 +118,6 @@ mod tests {
         // pointed at has changed
         assert_eq!(state.cursor.selected, 0);
         assert_eq!(state.rows[1].on_click.as_ref(), Some(&run("firefox")));
-    }
-
-    #[test]
-    fn a_row_is_only_removed_when_the_core_confirms_the_forget() {
-        let mut state = state();
-        let items = vec![
-            item(
-                "Files",
-                None,
-                Some(Action::Launch {
-                    desktop_id: "files.desktop".to_string(),
-                }),
-                None,
-            ),
-            item(
-                "Firefox",
-                None,
-                Some(Action::Launch {
-                    desktop_id: "firefox.desktop".to_string(),
-                }),
-                None,
-            ),
-        ];
-        let now = std::time::Instant::now();
-        state.apply_results(items, now);
-        state.cursor.selected = 1;
-        assert_eq!(
-            state.rows[1].on_click.as_ref(),
-            Some(&Action::Launch {
-                desktop_id: "firefox.desktop".to_string()
-            })
-        );
-
-        // "nothing was dropped" (a provider that implements no forget): the row
-        // stays exactly where it is
-        let other = Action::Launch {
-            desktop_id: "other.desktop".to_string(),
-        }
-        .key();
-        assert!(!state.remove_row(&other, now));
-        assert_eq!(state.rows.len(), 2);
-
-        // a confirmed forget takes that row out and keeps the selection valid
-        let firefox = Action::Launch {
-            desktop_id: "firefox.desktop".to_string(),
-        }
-        .key();
-        assert!(state.remove_row(&firefox, now));
-        assert_eq!(state.rows.len(), 1);
-        assert_eq!(state.rows[0].title, "Files");
-        assert_eq!(state.cursor.selected, 0);
     }
 
     #[test]

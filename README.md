@@ -15,8 +15,8 @@ English | [Chinese](docs/zh_cn/README_CN.md)
 </div>
 
 A Wayland-native application launcher and quick-search tool for Linux. Type to
-search installed apps, files, usage history and inline math, all from a single
-floating overlay.
+search installed apps, files and inline math, all from a single floating
+overlay.
 
 ## Overview
 
@@ -36,7 +36,6 @@ needs no GPU stack and no GUI toolkit.
   desktop itself would, with Flatpak apps and themed icons per row.
 - **Quick search** — files and paths, clipboard history, `$PATH` commands,
   open windows, system commands, and inline math.
-- **Usage history** — most-used items on an empty query.
 - **Action panel** — `Shift+Enter` opens a per-type action menu (reveal a
   file, run a desktop action, copy a link).
 - **Themeable** — follows DankMaterialShell's Material You palette, with

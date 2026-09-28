@@ -3,7 +3,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
 use crate::protocol;
-use crate::wire::{Action, ResultItem};
+use crate::wire::Action;
 
 const PARSE_ERROR: (i64, &str) = (-32700, "Parse error");
 const INVALID_REQUEST: (i64, &str) = (-32600, "Invalid Request");
@@ -72,18 +72,6 @@ fn string_param(params: Option<&Value>, key: &str) -> Result<String, ()> {
     }
 }
 
-/// The `command` method's params are a `Action` object; a nested param is a
-/// `Action` under `key`.
-fn command_param(params: Option<&Value>, key: &str) -> Result<Action, ()> {
-    match params {
-        Some(Value::Object(map)) => map
-            .get(key)
-            .and_then(|value| serde_json::from_value(value.clone()).ok())
-            .ok_or(()),
-        _ => Err(()),
-    }
-}
-
 fn command_payload(params: Option<Value>) -> Result<Action, ()> {
     serde_json::from_value(params.ok_or(())?).map_err(|_| ())
 }
@@ -124,21 +112,12 @@ pub async fn handle(
                         search.request(&text);
                     }
                 }
-                // an empty text is not a search; `top` serves the empty query
+                // an empty text is not a search
                 _ => {
                     if has_id {
                         respond(tx, id, Err(INVALID_PARAMS)).await;
                     }
                 }
-            }
-        }
-        "top" => {
-            if has_id {
-                search.cancel();
-                let items = history_items().await;
-                respond_ok(tx, id, &items).await;
-            } else {
-                search.request_top();
             }
         }
         "dismiss" => {
@@ -208,25 +187,6 @@ pub async fn handle(
                 respond(tx, id, Ok(Value::Null)).await;
             }
         }
-        "forget" => {
-            let Ok(command) = command_param(params, "on_click") else {
-                if has_id {
-                    respond(tx, id, Err(INVALID_PARAMS)).await;
-                }
-                return;
-            };
-            let removed = crate::system::db::usage::forget(&command.key()).unwrap_or(false);
-            // The provider walk waits on external hosts, so it must not hold the
-            // read loop: the reply carries the id and may land out of order.
-            let tx = tx.clone();
-            pending.retain(|handle| !handle.is_finished());
-            pending.push(tokio::spawn(async move {
-                let owned = crate::plugin::forget_row(&command).await;
-                if has_id {
-                    respond(&tx, id, Ok(json!({ "forgotten": removed || owned }))).await;
-                }
-            }));
-        }
         "list_plugins" => {
             let plugins: Vec<Value> = crate::plugin::list_plugins()
                 .await
@@ -264,52 +224,30 @@ pub async fn handle(
     }
 }
 
-/// The empty query: the full, uncapped history so deleting a row converges,
-/// with every row's action panel attached.
-pub async fn history_items() -> Vec<ResultItem> {
-    // The history is uncapped, so this is a read plus a JSON parse per row: real
-    // work, and it runs on the blocking pool rather than a runtime worker.
-    let items = tokio::task::spawn_blocking(|| crate::system::db::usage::get_top(i32::MAX))
-        .await
-        .ok()
-        .and_then(Result::ok)
-        .unwrap_or_default();
-    crate::plugin::decorate(items, true).await
-}
-
 /// The streaming search's one worker: a new request supersedes the pending one,
 /// and a superseded payload is dropped instead of emitted.
 pub struct Search {
-    request: watch::Sender<Option<Request>>,
-}
-
-#[derive(Clone)]
-enum Request {
-    Query(String),
-    Top,
+    request: watch::Sender<Option<String>>,
 }
 
 impl Search {
     /// Start the session's worker; it exits when the returned `Search` drops.
     pub fn spawn(tx: mpsc::Sender<String>) -> Self {
-        let (request, mut rx) = watch::channel(None::<Request>);
+        let (request, mut rx) = watch::channel(None::<String>);
         tokio::spawn(async move {
             while rx.changed().await.is_ok() {
-                let Some(request) = rx.borrow_and_update().clone() else {
+                let Some(query) = rx.borrow_and_update().clone() else {
                     continue;
                 };
-                let results = match request {
-                    // Each query gets its own task: a panicking provider must not
-                    // silence the worker that answers every later search.
-                    Request::Query(query) => {
-                        match tokio::spawn(async move { crate::plugin::dispatch(&query).await })
-                            .await
-                        {
-                            Ok(results) => results,
-                            Err(_) => continue,
-                        }
-                    }
-                    Request::Top => history_items().await,
+                // Each query gets its own task: a panicking provider must not
+                // silence the worker that answers every later search.
+                let results = match tokio::spawn(
+                    async move { crate::plugin::dispatch(&query).await },
+                )
+                .await
+                {
+                    Ok(results) => results,
+                    Err(_) => continue,
                 };
                 // A newer request, or a cancel, supersedes this payload.
                 if !rx.has_changed().unwrap_or(true) {
@@ -322,17 +260,10 @@ impl Search {
 
     /// Queue a query, superseding anything pending.
     pub fn request(&self, query: &str) {
-        self.request
-            .send_replace(Some(Request::Query(query.to_string())));
+        self.request.send_replace(Some(query.to_string()));
     }
 
-    /// Queue the empty-query history, superseding anything pending.
-    pub fn request_top(&self) {
-        self.request.send_replace(Some(Request::Top));
-    }
-
-    /// Drop the pending request, so a payload still in flight is not emitted and
-    /// the history it superseded stays the last one.
+    /// Drop the pending request, so a payload still in flight is not emitted.
     pub fn cancel(&self) {
         self.request.send_replace(None);
     }
@@ -378,28 +309,6 @@ mod tests {
     async fn a_search_notification_queues_the_query_without_a_reply() {
         let msgs = run(r#"{"jsonrpc":"2.0","method":"search","params":{"text":"x"}}"#).await;
         assert!(msgs.is_empty(), "the worker streams the payload later");
-    }
-
-    #[tokio::test]
-    async fn a_top_notification_streams_the_history() {
-        let (tx, mut rx) = mpsc::channel::<String>(32);
-        let search = Search::spawn(tx.clone());
-        let mut pending = Vec::new();
-        handle(
-            r#"{"jsonrpc":"2.0","method":"top"}"#,
-            &tx,
-            &search,
-            &mut pending,
-        )
-        .await;
-
-        let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
-            .await
-            .expect("the worker answers a top request")
-            .expect("the worker keeps the sender open");
-        let v: Value = serde_json::from_str(&msg).unwrap();
-        assert_eq!(v["method"], "results");
-        assert!(v["params"].is_array());
     }
 
     #[tokio::test]
@@ -477,7 +386,7 @@ mod tests {
 
     #[tokio::test]
     async fn search_with_empty_text_returns_32602() {
-        // an absent/empty query is not a search; `top` serves the empty query
+        // an absent/empty query is not a search
         let msgs = run(r#"{"jsonrpc":"2.0","method":"search","id":10}"#).await;
         let v: Value = serde_json::from_str(&msgs[0]).unwrap();
         assert_eq!(v["error"]["code"], -32602);
@@ -513,18 +422,5 @@ mod tests {
             serde_json::from_str(r#"{"title":"x","on_click":{"type":"run","cmd":"ls"}}"#).unwrap();
         assert!(select_payload(Some(p)).unwrap().contains("run"));
         assert!(select_payload(Some(Value::String("run:ls".into()))).is_err());
-    }
-
-    #[test]
-    fn command_param_reads_a_nested_command() {
-        let p: Value = serde_json::from_str(r#"{"on_click":{"type":"run","cmd":"ls"}}"#).unwrap();
-        assert_eq!(
-            command_param(Some(&p), "on_click").unwrap(),
-            Action::Run {
-                cmd: "ls".to_string()
-            }
-        );
-        let bad: Value = serde_json::from_str(r#"{"on_click":"run:ls"}"#).unwrap();
-        assert!(command_param(Some(&bad), "on_click").is_err());
     }
 }

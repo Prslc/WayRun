@@ -15,7 +15,7 @@ use rust_i18n::t;
 /// secondary commands.
 pub async fn dispatch(input: &str) -> Vec<ResultItem> {
     let items = search(input).await;
-    decorate(items, false).await
+    decorate(items).await
 }
 
 async fn search(input: &str) -> Vec<ResultItem> {
