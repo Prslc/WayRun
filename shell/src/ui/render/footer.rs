@@ -46,7 +46,6 @@ struct Hints {
     panel_clear_default: Vec<Hint>,
     row: Vec<Hint>,
     launch: Vec<Hint>,
-    help: Vec<Hint>,
     no_match: Vec<Hint>,
 }
 
@@ -61,14 +60,14 @@ fn hints() -> &'static Hints {
             panel_clear_default: vec![run(), hint("Alt⏎", t!("footer.clear_default")), back()],
             row: vec![enter(t!("footer.launch")), hint("⇧⏎", t!("footer.actions"))],
             launch: vec![enter(t!("footer.launch"))],
-            help: vec![hint("", t!("footer.help"))],
             no_match: vec![hint("", t!("footer.no_results"))],
         }
     })
 }
 
 /// The footer's left hints: the panel's keys when open, the launch keys once
-/// rows exist, a help note for an untouched field, else "No results".
+/// rows exist, a note for a failed search, and nothing for an untouched field
+/// (its placeholder is the whole guide).
 pub(super) fn footer_hints(
     rows: usize,
     query_empty: bool,
@@ -93,7 +92,7 @@ pub(super) fn footer_hints(
             &hints.launch
         }
     } else if query_empty {
-        &hints.help
+        &[]
     } else {
         &hints.no_match
     }
@@ -132,7 +131,6 @@ pub(super) fn draw_footer(
 ) {
     let panel = state.menu.is_some();
     let empty = state.rows.is_empty();
-    let no_match = empty && !state.query.is_empty();
     let has_actions = state
         .rows
         .get(state.cursor.selected)
@@ -196,17 +194,12 @@ pub(super) fn draw_footer(
     let effective = effective_label(state);
     for hint in hints {
         if hint.key.is_empty() {
-            let color = if no_match {
-                state.fade(state.theme.primary, 0.7, now)
-            } else {
-                state.fade_rgba(state.surfaces.footer, now)
-            };
             let shaped = text.shape(&hint.label, label_size, Weight::NORMAL);
             let height = shaped.height / canvas.scale;
             text.draw(
                 pixmap,
                 &shaped,
-                color,
+                state.fade(state.theme.primary, 0.7, now),
                 canvas.px(x),
                 canvas.px(center_y - height / 2.0),
                 None,
@@ -302,11 +295,8 @@ mod tests {
 
     #[test]
     fn the_footer_separates_no_results_from_an_untouched_field() {
-        // an empty field has no query to blame for the empty list
-        assert_eq!(
-            footer_hints(0, true, false, false, false, false),
-            hints().help.as_slice()
-        );
+        // an untouched field stays silent: its placeholder is the guide
+        assert!(footer_hints(0, true, false, false, false, false).is_empty());
         assert_eq!(
             footer_hints(0, false, false, false, false, false),
             hints().no_match.as_slice()

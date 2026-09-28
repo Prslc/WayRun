@@ -55,7 +55,6 @@ footer.run: Run
 footer.default: Default
 footer.clear_default: Clear default
 footer.back: Back
-footer.help: Type ? for help
 footer.no_results: No results
 footer.count_action_one: 1 action
 footer.count_action_many: "%{count} actions"

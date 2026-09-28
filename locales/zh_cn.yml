@@ -54,7 +54,6 @@ footer.run: 运行
 footer.default: 设为默认
 footer.clear_default: 清除默认
 footer.back: 返回
-footer.help: 输入 ? 查看帮助
 footer.no_results: 无匹配结果
 footer.count_action_one: 1 个动作
 footer.count_action_many: "%{count} 个动作"
