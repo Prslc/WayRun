@@ -84,10 +84,6 @@ pub(super) fn build(
         "urlencode",
         lua.create_function(|_, text: String| Ok(urlencoding::encode(&text).into_owned()))?,
     )?;
-    sdk.set(
-        "web_search_engine",
-        lua.create_function(|_, ()| Ok(crate::config::web_search_engine()))?,
-    )?;
     sdk.set("time", lua.create_function(|_, ()| Ok(now_seconds()))?)?;
     let env_active = Rc::clone(&active);
     sdk.set(

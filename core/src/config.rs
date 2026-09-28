@@ -9,7 +9,6 @@ use serde::Deserialize;
 #[serde(default)]
 pub struct Config {
     pub ui: Ui,
-    pub web_search: WebSearch,
     pub font: Font,
     pub icon: Icon,
     pub files: Files,
@@ -22,13 +21,6 @@ pub struct Ui {
     /// follows the session's `$LC_ALL`/`$LC_MESSAGES`/`$LANG`.
     #[serde(deserialize_with = "lenient_blank")]
     pub locale: String,
-}
-
-#[derive(serde::Deserialize, Clone, Debug, PartialEq)]
-#[serde(default)]
-pub struct WebSearch {
-    /// `google` or `duckduckgo`; an unknown value falls back to google.
-    pub engine: String,
 }
 
 #[derive(serde::Deserialize, Clone, Debug, PartialEq)]
@@ -93,14 +85,6 @@ impl Default for Files {
 /// Names the walk never enters unless the user writes their own `exclude` list;
 /// the shipped template shows them commented out.
 const SHIPPED_EXCLUDES: [&str; 3] = ["node_modules", "target", "__pycache__"];
-
-impl Default for WebSearch {
-    fn default() -> Self {
-        Self {
-            engine: "google".to_string(),
-        }
-    }
-}
 
 impl Default for Font {
     fn default() -> Self {
@@ -174,15 +158,6 @@ pub fn reload() -> bool {
     true
 }
 
-pub fn web_search_engine() -> String {
-    cell()
-        .read()
-        .expect("config lock poisoned")
-        .web_search
-        .engine
-        .clone()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,9 +181,6 @@ mod tests {
     fn present_keys_override_field_by_field() {
         let config = parse(
             r#"
-            [web_search]
-            engine = "duckduckgo"
-
             [font]
             family = "Noto Sans"
 
@@ -216,13 +188,8 @@ mod tests {
             theme = "Papirus"
             "#,
         );
-        assert_eq!(config.web_search.engine, "duckduckgo");
         assert_eq!(config.font.family, "Noto Sans");
         assert_eq!(config.icon.theme, "Papirus");
-        assert_eq!(
-            parse("[web_search]\nengine = \"google\"").font,
-            Font::default()
-        );
     }
 
     #[test]

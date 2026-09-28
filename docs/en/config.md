@@ -17,12 +17,6 @@ of the text `.desktop` files contribute: application names, their comments and
 desktop action labels. A value with no table of its own falls back to English,
 and a blank value is the same as leaving the key out.
 
-## `[web_search]`
-
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `engine` | `google` | Suggestion backend: `google` or `duckduckgo`. An unknown value falls back to `google`. |
-
 ## `[font]`
 
 | Key | Default | Meaning |
