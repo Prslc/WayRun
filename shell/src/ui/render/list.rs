@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use tiny_skia::Pixmap;
 
-use crate::app::{Hover, State, effective_action};
+use crate::app::{Hover, State};
 use crate::ui::geom;
 use crate::ui::icons::IconCache;
 use crate::ui::text::TextEngine;
@@ -44,7 +44,7 @@ pub(super) fn draw_list(
             title: &row.title,
             bold: true,
             summary: row.summary.as_deref(),
-            default_marker: effective_action(row).is_some(),
+            default_marker: false,
         };
         draw_row(canvas, pixmap, state, text, icons, now, &body);
     }
