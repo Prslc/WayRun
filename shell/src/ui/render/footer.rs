@@ -66,8 +66,7 @@ fn hints() -> &'static Hints {
 }
 
 /// The footer's left hints: the panel's keys when open, the launch keys once
-/// rows exist, a note for a failed search, and nothing for an untouched field
-/// (its placeholder is the whole guide).
+/// rows exist, a note for a failed search, nothing for an untouched field.
 pub(super) fn footer_hints(
     rows: usize,
     query_empty: bool,
