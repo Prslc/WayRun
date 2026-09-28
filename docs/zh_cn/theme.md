@@ -120,7 +120,6 @@ layerrule = blur, WayRun
 | --- | --- | --- | --- | --- |
 | `radius` | float | `16.0` | ≥ 0 | 卡片圆角；`0` 即直角，内层圆角随之收缩。 |
 | `row_radius` | float | 派生（8.0） | ≥ 0 | 结果行底色圆角。 |
-| `chip_radius` | float | 派生（6.0） | ≥ 0 | 关键词 chip 圆角。 |
 | `hairline_width` | float | `1.0` | 0–8 | 卡片描边宽度。 |
 | `accent_width` | float | `3.0` | 0–40 | 选中行强调条宽度。 |
 | `accent_height` | float | `28.0` | 0–200 | 选中行强调条高度。 |

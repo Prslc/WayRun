@@ -135,7 +135,6 @@ layerrule = blur, WayRun
 | --- | --- | --- | --- | --- |
 | `radius` | float | `16.0` | ≥ 0 | Card corner radius; `0` gives square corners, and the inner radii shrink with it. |
 | `row_radius` | float | derived (8.0) | ≥ 0 | Row tint radius. |
-| `chip_radius` | float | derived (6.0) | ≥ 0 | Keyword chip radius. |
 | `hairline_width` | float | `1.0` | 0–8 | Card border stroke width. |
 | `accent_width` | float | `3.0` | 0–40 | Selected row's accent bar width. |
 | `accent_height` | float | `28.0` | 0–200 | Selected row's accent bar height. |

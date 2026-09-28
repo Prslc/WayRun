@@ -36,11 +36,8 @@ pub(super) fn draw_magnifier(
 /// The field's text area: left edge and width. The field is single-line, so a
 /// wider query scrolls inside the box rather than clipping the caret.
 fn text_area(field: Rect) -> (f32, f32) {
-    (field.x + TEXT_INSET, field.w - TEXT_INSET - RIGHT_MARGIN)
+    (field.x + TEXT_INSET, field.w - TEXT_INSET - 12.0)
 }
-
-/// The right column the query's text keeps clear for the keyword chip.
-const RIGHT_MARGIN: f32 = 40.0;
 
 /// The field's placeholder, translated once: it is drawn every frame while empty.
 fn placeholder_text() -> &'static str {
@@ -199,43 +196,6 @@ pub fn draw_caret(pixmap: &mut Pixmap, state: &State, text: &mut TextEngine, now
     };
     let (caret, _) = caret_box(state, text);
     canvas.fill_rect(pixmap, caret, state.fade(state.theme.fg, 1.0, now));
-}
-
-/// The query's keyword chip, right-aligned in the field's text area.
-pub(super) fn draw_chip(
-    canvas: &Canvas,
-    pixmap: &mut Pixmap,
-    field: Rect,
-    state: &State,
-    text: &mut TextEngine,
-    now: Instant,
-) {
-    let Some(prefix) = state.keyword_prefix() else {
-        return;
-    };
-    let font = state.appearance.font.suggestion() * canvas.scale;
-    let right = field.right() - RIGHT_MARGIN;
-    let shaped = text.shape(prefix, font, Weight::BOLD);
-    let chip = Rect {
-        x: right - shaped.width / canvas.scale - 16.0,
-        y: field.center_y() - 12.0,
-        w: shaped.width / canvas.scale + 16.0,
-        h: 24.0,
-    };
-    canvas.fill_round(
-        pixmap,
-        chip,
-        state.appearance.layout.chip_radius(),
-        state.fade(state.theme.primary, 0.16, now),
-    );
-    text.draw(
-        pixmap,
-        &shaped,
-        state.fade(state.theme.primary, 1.0, now),
-        canvas.px(chip.x) + canvas.px(8.0),
-        canvas.px(chip.center_y()) - shaped.height / 2.0,
-        None,
-    );
 }
 
 #[cfg(test)]

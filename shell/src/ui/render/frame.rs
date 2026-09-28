@@ -101,7 +101,6 @@ pub fn draw(
     let field = Rect::field_at(card.x, card.y, card.w);
     field::draw_magnifier(&canvas, pixmap, field, state, now);
     field::draw_query(&canvas, pixmap, field, state, text, now);
-    field::draw_chip(&canvas, pixmap, field, state, text, now);
     mark("query");
 
     if state.menu.is_some() {

@@ -27,7 +27,6 @@
 [layout]
 # radius = 16.0              # card corner radius; 0 is square corners
 # row_radius = 8.0           # inner radii; each follows the card radius down
-# chip_radius = 6.0
 # hairline_width = 1.0       # card border width
 # accent_width = 3.0         # selected row accent bar width
 # accent_height = 28.0

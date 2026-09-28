@@ -208,7 +208,6 @@ struct BlurFile {
 struct LayoutFile {
     radius: Option<f32>,
     row_radius: Option<f32>,
-    chip_radius: Option<f32>,
     width_ratio: Option<f32>,
     width_min: Option<f32>,
     width_max: Option<f32>,
@@ -270,7 +269,6 @@ impl AppearanceConfig {
             layout.radius.filter(|v| v.is_finite()).map(|v| v.max(0.0))
         );
         self.layout.row_radius = non_negative(layout.row_radius);
-        self.layout.chip_radius = non_negative(layout.chip_radius);
         assign!(
             self.layout.width_ratio,
             layout.width_ratio.filter(|v| v.is_finite() && *v > 0.0)
@@ -557,7 +555,6 @@ mod tests {
             offset_x = 12.0
             offset_y = -8.0
             row_radius = 3.0
-            chip_radius = 2.0
             hairline_width = 2.0
             accent_width = 5.0
             accent_height = 20.0
@@ -567,7 +564,6 @@ mod tests {
         assert_eq!(config.layout.offset_x, 12.0);
         assert_eq!(config.layout.offset_y, -8.0);
         assert_eq!(config.layout.row_radius, Some(3.0));
-        assert_eq!(config.layout.chip_radius, Some(2.0));
         assert_eq!(config.layout.hairline_width, 2.0);
         assert_eq!(config.layout.accent_width, 5.0);
         assert_eq!(config.layout.accent_height, 20.0);

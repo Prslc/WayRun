@@ -27,7 +27,6 @@ pub struct Layout {
     pub radius: f32,
     // Explicit inner radii; `None` keeps the base each one derives from.
     pub row_radius: Option<f32>,
-    pub chip_radius: Option<f32>,
     pub hairline_width: f32,
     pub accent_width: f32,
     pub accent_height: f32,
@@ -46,7 +45,6 @@ impl Default for Layout {
             offset_y: 0.0,
             radius: 16.0,
             row_radius: None,
-            chip_radius: None,
             hairline_width: 1.0,
             accent_width: 3.0,
             accent_height: 28.0,
@@ -270,10 +268,6 @@ impl Layout {
         self.inner(8.0, self.row_radius)
     }
 
-    pub fn chip_radius(&self) -> f32 {
-        self.inner(6.0, self.chip_radius)
-    }
-
     /// The selected row's accent bar, a pill half as wide as it is thick.
     pub fn accent_radius(&self) -> f32 {
         self.accent_width / 2.0
@@ -346,8 +340,6 @@ mod tests {
         // the pristine card drops the gap and the footer band
         assert_eq!(l.empty_h(), 80.0);
         assert_eq!(l.row_radius(), 8.0);
-        assert_eq!(l.row_radius(), 8.0);
-        assert_eq!(l.chip_radius(), 6.0);
         assert_eq!(l.hairline_radius(), 15.5);
     }
 
@@ -389,7 +381,6 @@ mod tests {
             ..Layout::default()
         };
         assert_eq!(l.row_radius(), 7.0);
-        assert_eq!(l.chip_radius(), 6.0);
         assert_eq!(l.hairline_radius(), 7.5);
     }
 

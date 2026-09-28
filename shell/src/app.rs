@@ -148,8 +148,7 @@ impl State {
     }
 
     /// The card's resting height (panel when open, the field alone while the
-    /// query is untouched, else the list). The footer, blur region and reflow all
-    /// read it, so they agree with the drawn frame.
+    /// query is untouched, else the list). The footer, blur region and reflow read it.
     pub fn content_height(&self) -> f32 {
         match &self.menu {
             Some(menu) => self.appearance.layout.panel_h(menu.actions.len()),
