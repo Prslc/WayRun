@@ -143,7 +143,6 @@ impl Hit {
                 }),
                 icon: app.icon_path(),
                 actions: Vec::new(),
-                badge: None,
             },
             Hit::Action(app, action) => ResultItem {
                 title: action.name.clone(),
@@ -154,7 +153,6 @@ impl Hit {
                 }),
                 icon: app.icon_path(),
                 actions: Vec::new(),
-                badge: None,
             },
         }
     }

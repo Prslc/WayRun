@@ -159,10 +159,6 @@ impl FontConfig {
     pub fn icon(&self) -> f32 {
         self.size * 30.0 / 14.0
     }
-
-    pub fn badge(&self) -> f32 {
-        self.size * 15.0 / 14.0
-    }
 }
 
 /// The shell's appearance, loaded from `theme.toml`. Every default equals the
@@ -551,7 +547,6 @@ mod tests {
         assert_eq!(config.font.summary(), 24.0);
         assert_eq!(config.font.suggestion(), 22.0);
         assert_eq!(config.font.icon(), 60.0);
-        assert_eq!(config.font.badge(), 30.0);
 
         // zero and negative keep the default
         assert_eq!(parse("[font]\nsize = -3.0").font.size, 14.0);

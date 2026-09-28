@@ -76,7 +76,6 @@ impl Entry {
             }),
             icon: icon.clone(),
             actions: Vec::new(),
-            badge: None,
         }
     }
 }

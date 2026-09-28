@@ -44,7 +44,6 @@ pub(super) fn draw_list(
             title: &row.title,
             bold: true,
             summary: row.summary.as_deref(),
-            badge: row.badge.as_deref(),
             default_marker: effective_action(row).is_some(),
         };
         draw_row(canvas, pixmap, state, text, icons, now, &body);

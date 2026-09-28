@@ -182,7 +182,6 @@ fn row_for(binary: &Binary, args: &str) -> ResultItem {
         on_click: Some(action_for(desktop_id, terminal, !args.is_empty(), run_cmd)),
         icon: None,
         actions: Vec::new(),
-        badge: None,
     }
 }
 

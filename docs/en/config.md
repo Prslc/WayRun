@@ -40,7 +40,7 @@ applies live.
 | --- | --- | --- |
 | `theme` | *(desktop setting)* | Icon theme for per-row icons. Omitted, the desktop's own icon theme is used. |
 
-The icon theme is optional: the panel, badge and built-in plugin glyphs are
+The icon theme is optional: the panel and built-in plugin glyphs are
 built into the binary, and a row icon no theme resolves falls back to a bundled
 placeholder. `theme` beats the desktop setting. A change takes effect on the next
 launch.

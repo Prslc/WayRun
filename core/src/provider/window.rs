@@ -135,7 +135,6 @@ fn row(compositor: &dyn Compositor, window: &Window) -> ResultItem {
         }),
         icon: window.app_id.as_deref().and_then(app_icon),
         actions: Vec::new(),
-        badge: None,
     }
 }
 

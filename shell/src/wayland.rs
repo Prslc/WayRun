@@ -309,21 +309,16 @@ impl Shell {
                 let font = self.app.appearance.font;
                 let scale = self.app.scale_factor();
                 let icon_size = (font.icon() * scale).round() as u32;
-                let badge_size = (font.badge() * scale).round() as u32;
                 let fg = self.app.theme.fg;
-                let primary = self.app.theme.primary;
                 let layout = self.app.appearance.layout;
                 let first = self.app.cursor.first;
                 // Ask for what the visible window draws; a row scrolled in
                 // later asks when the frame draws it.
                 for row in self.app.rows.iter().skip(first).take(layout.max_rows) {
-                    // Each warm mirrors how the frame draws it: the row icon plain,
-                    // the badge and action glyphs tinted to their theme colours.
+                    // Each warm mirrors how the frame draws it: the row icon
+                    // plain, the action glyphs tinted to their theme colour.
                     if let Some(path) = &row.icon {
                         self.icons.warm(path, icon_size);
-                    }
-                    if let Some(path) = &row.badge {
-                        self.icons.warm_tinted(path, badge_size, primary);
                     }
                     for action in &row.actions {
                         if let Some(path) = &action.icon {

@@ -73,7 +73,7 @@ workspace:
 | a blurred card | `ext-background-effect-v1` (niri) or the compositor's own blur by namespace |
 | per-row icons | a desktop **icon theme** (optional); without one, rows fall back to a bundled placeholder |
 
-The action panel, badge and built-in plugin glyphs are compiled into the binary,
+The action panel and built-in plugin glyphs are compiled into the binary,
 so the launcher is fully usable with no icon theme at all. App and file rows
 follow the desktop's icon theme; see [config.md](docs/en/config.md) for the
 `[icon]` override.

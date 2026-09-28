@@ -128,7 +128,6 @@ fn do_search(expr: &str) -> Vec<ResultItem> {
                 on_click: None,
                 icon: resolve("builtin:calculator"),
                 actions: Vec::new(),
-                badge: None,
             }]
         }
         Err(_) => vec![],

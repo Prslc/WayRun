@@ -250,7 +250,6 @@ pub(super) fn entry_item(path: &Path, is_dir: bool) -> ResultItem {
             mime_icon(path)
         },
         actions: Vec::new(),
-        badge: None,
     }
 }
 
@@ -411,7 +410,6 @@ mod tests {
             on_click,
             icon: None,
             actions: Vec::new(),
-            badge: None,
         }
     }
 

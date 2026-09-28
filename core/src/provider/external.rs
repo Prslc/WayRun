@@ -235,7 +235,6 @@ fn parse_result_items(
     for item in &mut parsed {
         let spec = item.icon.as_deref().unwrap_or("");
         item.icon = resolve_item_icon(spec, identity.clone());
-        item.badge = item.badge.as_deref().and_then(host_icon_spec);
         for action in &mut item.actions {
             action.icon = action.icon.as_deref().and_then(host_icon_spec);
             // The core owns this field; whatever the host sent is ignored.
@@ -358,12 +357,11 @@ mod tests {
     }
 
     #[test]
-    fn a_hosts_action_and_badge_icons_take_paths_and_glyphs() {
+    fn a_hosts_action_icons_take_paths_and_glyphs() {
         let response = serde_json::json!({
             "result": [{
                 "title": "r",
                 "on_click": {"type":"run","cmd":"x"},
-                "badge": "builtin:bookmark",
                 "actions": [
                     {"title":"a", "action":{"type":"run","cmd":"y"}, "icon": "builtin:open"},
                     {"title":"b", "action":{"type":"run","cmd":"z"}, "icon": "/tmp/a.svg"},
@@ -372,7 +370,6 @@ mod tests {
             }]
         });
         let items = parse_result_items(response, "system-search", "").unwrap();
-        assert_eq!(items[0].badge.as_deref(), Some("builtin:bookmark"));
         assert_eq!(
             items[0].actions[0].plugin.as_deref(),
             Some("system-search"),

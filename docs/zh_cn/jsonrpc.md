@@ -117,7 +117,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 ## 结果项
 
 `search` 与主机的 `top` 返回结果项数组。每个结果项是含以下键的对象——前四个**始终都在**，
-缺省的可选字段为 `null`（而非省略）；`actions`/`badge` 仅在设置时出现：
+缺省的可选字段为 `null`（而非省略）；`actions` 仅在设置时出现：
 
 | 键 | 类型 | 含义 |
 |-----|------|------|
@@ -126,7 +126,6 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 | `on_click` | [`Action`](#动作) \| null | Enter 绑定的动作 |
 | `icon` | string \| null | 图标规范：绝对路径或 `builtin:` 字形；见 [图标规范](#图标规范) |
 | `actions` | array | 可选，`Shift+Enter` 二级菜单的次级命令 |
-| `badge` | string \| null | 可选，行右缘的状态图标 |
 
 `actions` 元素为 `{"title": string, "action": Action, "icon"?: string}`，
 `icon` 与结果行的 `icon` 采用同样的规范解析。动作还可能带 `id`（稳定 kind）、
@@ -147,7 +146,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 每个 `icon` 都是绝对路径，或是启动器从内编字形集中绘制的 `builtin:<name>` 字形。
 **外部插件主机**（`plugins.toml` 中带 `command` 的条目）返回它**自己准备**的图标文件，
 或一个已知的 `builtin:` 字形：结果项 `icon` 字段（`search` 结果与 `top` 默认视图皆然）、
-动作的 `icon`、行的 `badge`，以及 `list_plugins` 身份 `icon` 都如此。主题图标名与
+动作的 `icon`，以及 `list_plugins` 身份 `icon` 都如此。主题图标名与
 `papirus:` 规范一律视为无图标。
 
 结果行图标缺失或为符号规范时，回退到插件的身份图标；身份图标也没有时，绘制内置占位图标。

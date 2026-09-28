@@ -75,9 +75,6 @@ pub struct ResultItem {
     /// the core before emitting; a host may supply its own.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<ActionItem>,
-    /// A small status glyph shown at the row's right edge, resolved like `icon`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub badge: Option<String>,
 }
 
 /// The `theme` notification's params. Every role is optional, so a partial

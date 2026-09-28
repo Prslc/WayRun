@@ -133,7 +133,7 @@ identity and its rows.
 
 `search`, and a host's `top`, return an array of items. Every item is an object
 with these keys — the first four are always present (`null` for an absent
-optional field), and `actions`/`badge` only when set:
+optional field), and `actions` only when set:
 
 | Key | Type | Meaning |
 |-----|------|---------|
@@ -142,7 +142,6 @@ optional field), and `actions`/`badge` only when set:
 | `on_click` | [`Action`](#actions) \| null | action bound to Enter |
 | `icon` | string \| null | the icon spec, an absolute path or a `builtin:` glyph; see [Icon specs](#icon-specs) |
 | `actions` | array | optional secondary commands for the `Shift+Enter` action panel |
-| `badge` | string \| null | optional status glyph at the row's right edge |
 
 An `actions` entry is
 `{"title": string, "action": Action, "icon"?: string}`, with the same icon-spec
@@ -168,9 +167,8 @@ Every `icon` is an absolute path, or a `builtin:<name>` glyph the launcher
 draws from its compiled set. **External plugin hosts** (a `plugins.toml` entry
 with `command`) return an icon file the host ships itself, or a known
 `builtin:` glyph — in any result-item `icon` field (`search` results and `top`
-default views alike), in an action's `icon`, in the row's `badge`, and in the
-`list_plugins` identity `icon`. A theme icon name or a `papirus:` spec counts
-as no icon.
+default views alike), in an action's `icon`, and in the `list_plugins` identity
+`icon`. A theme icon name or a `papirus:` spec counts as no icon.
 
 A row icon that is missing or symbolic falls back to the plugin's identity icon;
 when that is missing too, the bundled placeholder is drawn.

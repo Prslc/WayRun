@@ -373,7 +373,6 @@ mod tests {
                 plugin: Some("file-search".into()),
                 default: true,
             }],
-            badge: None,
         };
         state.apply_results(vec![row.clone()], now);
         assert_eq!(effective_label(&state), Some("Open in terminal"));

@@ -71,8 +71,8 @@ enabled = true
 对单次调用无状态，但常驻进程内可以自行缓存。
 
 身份 `icon` 与每条结果的 `icon` 都必须指向主机**自己准备**的图标文件的绝对路径，或使用
-启动器内编的 `builtin:` 字形（`wayrun.icon()` 返回二者之一）；动作的 `icon` 与行的
-`badge` 同理。主题图标名与 `papirus:` 规范一律视为无图标。结果行自身没有图标时，改用
+启动器内编的 `builtin:` 字形（`wayrun.icon()` 返回二者之一）；动作的 `icon` 同理。
+主题图标名与 `papirus:` 规范一律视为无图标。结果行自身没有图标时，改用
 所属插件的身份图标；身份图标也没有时，回退到编入二进制的占位图。
 
 主机可以手写。[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区提供了一套

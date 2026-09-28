@@ -57,7 +57,6 @@ pub(super) struct RowBody<'a> {
     pub title: &'a str,
     pub bold: bool,
     pub summary: Option<&'a str>,
-    pub badge: Option<&'a str>,
     pub default_marker: bool,
 }
 
@@ -102,17 +101,16 @@ pub(super) fn draw_row(
     }
 
     let labels_x = icon_x + font.icon() + 12.0;
-    // The selected row's ↵ hint, the pinned badge and the default marker are
-    // part of the layout: the labels must leave room for all of them.
+    // The selected row's ↵ hint and the default marker are part of the layout:
+    // the labels must leave room for both.
     let enter = body
         .selected
         .then(|| text.shape(ENTER_GLYPH, 13.0 * canvas.scale, Weight::NORMAL));
     let enter_w = enter
         .as_ref()
         .map_or(0.0, |shaped| shaped.width / canvas.scale + 12.0);
-    let badge_w = body.badge.map_or(0.0, |_| font.badge() + 8.0);
     let marker_w = if body.default_marker { 12.0 } else { 0.0 };
-    let labels_max = (rect.right() - 10.0 - labels_x - enter_w - badge_w - marker_w).max(0.0);
+    let labels_max = (rect.right() - 10.0 - labels_x - enter_w - marker_w).max(0.0);
 
     let title = text.fit(
         body.title,
@@ -183,7 +181,7 @@ pub(super) fn draw_row(
     }
 
     if body.default_marker {
-        let cx = rect.right() - 10.0 - enter_w - badge_w - 6.0;
+        let cx = rect.right() - 10.0 - enter_w - 6.0;
         canvas.fill_round(
             pixmap,
             Rect {
@@ -194,21 +192,6 @@ pub(super) fn draw_row(
             },
             3.0,
             state.fade(theme.primary, 1.0, now),
-        );
-    }
-
-    if let Some(path) = body.badge {
-        let x = rect.right() - 10.0 - enter_w - font.badge();
-        icons.draw_tinted(
-            pixmap,
-            path,
-            (
-                canvas.px(x),
-                canvas.px(rect.center_y() - font.badge() / 2.0),
-            ),
-            (font.badge() * canvas.scale).round() as u32,
-            state.entrance(now),
-            theme.primary,
         );
     }
 }

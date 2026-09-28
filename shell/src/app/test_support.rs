@@ -20,7 +20,6 @@ pub(super) fn item(
         on_click,
         icon: icon.map(str::to_string),
         actions: Vec::new(),
-        badge: None,
     }
 }
 
