@@ -82,12 +82,13 @@ when the launcher dismisses, when it sits idle for two minutes, or when a call
 crashes or stalls; the next call starts a new one. The host must be stateless
 per call either way, but it may cache within its process lifetime.
 
-Both the identity `icon` and each result `icon` must be an absolute path to an
-icon file the host ships itself, or a `builtin:` glyph from the launcher's
-compiled set (`wayrun.icon()` returns either); the same holds for an action's
-`icon`. A theme icon name or a `papirus:` spec counts as no icon. A result whose
-own icon is missing falls back to the plugin's identity icon, and the built-in
-placeholder answers when that is missing too.
+Both the identity `icon` and each result `icon` must be an absolute path — a
+file the host ships itself (`wayrun.script_dir()` locates the script's own
+directory) or a theme icon the Lua SDK's `wayrun.icon()` resolved; the same
+holds for an action's `icon`. A `builtin:` glyph, or a theme name or `papirus:`
+spec left unresolved, counts as no icon. A result whose own icon is missing
+falls back to the plugin's identity icon, and the built-in placeholder answers
+when that is missing too.
 
 Hosts can be written by hand. The
 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace ships a

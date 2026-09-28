@@ -78,7 +78,7 @@ pub(super) fn build(
     )?;
     sdk.set(
         "icon",
-        lua.create_function(|_, spec: String| Ok(crate::system::icon::resolve(&spec)))?,
+        lua.create_function(|_, spec: String| Ok(crate::system::icon::resolve_for_host(&spec)))?,
     )?;
     sdk.set(
         "urlencode",

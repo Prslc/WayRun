@@ -13,8 +13,8 @@ use self::theme::{find_pixmap_icon, find_theme_icon};
 pub use self::mime::content_type_icon;
 pub use self::theme::warn_if_no_icon_theme;
 
-/// Distinct specs kept before the map is dropped whole; a host's `wayrun.icon()`
-/// can mint arbitrary keys, and tiny values need a bound, not an eviction order.
+/// Distinct specs kept before the map is dropped whole; an app's icon name can
+/// be any string, and tiny values need a bound, not an eviction order.
 const CACHE_MAX: usize = 4096;
 
 static CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
@@ -52,13 +52,16 @@ pub fn find_icon_spec(name: &str) -> Option<String> {
     resolve(name).or_else(|| resolve(BUILTIN_FALLBACK))
 }
 
-/// An external host's icon: an absolute path to a file the host ships, or a
-/// compiled `builtin:` glyph; the theme's own namespace stays out of reach.
+/// An external host's icon: an absolute path to a file the host ships; the
+/// theme's namespace and the compiled glyphs stay out of reach.
 pub fn host_icon_spec(spec: &str) -> Option<String> {
-    let known_glyph = spec
-        .strip_prefix("builtin:")
-        .is_some_and(|glyph| BUILTIN_GLYPHS.contains(&glyph));
-    (spec.starts_with('/') || known_glyph).then(|| spec.to_string())
+    spec.starts_with('/').then(|| spec.to_string())
+}
+
+/// What the Lua SDK's `wayrun.icon()` binds: an absolute path, a theme icon
+/// name or a `papirus:` spec; a `builtin:` glyph resolves to nil.
+pub fn resolve_for_host(name: &str) -> Option<String> {
+    resolve(name).filter(|spec| !spec.starts_with("builtin:"))
 }
 
 /// The first name in `names` that resolves, without the bundled default: a MIME
@@ -135,19 +138,25 @@ mod tests {
     }
 
     #[test]
-    fn host_icon_spec_takes_files_and_known_glyphs() {
+    fn host_icon_spec_takes_shipped_files_only() {
         assert_eq!(
             host_icon_spec("/usr/share/icons/x.svg").as_deref(),
             Some("/usr/share/icons/x.svg")
         );
-        assert_eq!(
-            host_icon_spec("builtin:power").as_deref(),
-            Some("builtin:power")
-        );
-        // the theme namespace and unknown glyphs stay out of reach for hosts
-        assert!(host_icon_spec("builtin:not-a-glyph").is_none());
+        // the theme namespace, the compiled glyphs and unknown names stay out of reach
+        assert!(host_icon_spec("builtin:power").is_none());
         assert!(host_icon_spec("papirus:folder-open").is_none());
         assert!(host_icon_spec("firefox").is_none());
         assert!(host_icon_spec("").is_none());
+    }
+
+    #[test]
+    fn a_host_resolves_names_but_gets_no_glyphs() {
+        assert_eq!(
+            resolve_for_host("/tmp/icon.svg").as_deref(),
+            Some("/tmp/icon.svg")
+        );
+        assert!(resolve_for_host("builtin:app").is_none());
+        assert!(resolve_for_host("definitely-not-an-icon-xyz").is_none());
     }
 }

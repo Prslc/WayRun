@@ -87,7 +87,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 |-----|------|------|
 | `id` | string（必填） | 插件 id——必须与 `plugins.toml` 条目的 id 一致，否则身份被忽略 |
 | `name` | string | 显示名（空 → 回落为配置的 id） |
-| `icon` | string | 主机自带的图标：绝对路径或 `builtin:` 字形（见 [图标规范](#图标规范)） |
+| `icon` | string | 主机自带的图标的绝对路径（见 [图标规范](#图标规范)） |
 | `description` | string | ready 提示，显示在 `?` 列表与关键词+空格提示中 |
 
 未实现 `list_plugins`（或返回中没有匹配的 `id`）的主机仍可用——搜索照常转发、
@@ -145,9 +145,9 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 ### 图标规范
 
 每个 `icon` 都是绝对路径，或是启动器从内编字形集中绘制的 `builtin:<name>` 字形。
-**外部插件主机**（`plugins.toml` 中带 `command` 的条目）返回它**自己准备**的图标文件，
-或一个已知的 `builtin:` 字形：结果项 `icon` 字段（`search` 结果与 `top` 默认视图皆然）、
-动作的 `icon`，以及 `list_plugins` 身份 `icon` 都如此。主题图标名与
+**外部插件主机**（`plugins.toml` 中带 `command` 的条目）返回它**自己准备**的图标文件：
+结果项 `icon` 字段（`search` 结果与 `top` 默认视图皆然）、动作的 `icon`，以及
+`list_plugins` 身份 `icon` 都如此。`builtin:` 字形、主题图标名与
 `papirus:` 规范一律视为无图标。
 
 结果行图标缺失或为符号规范时，回退到插件的身份图标；身份图标也没有时，绘制内置占位图标。

@@ -5,10 +5,6 @@ use wayrun_core::wire::BUILTIN_FALLBACK;
 pub(super) const GLYPHS: &[(&str, &[u8])] = &[
     ("app", include_bytes!("../../../assets/icons/app.svg")),
     (
-        "bookmark",
-        include_bytes!("../../../assets/icons/bookmark.svg"),
-    ),
-    (
         "calculator",
         include_bytes!("../../../assets/icons/calculator.svg"),
     ),
@@ -16,11 +12,9 @@ pub(super) const GLYPHS: &[(&str, &[u8])] = &[
         "clipboard",
         include_bytes!("../../../assets/icons/clipboard.svg"),
     ),
-    ("clock", include_bytes!("../../../assets/icons/clock.svg")),
     ("copy", include_bytes!("../../../assets/icons/copy.svg")),
     ("file", include_bytes!("../../../assets/icons/file.svg")),
     ("folder", include_bytes!("../../../assets/icons/folder.svg")),
-    ("globe", include_bytes!("../../../assets/icons/globe.svg")),
     ("lock", include_bytes!("../../../assets/icons/lock.svg")),
     ("logout", include_bytes!("../../../assets/icons/logout.svg")),
     ("open", include_bytes!("../../../assets/icons/open.svg")),

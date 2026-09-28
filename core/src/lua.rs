@@ -314,10 +314,7 @@ fn read_plugins(declared: &Table, script: &str) -> mlua::Result<Vec<Plugin>> {
                 if kept.is_none() {
                     warn(
                         script,
-                        &format!(
-                            "plugin {id}: icon {spec:?} is neither an absolute path nor a \
-                             known builtin: glyph; dropped"
-                        ),
+                        &format!("plugin {id}: icon {spec:?} is not an absolute path; dropped"),
                     );
                 }
                 kept
@@ -427,24 +424,34 @@ mod tests {
     }
 
     #[test]
-    fn a_manifest_icon_may_be_a_known_glyph_or_a_file() {
+    fn a_manifest_icon_is_a_shipped_file_or_nothing() {
         let host = host(
             r#"
             return {
-              { id = "glyph", icon = wayrun.icon("builtin:globe"),
-                search = function() return {} end },
               { id = "file", icon = "/tmp/x.svg", search = function() return {} end },
+              { id = "glyph", icon = "builtin:power", search = function() return {} end },
               { id = "theme", icon = "firefox", search = function() return {} end },
-              { id = "unknown", icon = "builtin:not-a-glyph",
+            }
+            "#,
+        );
+        let icons: Vec<_> = host.plugins.iter().map(|p| p.icon.as_deref()).collect();
+        assert_eq!(icons, [Some("/tmp/x.svg"), None, None]);
+    }
+
+    #[test]
+    fn the_sdk_icon_helper_resolves_a_path_but_no_glyph() {
+        let host = host(
+            r#"
+            return {
+              { id = "path", icon = wayrun.icon("/tmp/x.svg"),
+                search = function() return {} end },
+              { id = "glyph", icon = wayrun.icon("builtin:app"),
                 search = function() return {} end },
             }
             "#,
         );
         let icons: Vec<_> = host.plugins.iter().map(|p| p.icon.as_deref()).collect();
-        assert_eq!(
-            icons,
-            [Some("builtin:globe"), Some("/tmp/x.svg"), None, None]
-        );
+        assert_eq!(icons, [Some("/tmp/x.svg"), None]);
     }
 
     #[test]

@@ -101,14 +101,11 @@ pub struct ThemeConfig {
 /// each from its own compiled copy of the SVGs.
 pub const BUILTIN_GLYPHS: &[&str] = &[
     "app",
-    "bookmark",
     "calculator",
     "clipboard",
-    "clock",
     "copy",
     "file",
     "folder",
-    "globe",
     "lock",
     "logout",
     "open",

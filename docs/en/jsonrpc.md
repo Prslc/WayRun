@@ -95,7 +95,7 @@ response `result` is an array of objects:
 |-----|------|---------|
 | `id` | string (required) | plugin id — must match the `plugins.toml` entry id, or the identity is ignored |
 | `name` | string | display name (empty → falls back to the configured id) |
-| `icon` | string | an icon the host ships, or a `builtin:` glyph (see [Icon specs](#icon-specs)) |
+| `icon` | string | an absolute path to an icon the host ships (see [Icon specs](#icon-specs)) |
 | `description` | string | ready hint shown in the `?` list and the keyword+space hint |
 
 A host with no `list_plugins`, or with no id matching its entry, still works —
@@ -166,10 +166,10 @@ exempt: its value is the copied text, not a target to re-open.
 
 Every `icon` is an absolute path, or a `builtin:<name>` glyph the launcher
 draws from its compiled set. **External plugin hosts** (a `plugins.toml` entry
-with `command`) return an icon file the host ships itself, or a known
-`builtin:` glyph — in any result-item `icon` field (`search` results and `top`
-default views alike), in an action's `icon`, and in the `list_plugins` identity
-`icon`. A theme icon name or a `papirus:` spec counts as no icon.
+with `command`) return an icon file the host ships itself — in any result-item
+`icon` field (`search` results and `top` default views alike), in an action's
+`icon`, and in the `list_plugins` identity `icon`. A `builtin:` glyph, a theme
+icon name or a `papirus:` spec counts as no icon.
 
 A row icon that is missing or symbolic falls back to the plugin's identity icon;
 when that is missing too, the bundled placeholder is drawn.

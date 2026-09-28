@@ -11,14 +11,11 @@ tinting them.
 Local name    Source
 ----------    ------
 app           original (WayRun's launcher mark, not from Material Symbols)
-bookmark      bookmark
 calculator    calculate
 clipboard     content-paste
-clock         history
 copy          content-copy
 file          description
 folder        folder
-globe         public
 lock          lock
 logout        logout
 open          open-in-new

@@ -341,23 +341,15 @@ mod tests {
     }
 
     #[test]
-    fn a_theme_or_papirus_spec_is_no_icon_for_a_host() {
+    fn a_theme_glyph_or_papirus_spec_is_no_icon_for_a_host() {
         // the core resolves these for its own rows, but not for an external host
         assert_eq!(resolve_item_icon("papirus:folder-open", None), None);
         assert_eq!(resolve_item_icon("firefox", None), None);
+        assert_eq!(resolve_item_icon("builtin:power", None), None);
     }
 
     #[test]
-    fn a_known_glyph_is_an_icon_for_a_host() {
-        assert_eq!(
-            resolve_item_icon("builtin:power", None),
-            Some("builtin:power".into())
-        );
-        assert_eq!(resolve_item_icon("builtin:not-a-glyph", None), None);
-    }
-
-    #[test]
-    fn a_hosts_action_icons_take_paths_and_glyphs() {
+    fn a_hosts_action_icons_take_paths_only() {
         let response = serde_json::json!({
             "result": [{
                 "title": "r",
@@ -375,7 +367,10 @@ mod tests {
             Some("system-search"),
             "the host owns the actions it attaches"
         );
-        assert_eq!(items[0].actions[0].icon.as_deref(), Some("builtin:open"));
+        assert!(
+            items[0].actions[0].icon.is_none(),
+            "a glyph is no host icon"
+        );
         assert_eq!(items[0].actions[1].icon.as_deref(), Some("/tmp/a.svg"));
         assert!(
             items[0].actions[2].icon.is_none(),
