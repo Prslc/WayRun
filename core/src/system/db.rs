@@ -1,5 +1,4 @@
 pub mod defaults;
-pub mod pins;
 #[cfg(test)]
 mod test_support;
 pub mod usage;
@@ -11,12 +10,12 @@ use std::sync::{LazyLock, Mutex, PoisonError};
 
 use crate::system::fs::get_home;
 
-/// Bump when the wire types change; a mismatch drops the history and pins, since
-/// a row's `on_click` is stored as its serialized command and cannot survive.
+/// Bump when the wire types change; a mismatch drops every table, since a stored
+/// `on_click` is a serialized command and cannot survive.
 const SCHEMA_VERSION: i64 = 2;
 
 /// The schema every open ensures. `usage` is the ranked history behind an empty
-/// query, `pins` the per-query favorites.
+/// query, `defaults` the remembered Enter actions.
 const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS usage (
         key TEXT PRIMARY KEY,
         on_click TEXT,
@@ -25,14 +24,6 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS usage (
         item_json TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS usage_on_click ON usage(on_click, key);
-    CREATE TABLE IF NOT EXISTS pins (
-        id INTEGER PRIMARY KEY,
-        scope TEXT NOT NULL,
-        on_click TEXT NOT NULL,
-        item_json TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        UNIQUE (scope, on_click)
-    );
     CREATE TABLE IF NOT EXISTS defaults (
         scope TEXT PRIMARY KEY,
         action_id TEXT NOT NULL
@@ -59,9 +50,7 @@ fn open_conn() -> Result<Connection> {
 fn prepare(conn: &Connection) -> Result<()> {
     let version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version != SCHEMA_VERSION {
-        conn.execute_batch(
-            "DROP TABLE IF EXISTS usage; DROP TABLE IF EXISTS pins; DROP TABLE IF EXISTS defaults;",
-        )?;
+        conn.execute_batch("DROP TABLE IF EXISTS usage; DROP TABLE IF EXISTS defaults;")?;
     }
     conn.execute_batch(SCHEMA)?;
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -97,8 +86,7 @@ mod tests {
                 item_json TEXT NOT NULL
             );
             INSERT INTO usage (key, on_click, item_json)
-                VALUES ('old', 'run:x', '{\"title\":\"old\"}');
-            CREATE TABLE pins (scope TEXT, on_click TEXT, item_json TEXT);",
+                VALUES ('old', 'run:x', '{\"title\":\"old\"}');",
         )
         .unwrap();
 
@@ -114,8 +102,7 @@ mod tests {
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
-        // the schema is rebuilt with the version: the pins shape, the action-key index
-        assert!(column_exists(&conn, "pins", "id"));
+        // the schema is rebuilt with the version: the action-key index
         assert!(index_exists(&conn, "usage", "usage_on_click"));
     }
 
@@ -136,14 +123,6 @@ mod tests {
                 .unwrap(),
             1
         );
-    }
-
-    fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
-        let mut stmt = conn
-            .prepare(&format!("PRAGMA table_info({table})"))
-            .unwrap();
-        let mut names = stmt.query_map([], |r| r.get::<_, String>(1)).unwrap();
-        names.any(|name| name.is_ok_and(|name| name == column))
     }
 
     fn index_exists(conn: &Connection, table: &str, index: &str) -> bool {

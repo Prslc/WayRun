@@ -34,20 +34,18 @@ pub enum Action {
 }
 
 impl Action {
-    /// Canonical key for usage history and pins; internal, never emitted.
+    /// Canonical key for the usage database; internal, never emitted.
     pub fn key(&self) -> String {
         serde_json::to_string(self).unwrap_or_default()
     }
 }
 
 /// A row's panel command: the row's own `Action`, or a launcher-level
-/// pin/unpin/history operation the shell turns into its own RPC call.
+/// history operation the shell turns into its own RPC call.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PanelAction {
     Execute { command: Action },
-    Pin { scope: String },
-    Unpin { scope: String, on_click: Action },
     Forget { on_click: Action },
 }
 
@@ -90,8 +88,7 @@ pub struct ResultItem {
     /// the core before emitting; a host may supply its own.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<ActionItem>,
-    /// A small status glyph shown at the row's right edge (a pin for a pinned
-    /// row), resolved like `icon`.
+    /// A small status glyph shown at the row's right edge, resolved like `icon`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub badge: Option<String>,
 }
@@ -131,14 +128,12 @@ pub const BUILTIN_GLYPHS: &[&str] = &[
     "lock",
     "logout",
     "open",
-    "pin",
     "power",
     "reboot",
     "remove",
     "reveal",
     "suspend",
     "terminal",
-    "unpin",
     "window",
 ];
 

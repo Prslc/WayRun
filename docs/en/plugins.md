@@ -61,11 +61,10 @@ A result row can carry secondary commands, shown in the `Shift+Enter` panel. The
 differ by result type: `file-search`/`path-search` offer "Open in terminal",
 "Reveal in file manager" and "Copy path", `app-search` lists the entry's
 `[Desktop Action …]` groups, an external host's rows carry whatever `actions` it
-attaches (the workspace's `web.lua` offers "Copy URL"), and every actionable row
-gets the launcher-level pin/unpin — plus "Remove from history" on a row the
-empty-query history sourced. The row's own command leads the panel, an external
-host's own `actions` follow the plugin's, and the launcher-level entries come
-last.
+attaches (the workspace's `web.lua` offers "Copy URL"), and a row the empty-query
+history sourced gets the launcher-level "Remove from history". The row's own
+command leads the panel, an external host's own `actions` follow the plugin's,
+and the launcher's entry comes last.
 
 Give an action an `id` to let the user make it the default `Enter` action with
 `Alt+Enter`; the panel's **Open** entry — the row's own command — takes the

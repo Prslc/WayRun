@@ -15,11 +15,9 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 |--------|--------|--------|
 | `search` | `{"text"}` | array of result items; sent as a notification, streams a `results` notification |
 | `top` | — | most-used items; sent as a notification, streams a `results` notification |
-| `dismiss` | — | `null` (the launcher closed: drops the remembered payload and any search still in flight) |
+| `dismiss` | — | `null` (the launcher closed: drops any search still in flight) |
 | `select` | item object | `null` (records usage; `ephemeral` and `copy` rows are not) |
 | `command` | an [`Action`](#actions) object | `null` (runs one row or panel command) |
-| `pin` | `{"scope","on_click": Action}` | `{"pinned": bool}` (pins a row of that query's payload) |
-| `unpin` | `{"scope","on_click": Action}` | `{"unpinned": bool}` |
 | `default` | `{"scope","action_id"}` | `null` (remembers the default Enter action for a plugin; a null `action_id` clears it) |
 | `forget` | `{"on_click": Action}` | `{"forgotten": bool}` |
 | `list_plugins` | — | plugin metadata; see [schema](#plugin-metadata-list_plugins) |
@@ -79,15 +77,6 @@ plugin removes the todo. The answer says whether anything was really dropped:
 without an error, `false` otherwise. A host without a `forget` method answers
 `-32601`, which counts as "not mine" — the launcher keeps such a row in the list
 rather than claiming a deletion nobody made.
-
-`pin` stores a row under an exact query string (`scope` is the whole trimmed
-input; `""` is the empty-query history), keyed by the command `on_click` names:
-the core looks the row up in the payload it last emitted for that scope, so a
-client never has to echo a row back, and a command that payload no longer holds
-answers `pinned: false`. `unpin` removes a pin by the same key. A later `search`
-whose `text` trims to that same string prepends the pins, most recently pinned
-first, deduplicated against the fresh results, and decorates them with their
-`actions`; a bare keyword does not match.
 
 ## Plugin metadata (`list_plugins`)
 
@@ -168,7 +157,7 @@ and `actions`/`badge` only when set:
 | `icon` | string \| null | the icon spec, an absolute path or a `builtin:` glyph; see [Icon specs](#icon-specs) |
 | `ephemeral` | bool | when true, selecting this row is not recorded in usage history |
 | `actions` | array | optional secondary commands for the `Shift+Enter` action panel |
-| `badge` | string \| null | optional status glyph at the row's right edge (a pin for a pinned row) |
+| `badge` | string \| null | optional status glyph at the row's right edge |
 
 An `actions` entry is `{"title": string, "action": PanelAction, "icon"?: string}`,
 with the same icon-spec resolution as a row's `icon`. An entry may also carry `id`
@@ -182,16 +171,13 @@ A `PanelAction` is one of:
 | `type` | Fields | Meaning |
 |--------|--------|---------|
 | `execute` | `command` | run that [`Action`](#actions) |
-| `pin` | `scope` | pin the row's command to an exact query |
-| `unpin` | `scope`, `on_click` | unpin the command from an exact query |
 | `forget` | `on_click` | drop the command from usage history |
 
-The core attaches the launcher-level pin/unpin to every actionable row, and
-history removal to a row it sourced from the empty-query history that could have
-been recorded (not `ephemeral`, not `copy`); the owning built-in provider adds
-its type-specific ones (a file reveal, copy path or open in terminal, a
-`[Desktop Action …]` group, a copy-link), and a host's own entries are kept
-after them.
+The core attaches history removal to a row it sourced from the empty-query
+history that could have been recorded (not `ephemeral`, not `copy`); the owning
+built-in provider adds its type-specific ones (a file reveal, copy path or open
+in terminal, a `[Desktop Action …]` group, a copy-link), and a host's own
+entries are kept after them.
 
 An item without `on_click` is non-interactive (display only).
 

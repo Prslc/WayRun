@@ -24,7 +24,6 @@ pub(super) const GLYPHS: &[(&str, &[u8])] = &[
     ("lock", include_bytes!("../../../assets/icons/lock.svg")),
     ("logout", include_bytes!("../../../assets/icons/logout.svg")),
     ("open", include_bytes!("../../../assets/icons/open.svg")),
-    ("pin", include_bytes!("../../../assets/icons/pin.svg")),
     ("power", include_bytes!("../../../assets/icons/power.svg")),
     ("reboot", include_bytes!("../../../assets/icons/reboot.svg")),
     ("remove", include_bytes!("../../../assets/icons/remove.svg")),
@@ -37,7 +36,6 @@ pub(super) const GLYPHS: &[(&str, &[u8])] = &[
         "terminal",
         include_bytes!("../../../assets/icons/terminal.svg"),
     ),
-    ("unpin", include_bytes!("../../../assets/icons/unpin.svg")),
     ("window", include_bytes!("../../../assets/icons/window.svg")),
 ];
 

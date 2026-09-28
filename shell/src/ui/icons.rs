@@ -694,9 +694,10 @@ mod tests {
             );
             checked += 1;
         }
-        assert!(
-            checked >= 20,
-            "expected the bundled glyphs, found {checked}"
+        assert_eq!(
+            checked,
+            wayrun_core::wire::BUILTIN_GLYPHS.len(),
+            "the compiled table and the wire vocabulary agree"
         );
     }
 }

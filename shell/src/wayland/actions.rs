@@ -122,8 +122,8 @@ impl Shell {
         self.keep_panel(&action);
     }
 
-    /// One action-panel command: pin/unpin and the default re-search keep the panel on
-    /// the changed entry; the rest launch and dismiss; `forget` drops its row.
+    /// One action-panel command: the default re-search keeps the panel on the
+    /// changed entry; the rest launch and dismiss; `forget` drops its row.
     fn execute_action(&mut self, action: &ActionItem, now: Instant) {
         match &action.action {
             PanelAction::Execute { command } => {
@@ -132,16 +132,6 @@ impl Shell {
                 }
                 backend::command(command);
                 self.schedule_dismiss(now);
-            }
-            PanelAction::Pin { scope } => {
-                if let Some(command) = self.app.menu_parent_command() {
-                    backend::pin(scope, &command);
-                }
-                self.keep_panel(action);
-            }
-            PanelAction::Unpin { scope, on_click } => {
-                backend::unpin(scope, on_click);
-                self.keep_panel(action);
             }
             PanelAction::Forget { on_click } => {
                 backend::forget_row(on_click);

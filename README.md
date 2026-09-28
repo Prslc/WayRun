@@ -37,9 +37,8 @@ needs no GPU stack and no GUI toolkit.
 - **Quick search** — files and paths, clipboard history, `$PATH` commands,
   open windows, system commands, and inline math.
 - **Usage history** — most-used items on an empty query.
-- **Action panel & pins** — `Shift+Enter` opens a per-type action menu (reveal a
-  file, run a desktop action, copy a link); `Pin to top` keeps a result first
-  under its keyword.
+- **Action panel** — `Shift+Enter` opens a per-type action menu (reveal a
+  file, run a desktop action, copy a link).
 - **Themeable** — follows DankMaterialShell's Material You palette, with
   `theme.toml` overrides for colors, blur, layout, typography and motion.
 - **Extensible** — eight built-ins in the binary; everything else is an

@@ -73,27 +73,3 @@ pub(super) fn plugin_action(title: &str, command: Action, id: &str, default: boo
         default,
     }
 }
-
-pub(super) fn pin_entry(uri: &str, unpin: bool) -> ActionItem {
-    let on_click = Action::Open {
-        uri: uri.to_string(),
-    };
-    let action = if unpin {
-        PanelAction::Unpin {
-            scope: "f a".to_string(),
-            on_click,
-        }
-    } else {
-        PanelAction::Pin {
-            scope: "f a".to_string(),
-        }
-    };
-    ActionItem {
-        title: if unpin { "Unpin" } else { "Pin to top" }.to_string(),
-        action,
-        icon: None,
-        id: None,
-        plugin: None,
-        default: false,
-    }
-}

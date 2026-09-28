@@ -1,5 +1,3 @@
-use std::sync::{Mutex, PoisonError};
-
 use super::registry::{Entry, REGISTRY, ensure_loaded};
 use crate::system::icon::find_icon_spec;
 use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
@@ -17,86 +15,19 @@ pub async fn forget_row(command: &Action) -> bool {
     owned
 }
 
-/// The rows of the payload last built for one scope: what a `pin` stores, held
-/// here so no payload has to carry a copy of itself.
-static LAST_ROWS: Mutex<Option<(String, Vec<ResultItem>)>> = Mutex::new(None);
-
-/// The rows a `pin` may name: an ephemeral row is offered no pin entry, so it is
-/// not worth holding.
-fn pinnable(rows: &[ResultItem]) -> Vec<ResultItem> {
-    rows.iter()
-        .filter(|item| !item.ephemeral && item.on_click.is_some())
-        .cloned()
-        .collect()
-}
-
-fn find_row(rows: &[ResultItem], command: &Action) -> Option<ResultItem> {
-    rows.iter()
-        .find(|item| item.on_click.as_ref() == Some(command))
-        .cloned()
-}
-
-/// Hold the payload as the shell sees it, before the launcher's own entries are
-/// attached, so the row a pin stores is the row the user picked.
-fn remember(scope: &str, rows: &[ResultItem]) {
-    let kept = pinnable(rows);
-    let mut held = LAST_ROWS.lock().unwrap_or_else(PoisonError::into_inner);
-    *held = Some((scope.to_string(), kept));
-}
-
-/// Drop the remembered payload: the shell is hidden, so no `pin` can name a row.
-pub fn drop_remembered() {
-    *LAST_ROWS.lock().unwrap_or_else(PoisonError::into_inner) = None;
-}
-
-/// The row `command` names in `scope`'s remembered payload, or `None` when that
-/// payload no longer holds it (a newer search, a restarted core).
-fn remembered_row(scope: &str, command: &Action) -> Option<ResultItem> {
-    let held = LAST_ROWS.lock().unwrap_or_else(PoisonError::into_inner);
-    let (rows_scope, rows) = held.as_ref()?;
-    if rows_scope != scope {
-        return None;
-    }
-    find_row(rows, command)
-}
-
-/// Pin the row `command` names in `scope`'s payload. `false` when the payload no
-/// longer holds it, so the panel comes back unchanged instead of a stale pin.
-pub fn pin_row(scope: &str, command: &Action) -> bool {
-    let Some(row) = remembered_row(scope, command) else {
-        return false;
-    };
-    crate::system::db::pins::pin(scope, &row).is_ok()
-}
-
-/// A pin's scope is the exact trimmed query, so a bare keyword never summons it;
-/// `?` is help, not a result set, so it has no pins.
-pub(super) fn pin_scope(input: &str) -> Option<&str> {
-    let input = input.trim();
-    (input != "?").then_some(input)
-}
-
-/// Prepend the scope's pins and attach each row's actions. A pinned row is
-/// re-emitted from storage, so its fresh copy is dropped as a duplicate.
-pub async fn decorate(items: Vec<ResultItem>, scope: &str, history: bool) -> Vec<ResultItem> {
+/// Attach each row's action panel.
+pub async fn decorate(items: Vec<ResultItem>, history: bool) -> Vec<ResultItem> {
     ensure_loaded().await;
-    // The shared connection stays off the runtime's workers: the pins and the
-    // defaults are two reads, so one hop serves both.
-    let scoped = scope.to_string();
-    let Ok((pins, defaults)) = tokio::task::spawn_blocking(move || {
-        let pins: Vec<ResultItem> = crate::system::db::pins::get_pins(&scoped).unwrap_or_default();
-        (pins, crate::system::db::defaults::all().unwrap_or_default())
-    })
-    .await
-    else {
-        return Vec::new();
-    };
-    let (mut out, pinned) = merge_pins(pins, items);
-    // What the shell can name in a `pin`: the rows as they arrive here.
-    remember(scope, &out);
+    // The shared connection stays off the runtime's workers.
+    let defaults = tokio::task::spawn_blocking(crate::system::db::defaults::all)
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default();
 
     // One registry read for the whole list; `Plugin::actions` is synchronous,
     // so the guard never spans an await.
+    let mut out = items;
     let reg = REGISTRY.read().await;
     for item in &mut out {
         // A row without a click command gets no panel at all, so it needs no
@@ -106,29 +37,9 @@ pub async fn decorate(items: Vec<ResultItem>, scope: &str, history: bool) -> Vec
         } else {
             (None, Vec::new())
         };
-        attach_actions(item, scope, &pinned, history, &defaults, plugin_actions);
+        attach_actions(item, history, &defaults, plugin_actions);
     }
     out
-}
-
-/// Pins lead the results, deduplicated, so each appears once at the top. Returns
-/// the merged list and the pinned commands the action labels use.
-fn merge_pins(
-    mut pins: Vec<ResultItem>,
-    mut results: Vec<ResultItem>,
-) -> (Vec<ResultItem>, Vec<Action>) {
-    let pinned: Vec<Action> = pins
-        .iter()
-        .filter_map(|item| item.on_click.clone())
-        .collect();
-    results.retain(|item| {
-        !item
-            .on_click
-            .as_ref()
-            .is_some_and(|on_click| pinned.iter().any(|pin| pin == on_click))
-    });
-    pins.append(&mut results);
-    (pins, pinned)
 }
 
 /// The first plugin that recognises the row and declares actions for it, with
@@ -143,12 +54,10 @@ fn plugin_actions(entries: &[Entry], item: &ResultItem) -> (Option<String>, Vec<
     (None, Vec::new())
 }
 
-/// The launcher-level entries an actionable row gets (pin/unpin always, history
-/// removal only on a recordable history row), after its type and host actions.
+/// The launcher-level entries an actionable row gets (history removal only on a
+/// recordable history row), after its type and host actions.
 fn attach_actions(
     item: &mut ResultItem,
-    scope: &str,
-    pinned: &[Action],
     history: bool,
     defaults: &std::collections::HashMap<String, String>,
     plugin_actions: (Option<String>, Vec<ActionItem>),
@@ -157,10 +66,6 @@ fn attach_actions(
         return;
     };
     let (owner, mut plugin_actions) = plugin_actions;
-    let is_pinned = pinned.iter().any(|pin| pin == &on_click);
-    if is_pinned {
-        item.badge = find_icon_spec("builtin:pin");
-    }
 
     let mut actions: Vec<ActionItem> = Vec::new();
     actions.append(&mut plugin_actions);
@@ -185,33 +90,8 @@ fn attach_actions(
             .is_some_and(|id| action.id.as_deref() == Some(id.as_str()));
     }
 
-    // Launcher-level entries come last: they are launcher state rather than what
-    // the row offers, and the first slot belongs to the row's own command.
-    if is_pinned {
-        actions.push(ActionItem {
-            title: t!("action.unpin"),
-            action: PanelAction::Unpin {
-                scope: scope.to_string(),
-                on_click: on_click.clone(),
-            },
-            icon: Some("builtin:unpin".to_string()),
-            id: None,
-            plugin: None,
-            default: false,
-        });
-    } else if !item.ephemeral {
-        actions.push(ActionItem {
-            title: t!("action.pin"),
-            action: PanelAction::Pin {
-                scope: scope.to_string(),
-            },
-            icon: Some("builtin:pin".to_string()),
-            id: None,
-            plugin: None,
-            default: false,
-        });
-    }
-
+    // The history entry comes last: it is launcher state rather than what the
+    // row offers, and the first slot belongs to the row's own command.
     if history && crate::system::db::usage::is_recordable(item.ephemeral, Some(&on_click)) {
         actions.push(ActionItem {
             title: t!("action.remove_history"),
@@ -262,77 +142,10 @@ mod tests {
     use crate::plugin::item;
     use std::collections::HashMap;
 
-    #[test]
-    fn a_pin_is_scoped_to_the_exact_query_not_its_keyword() {
-        assert_eq!(pin_scope("b firefox"), Some("b firefox"));
-        assert_eq!(pin_scope("b"), Some("b"));
-        assert_eq!(pin_scope("  firefox  "), Some("firefox"));
-        // the empty query is the history view, which still has its own scope
-        assert_eq!(pin_scope(""), Some(""));
-        // `?` is the help table, never a pin scope
-        assert_eq!(pin_scope("?"), None);
-        assert_eq!(pin_scope("  ?  "), None);
-    }
-
     fn run(cmd: &str) -> Action {
         Action::Run {
             cmd: cmd.to_string(),
         }
-    }
-
-    #[test]
-    fn a_dismissed_payload_holds_no_row() {
-        let command = run("cmd");
-        remember("", &[item("Kept", command.clone())]);
-        assert!(remembered_row("", &command).is_some());
-
-        drop_remembered();
-
-        assert!(remembered_row("", &command).is_none());
-    }
-
-    #[test]
-    fn pinned_rows_lead_and_their_duplicate_is_dropped() {
-        let pins = vec![item("Pinned", run("pinned"))];
-        let results = vec![item("Other", run("other")), item("Pinned", run("pinned"))];
-
-        let (merged, pinned) = merge_pins(pins, results);
-        assert_eq!(merged.len(), 2);
-        assert_eq!(merged[0].title, "Pinned");
-        assert_eq!(merged[1].title, "Other");
-        assert_eq!(pinned, [run("pinned")]);
-    }
-
-    #[test]
-    fn launcher_entries_carry_the_rows_scope() {
-        let mut row = item(
-            "Firefox",
-            Action::Launch {
-                desktop_id: "firefox.desktop".to_string(),
-            },
-        );
-        attach_actions(
-            &mut row,
-            "b",
-            &[],
-            false,
-            &HashMap::new(),
-            (None, Vec::new()),
-        );
-
-        let titles: Vec<&str> = row
-            .actions
-            .iter()
-            .map(|action| action.title.as_str())
-            .collect();
-        assert_eq!(titles, [t!("action.open"), t!("action.pin")]);
-        match &row.actions[1].action {
-            // the entry names the row's scope only: `pin` looks the row up in the
-            // payload the core emitted rather than having it echoed back
-            PanelAction::Pin { scope } => assert_eq!(scope, "b"),
-            other => panic!("expected a pin, got {other:?}"),
-        }
-        assert!(row.badge.is_none(), "an unpinned row carries no badge");
     }
 
     #[test]
@@ -357,10 +170,6 @@ mod tests {
         };
         attach_actions(
             &mut row,
-            "",
-            &[Action::Open {
-                uri: "file:///tmp/a.txt".to_string(),
-            }],
             true,
             &HashMap::new(),
             (Some("file-search".to_string()), vec![reveal]),
@@ -376,44 +185,9 @@ mod tests {
             [
                 t!("action.open"),
                 "Reveal in file manager".to_string(),
-                t!("action.unpin"),
                 t!("action.remove_history")
             ]
         );
-        assert!(row.badge.is_some(), "a pinned row carries the pin badge");
-    }
-
-    /// A `pin` stores the row as the payload carried it: host actions included,
-    /// launcher entries never attached, and an unpinnable row not held at all.
-    #[test]
-    fn a_pins_row_comes_from_the_remembered_payload() {
-        let mut host_row = item(
-            "Firefox",
-            Action::Launch {
-                desktop_id: "firefox.desktop".to_string(),
-            },
-        );
-        host_row.actions = vec![ActionItem {
-            title: "Host".to_string(),
-            action: PanelAction::Execute {
-                command: run("host"),
-            },
-            icon: None,
-            id: None,
-            plugin: None,
-            default: false,
-        }];
-        let mut one_shot = item("window", run("wctl activate 1"));
-        one_shot.ephemeral = true;
-
-        let held = pinnable(&[host_row.clone(), one_shot]);
-        assert_eq!(held.len(), 1, "an ephemeral row is never a pin target");
-
-        let command = host_row.on_click.clone().expect("clickable");
-        let found = find_row(&held, &command).expect("the payload holds the row");
-        assert_eq!(found.actions, host_row.actions, "host actions survive");
-        // a command the payload does not hold is a miss, so the pin is refused
-        assert!(find_row(&held, &run("nope")).is_none());
     }
 
     #[test]
@@ -428,21 +202,10 @@ mod tests {
                 desktop_id: "firefox.desktop".to_string(),
             },
         );
-        attach_actions(
-            &mut history,
-            "",
-            &[],
-            true,
-            &HashMap::new(),
-            (None, Vec::new()),
-        );
+        attach_actions(&mut history, true, &HashMap::new(), (None, Vec::new()));
         assert_eq!(
             titles(&history),
-            [
-                t!("action.open"),
-                t!("action.pin"),
-                t!("action.remove_history")
-            ]
+            [t!("action.open"), t!("action.remove_history")]
         );
 
         // a fresh search result is not sourced from the history view
@@ -452,61 +215,27 @@ mod tests {
                 desktop_id: "firefox.desktop".to_string(),
             },
         );
-        attach_actions(
-            &mut search,
-            "fire",
-            &[],
-            false,
-            &HashMap::new(),
-            (None, Vec::new()),
-        );
-        assert_eq!(titles(&search), [t!("action.open"), t!("action.pin")]);
-
-        // an ephemeral row is neither a durable pin target nor recorded
-        let mut one_shot = item("window", run("wctl activate 1"));
-        one_shot.ephemeral = true;
-        attach_actions(
-            &mut one_shot,
-            "",
-            &[],
-            true,
-            &HashMap::new(),
-            (None, Vec::new()),
-        );
+        attach_actions(&mut search, false, &HashMap::new(), (None, Vec::new()));
         assert!(
-            titles(&one_shot).is_empty(),
+            titles(&search).is_empty(),
             "a row with nothing else to offer has no panel"
         );
 
-        // an existing pin must stay removable even on an ephemeral row
-        let mut pinned = item("clip", run("cliphist decode 1"));
-        pinned.ephemeral = true;
-        attach_actions(
-            &mut pinned,
-            "",
-            &[run("cliphist decode 1")],
-            true,
-            &HashMap::new(),
-            (None, Vec::new()),
-        );
-        assert_eq!(titles(&pinned), [t!("action.open"), t!("action.unpin")]);
+        // an ephemeral row is never recorded, so it has no history entry
+        let mut one_shot = item("window", run("wctl activate 1"));
+        one_shot.ephemeral = true;
+        attach_actions(&mut one_shot, true, &HashMap::new(), (None, Vec::new()));
+        assert!(titles(&one_shot).is_empty());
 
-        // a copy row is not recorded, but it is a stable pin target
+        // a copy row is not recorded either
         let mut copy = item(
             "translated",
             Action::Copy {
                 text: "hi".to_string(),
             },
         );
-        attach_actions(
-            &mut copy,
-            "",
-            &[],
-            true,
-            &HashMap::new(),
-            (None, Vec::new()),
-        );
-        assert_eq!(titles(&copy), [t!("action.open"), t!("action.pin")]);
+        attach_actions(&mut copy, true, &HashMap::new(), (None, Vec::new()));
+        assert!(titles(&copy).is_empty());
     }
 
     #[test]
@@ -529,20 +258,10 @@ mod tests {
         }];
         let mut defaults = HashMap::new();
         defaults.insert("todo".to_string(), "done".to_string());
-        attach_actions(
-            &mut row,
-            "todo x",
-            &[],
-            false,
-            &defaults,
-            (None, Vec::new()),
-        );
+        attach_actions(&mut row, false, &defaults, (None, Vec::new()));
 
         let titles: Vec<&str> = row.actions.iter().map(|a| a.title.as_str()).collect();
-        assert_eq!(
-            titles,
-            [t!("action.open"), "Mark done".to_string(), t!("action.pin")]
-        );
+        assert_eq!(titles, [t!("action.open"), "Mark done".to_string()]);
         let marked = row.actions.iter().find(|a| a.default).unwrap();
         assert_eq!(marked.id.as_deref(), Some("done"));
         assert_eq!(marked.plugin.as_deref(), Some("todo"));
@@ -573,8 +292,6 @@ mod tests {
         defaults.insert("todo".to_string(), "done".to_string());
         attach_actions(
             &mut row,
-            "todo x",
-            &[],
             false,
             &defaults,
             (
@@ -638,8 +355,6 @@ mod tests {
         defaults.insert("file-search".to_string(), "terminal".to_string());
         attach_actions(
             &mut row,
-            "",
-            &[],
             false,
             &defaults,
             (Some("file-search".to_string()), actions),
@@ -675,8 +390,6 @@ mod tests {
         );
         attach_actions(
             &mut row,
-            "",
-            &[],
             false,
             &HashMap::new(),
             (

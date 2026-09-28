@@ -19,17 +19,15 @@ impl Menu {
 }
 
 /// A panel entry, named so a re-emit can find it again: an action id survives
-/// verbatim; the row's command is the id-less `Primary`, and `Pin` relabels as it lands.
+/// verbatim; the row's command is the id-less `Primary`.
 pub(super) enum PanelKey {
     Id(String),
     Primary,
-    Pin,
 }
 
 impl PanelKey {
     fn of(action: &ActionItem) -> Option<Self> {
         match &action.action {
-            PanelAction::Pin { .. } | PanelAction::Unpin { .. } => Some(PanelKey::Pin),
             PanelAction::Execute { .. } => Some(match action.id.clone() {
                 Some(id) => PanelKey::Id(id),
                 None => PanelKey::Primary,
@@ -48,10 +46,6 @@ impl PanelKey {
             PanelKey::Primary => {
                 action.id.is_none() && matches!(action.action, PanelAction::Execute { .. })
             }
-            PanelKey::Pin => matches!(
-                action.action,
-                PanelAction::Pin { .. } | PanelAction::Unpin { .. }
-            ),
         }
     }
 }
@@ -197,13 +191,6 @@ impl State {
         self.rows.get(menu.parent).map(|row| row.title.as_str())
     }
 
-    /// The command of the row the open panel belongs to, which is what a panel
-    /// `pin` names it by.
-    pub fn menu_parent_command(&self) -> Option<Action> {
-        let menu = self.menu.as_ref()?;
-        self.rows.get(menu.parent)?.on_click.clone()
-    }
-
     pub fn menu_up(&mut self) {
         if let Some(menu) = &mut self.menu {
             menu.cursor.up();
@@ -258,9 +245,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::test_support::{
-        file_row, item, pin_entry, plugin_action, run, state, with_actions,
-    };
+    use crate::app::test_support::{file_row, item, plugin_action, run, state, with_actions};
 
     #[test]
     fn the_rows_own_command_clears_a_remembered_default() {
@@ -310,16 +295,6 @@ mod tests {
                 Some("file-search"),
             ),
             terminal,
-            ActionItem {
-                title: "Pin to top".to_string(),
-                action: PanelAction::Pin {
-                    scope: String::new(),
-                },
-                icon: None,
-                id: None,
-                plugin: None,
-                default: false,
-            },
         ];
         state.apply_results(vec![row], std::time::Instant::now());
         assert!(state.open_actions());
@@ -345,8 +320,6 @@ mod tests {
             remember(&mut state, 2),
             Some(("file-search".to_string(), None))
         );
-        // a launcher-level action belongs to no plugin
-        assert_eq!(remember(&mut state, 3), None);
     }
 
     #[test]
@@ -375,58 +348,27 @@ mod tests {
             now,
         );
         state.cursor.selected = 1;
-        state.rows[1].actions = vec![ActionItem {
-            title: "Pin to top".to_string(),
-            action: PanelAction::Pin {
-                scope: String::new(),
+        state.rows[1].actions = vec![plugin_action(
+            "Reveal in file manager",
+            Action::Reveal {
+                uri: "file:///tmp".to_string(),
             },
-            icon: None,
-            id: None,
-            plugin: None,
-            default: false,
-        }];
+            "reveal",
+            false,
+        )];
 
         assert!(state.open_actions());
         assert_eq!(state.menu_parent_title(), Some("Firefox"));
-        assert_eq!(state.selected_action().unwrap().title, "Pin to top");
+        assert_eq!(
+            state.selected_action().unwrap().title,
+            "Reveal in file manager"
+        );
         // the panel is taller than the one-row list it replaced
         assert_eq!(state.content_height(), state.appearance.layout.panel_h(1));
 
         state.close_actions();
         assert!(state.menu.is_none());
         assert_eq!(state.content_height(), state.appearance.layout.content_h(2));
-    }
-
-    #[test]
-    fn a_pinned_row_keeps_its_badge_and_offers_unpin() {
-        let mut state = state();
-        let mut row = item(
-            "YouTube",
-            None,
-            Some(Action::Open {
-                uri: "https://youtube.com/".to_string(),
-            }),
-            None,
-        );
-        row.badge = Some("/usr/share/icons/Papirus/24x24/actions/pin.svg".to_string());
-        row.actions = vec![ActionItem {
-            title: "Unpin".to_string(),
-            action: PanelAction::Unpin {
-                scope: "b youtube".to_string(),
-                on_click: Action::Open {
-                    uri: "https://youtube.com/".to_string(),
-                },
-            },
-            icon: None,
-            id: None,
-            plugin: None,
-            default: false,
-        }];
-        state.apply_results(vec![row], std::time::Instant::now());
-
-        assert!(state.rows[0].badge.is_some());
-        assert!(state.open_actions());
-        assert_eq!(state.selected_action().unwrap().title, "Unpin");
     }
 
     #[test]
@@ -454,7 +396,7 @@ mod tests {
         state.apply_results(
             vec![with_actions(
                 item("a", None, Some(run("a")), None),
-                &["Pin to top"],
+                &["Reveal in file manager"],
             )],
             now,
         );
@@ -614,27 +556,21 @@ mod tests {
     }
 
     #[test]
-    fn a_pin_gesture_keeps_the_panel_on_the_entry_it_flipped() {
-        let now = std::time::Instant::now();
-        let mut state = state();
-        let uri = "file:///tmp/a.txt";
-        state.apply_results(vec![file_row(uri, vec![pin_entry(uri, false)])], now);
-        assert!(state.open_actions());
-
-        let chosen = state.selected_action().unwrap();
-        state.keep_panel(&chosen);
-        state.apply_results(vec![file_row(uri, vec![pin_entry(uri, true)])], now);
-
-        let menu = state.menu.as_ref().expect("the panel comes back");
-        assert_eq!(menu.actions[menu.cursor.selected].title, "Unpin");
-    }
-
-    #[test]
     fn a_panel_gesture_on_a_vanished_row_leaves_the_panel_closed() {
         let now = std::time::Instant::now();
         let mut state = state();
         let uri = "file:///tmp/a.txt";
-        state.apply_results(vec![file_row(uri, vec![pin_entry(uri, false)])], now);
+        let reveal = || {
+            plugin_action(
+                "Reveal in file manager",
+                Action::Reveal {
+                    uri: uri.to_string(),
+                },
+                "reveal",
+                false,
+            )
+        };
+        state.apply_results(vec![file_row(uri, vec![reveal()])], now);
         assert!(state.open_actions());
 
         let chosen = state.selected_action().unwrap();
@@ -648,7 +584,17 @@ mod tests {
         let now = std::time::Instant::now();
         let mut state = state();
         let uri = "file:///tmp/a.txt";
-        let row = file_row(uri, vec![pin_entry(uri, false)]);
+        let reveal = |default| {
+            plugin_action(
+                "Reveal in file manager",
+                Action::Reveal {
+                    uri: uri.to_string(),
+                },
+                "reveal",
+                default,
+            )
+        };
+        let row = file_row(uri, vec![reveal(false)]);
         state.apply_results(vec![row.clone()], now);
         assert!(state.open_actions());
 
@@ -657,7 +603,7 @@ mod tests {
         let chosen = state.selected_action().unwrap();
         state.keep_panel(&chosen);
         state.hidden();
-        state.apply_results(vec![file_row(uri, vec![pin_entry(uri, true)])], now);
+        state.apply_results(vec![file_row(uri, vec![reveal(true)])], now);
         assert!(state.menu.is_none());
 
         state.apply_results(vec![row], now);
@@ -665,7 +611,7 @@ mod tests {
         let chosen = state.selected_action().unwrap();
         state.keep_panel(&chosen);
         state.cancel_panel_resume();
-        state.apply_results(vec![file_row(uri, vec![pin_entry(uri, true)])], now);
+        state.apply_results(vec![file_row(uri, vec![reveal(true)])], now);
         assert!(state.menu.is_none(), "an edit cancels the pending resume");
     }
 

@@ -143,7 +143,6 @@ pub async fn handle(
         }
         "dismiss" => {
             search.cancel();
-            crate::plugin::drop_remembered();
             // A dismissal ends the session, so the warm hosts go with it.
             crate::provider::resident::reap_all();
         }
@@ -178,36 +177,6 @@ pub async fn handle(
                     respond(&tx, id, Ok(Value::Null)).await;
                 }
             }));
-        }
-        "pin" => {
-            let (Ok(scope), Ok(command)) = (
-                string_param(params, "scope"),
-                command_param(params, "on_click"),
-            ) else {
-                if has_id {
-                    respond(tx, id, Err(INVALID_PARAMS)).await;
-                }
-                return;
-            };
-            let pinned = crate::plugin::pin_row(&scope, &command);
-            if has_id {
-                respond(tx, id, Ok(json!({ "pinned": pinned }))).await;
-            }
-        }
-        "unpin" => {
-            let (Ok(scope), Ok(command)) = (
-                string_param(params, "scope"),
-                command_param(params, "on_click"),
-            ) else {
-                if has_id {
-                    respond(tx, id, Err(INVALID_PARAMS)).await;
-                }
-                return;
-            };
-            let unpinned = crate::system::db::pins::unpin(&scope, &command.key()).unwrap_or(false);
-            if has_id {
-                respond(tx, id, Ok(json!({ "unpinned": unpinned }))).await;
-            }
         }
         "default" => {
             // scope is the owning plugin id; a null action_id clears the default
@@ -296,7 +265,7 @@ pub async fn handle(
 }
 
 /// The empty query: the full, uncapped history so deleting a row converges,
-/// with the scope's pins leading and every row's action panel attached.
+/// with every row's action panel attached.
 pub async fn history_items() -> Vec<ResultItem> {
     // The history is uncapped, so this is a read plus a JSON parse per row: real
     // work, and it runs on the blocking pool rather than a runtime worker.
@@ -305,7 +274,7 @@ pub async fn history_items() -> Vec<ResultItem> {
         .ok()
         .and_then(Result::ok)
         .unwrap_or_default();
-    crate::plugin::decorate(items, "", true).await
+    crate::plugin::decorate(items, true).await
 }
 
 /// The streaming search's one worker: a new request supersedes the pending one,

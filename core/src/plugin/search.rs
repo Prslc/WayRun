@@ -2,7 +2,7 @@ use std::cmp::Reverse;
 use std::time::Duration;
 
 use super::Meta;
-use super::actions::{decorate, pin_scope};
+use super::actions::decorate;
 use super::rank::Rank;
 use super::registry::{REGISTRY, ensure_loaded, resolve_pending};
 use crate::provider::SHOW_CAP;
@@ -11,14 +11,11 @@ use crate::wire::Action;
 use crate::wire::ResultItem;
 use rust_i18n::t;
 
-/// Run a search and surface its action panel: the query's pins are prepended
-/// and every row is decorated with its secondary commands.
+/// Run a search and surface its action panel: every row is decorated with its
+/// secondary commands.
 pub async fn dispatch(input: &str) -> Vec<ResultItem> {
     let items = search(input).await;
-    let Some(scope) = pin_scope(input) else {
-        return items;
-    };
-    decorate(items, scope, false).await
+    decorate(items, false).await
 }
 
 async fn search(input: &str) -> Vec<ResultItem> {
@@ -169,7 +166,7 @@ fn fill_icon(fallback: &Option<String>, item: &mut ResultItem) {
 }
 
 /// Rows a provider left iconless take its identity icon, so no placeholder ever
-/// reaches the shell; running before `decorate`, pins and history store the fill.
+/// reaches the shell; running before `decorate`, the history stores the fill.
 fn fill_icons(meta_icon: &str, mut items: Vec<ResultItem>) -> Vec<ResultItem> {
     let fallback = find_icon_spec(meta_icon);
     for item in &mut items {

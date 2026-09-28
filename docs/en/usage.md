@@ -55,25 +55,24 @@ commands that type of result offers. It leads with the row's own command
 (**Open**), then the actions its plugin adds for that type — a file row offers
 "Open in terminal", "Reveal in file manager" and "Copy path", an application row
 lists its `[Desktop Action …]` groups — then anything an external host attached,
-and last the launcher-level
-entries: **Pin to top** / **Unpin**, plus **Remove from history** on a row the
-empty-query history sourced. The dot marks the entry `Enter` runs, so **Open**
-carries it until a default is remembered. A row with no command to offer has no
-panel at all, so the footer hides its actions hint.
+and last **Remove from history** on a row the empty-query history sourced. The
+dot marks the entry `Enter` runs, so **Open** carries it until a default is
+remembered. A row with no command to offer has no panel at all, so the footer
+hides its actions hint.
 
 While the panel is open, `↑`/`↓` (and the wheel) move through it, `Enter` runs
 the highlighted command, and `Esc` or `Shift+Enter` closes it. Typing closes the
-panel and returns to the field. `Pin to top`/`Unpin` and the `Alt+Enter` gesture
-re-send the query with the panel held open on the entry that changed — the pin
-becomes `Unpin` in place and the default dot moves where you put it.
+panel and returns to the field. The `Alt+Enter` gesture re-sends the query with
+the panel held open on the entry that changed, so the default dot moves where
+you put it.
 
 `Alt+Enter` remembers the highlighted command as the default for its plugin, so
 `Enter` on later rows of that plugin runs it; the row's own command stays
 available in the panel as **Open**. The remembered action carries a dot and the
 footer shows the `Alt+Enter` hint; `Alt+Enter` on **Open** — or on the action
 that is already the default — clears it, so `Enter` opens normally again.
-Launcher-level actions (pin/unpin, **Remove from history**) cannot be made
-default; a plugin's own actions, and a host's, can.
+**Remove from history** cannot be made default; a plugin's own actions, and a
+host's, can.
 
 While a default is in effect the row-level footer names the action `Enter` will
 run (`⏎ Open in terminal`) instead of `⏎ Launch`, and the row carries the same
@@ -93,13 +92,3 @@ at all. Application names, their descriptions and desktop action labels come fro
 `.desktop` files and follow the same choice. Setting
 `Environment=LC_ALL=zh_CN.UTF-8` in the unit works too. Either way the locale is
 read at startup, so restart the service after a change.
-
-## Pinned results
-
-**Pin to top** stores the row under the exact query it was pinned on — the whole
-trimmed input, keyword included — and re-emits it at the top the next time that
-same string is searched. Pinning Firefox on `firefox` leads the results for
-`firefox`, but not for `fire` or a bare keyword; pinning on `f report` leads
-only `f report`. The empty query is its own scope, so a pin made there leads the
-history. The original copy in the fresh results is dropped, so a pinned row
-appears once. **Unpin** takes it back out.

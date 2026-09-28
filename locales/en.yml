@@ -37,8 +37,6 @@ command.shutdown: Shutdown
 command.logout: Logout
 
 action.open: Open
-action.pin: Pin to top
-action.unpin: Unpin
 action.remove_history: Remove from history
 action.copy_path: Copy path
 action.reveal: Reveal in file manager

@@ -9,7 +9,7 @@ mod rank;
 mod registry;
 mod search;
 
-pub use actions::{decorate, drop_remembered, forget_row, pin_row};
+pub use actions::{decorate, forget_row};
 /// The ranking vocabulary providers and the dispatcher share.
 pub use rank::{
     Match, Rank, Ranked, classify, classify_bytes_confident, classify_ci, classify_ci_confident,
@@ -71,7 +71,7 @@ pub trait Plugin: Send + Sync {
     }
 
     /// Type-specific commands for one of this plugin's rows, shown in the action
-    /// panel. The core adds pin/unpin and history removal itself.
+    /// panel; the core leads the panel with the row's own command.
     fn actions(&self, _item: &ResultItem) -> Vec<crate::wire::ActionItem> {
         Vec::new()
     }

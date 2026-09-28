@@ -397,7 +397,7 @@ mod tests {
             "result": [{
                 "title": "r",
                 "on_click": {"type":"run","cmd":"x"},
-                "badge": "builtin:pin",
+                "badge": "builtin:bookmark",
                 "actions": [
                     {"title":"a", "action":{"type":"execute","command":{"type":"run","cmd":"y"}}, "icon": "builtin:open"},
                     {"title":"b", "action":{"type":"execute","command":{"type":"run","cmd":"z"}}, "icon": "/tmp/a.svg"},
@@ -406,7 +406,7 @@ mod tests {
             }]
         });
         let items = parse_result_items(response, "system-search", "").unwrap();
-        assert_eq!(items[0].badge.as_deref(), Some("builtin:pin"));
+        assert_eq!(items[0].badge.as_deref(), Some("builtin:bookmark"));
         assert_eq!(
             items[0].actions[0].plugin.as_deref(),
             Some("system-search"),

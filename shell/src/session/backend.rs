@@ -67,8 +67,7 @@ pub fn top() {
     notify("top", Value::Null);
 }
 
-/// The launcher was dismissed: the core drops the payload it remembered for
-/// pins and any search still in flight.
+/// The launcher was dismissed: the core drops any search still in flight.
 pub fn dismiss() {
     notify("dismiss", Value::Null);
 }
@@ -84,17 +83,6 @@ pub fn command(action: &Action) {
         "command",
         serde_json::to_value(action).unwrap_or(Value::Null),
     );
-}
-
-/// Pin the row `on_click` names to one exact query. A notification, not a
-/// request: the caller re-searches and the pin leads the reply.
-pub fn pin(scope: &str, on_click: &Action) {
-    notify("pin", json!({ "scope": scope, "on_click": on_click }));
-}
-
-/// Drop one pin of an exact query.
-pub fn unpin(scope: &str, on_click: &Action) {
-    notify("unpin", json!({ "scope": scope, "on_click": on_click }));
 }
 
 /// Remember (or, with `None`, clear) the default Enter action for a plugin scope.

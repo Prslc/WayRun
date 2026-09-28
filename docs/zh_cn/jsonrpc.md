@@ -13,11 +13,9 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 |------|------|------|
 | `search` | `{"text"}` | 结果项数组；不带 `id` 时改为推送 `results` 通知 |
 | `top` | — | 最常用项；不带 `id` 时同样推送 `results` 通知 |
-| `dismiss` | — | `null`（启动器已关闭：丢弃记住的载荷与仍在飞行中的搜索） |
+| `dismiss` | — | `null`（启动器已关闭：丢弃仍在飞行中的搜索） |
 | `select` | 结果项对象 | `null`（记录使用；`ephemeral` 与 `copy` 行不记录） |
 | `command` | 一个 [`Action`](#动作) 对象 | `null`（执行一条行或面板命令） |
-| `pin` | `{"scope","on_click": Action}` | `{"pinned": bool}`（把该查询载荷中的一行置顶） |
-| `unpin` | `{"scope","on_click": Action}` | `{"unpinned": bool}` |
 | `default` | `{"scope","action_id"}` | `null`（记录某插件的默认 Enter 动作；`action_id` 为 null 则清除） |
 | `forget` | `{"on_click": Action}` | `{"forgotten": bool}` |
 | `list_plugins` | — | 插件元数据；见 [schema](#插件元数据list_plugins) |
@@ -69,12 +67,6 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 比如 todo 插件据此删掉对应待办。返回值表示是否真的删掉了东西：删掉一条历史行、**或**拥有该行的
 主机正常应答，都是 `true`，否则为 `false`。未实现 `forget` 的主机会回 `-32601`，这算
 “不是我的行”——启动器会把这类行留在列表里，不会谎称删除成功。
-
-`pin` 以**精确查询字符串**为范围（`scope` 是整段去掉首尾空白的输入；`""` 表示空查询历史），
-以 `on_click` 指名的命令为键保存：后端在它最近为该 scope 发出的载荷里查找这一行，客户端不必
-把结果项回传；载荷中已没有该命令时返回 `pinned: false`。`unpin` 用同样的键删除。之后某次
-`search` 的 `text` 去掉首尾空白后与该字符串相等时，才会把这些置顶项按最近置顶优先排在最前，
-与新鲜结果去重，并补上各自的 `actions`；只输入关键词不会命中。
 
 ## 插件元数据（`list_plugins`）
 
@@ -145,7 +137,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 | `icon` | string \| null | 图标规范：绝对路径或 `builtin:` 字形；见 [图标规范](#图标规范) |
 | `ephemeral` | bool | 为 true 时，选中该项不记入使用历史 |
 | `actions` | array | 可选，`Shift+Enter` 二级菜单的次级命令 |
-| `badge` | string \| null | 可选，行右缘的状态图标（置顶行为图钉） |
+| `badge` | string \| null | 可选，行右缘的状态图标 |
 
 `actions` 元素为 `{"title": string, "action": PanelAction, "icon"?: string}`，
 `icon` 与结果行的 `icon` 采用同样的规范解析。动作还可能带 `id`（稳定 kind）、
@@ -157,14 +149,11 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 | `type` | 字段 | 含义 |
 |--------|------|------|
 | `execute` | `command` | 执行该 [`Action`](#动作) |
-| `pin` | `scope` | 把该行的命令置顶到某条精确查询 |
-| `unpin` | `scope`、`on_click` | 从某条精确查询取消置顶该命令 |
 | `forget` | `on_click` | 把该命令从使用历史中移除 |
 
-后端会为每个可操作的行补上启动器级别的置顶/取消置顶；对源自空查询历史、且本可记入
-历史（非 `ephemeral`、非 `copy`）的行，再补一条移除历史。产出该行的内置提供者会补上
-类型专属动作（文件定位、复制路径、在终端打开、`[Desktop Action …]`、复制链接），
-外部主机自带的动作排在其后。
+对源自空查询历史、且本可记入历史（非 `ephemeral`、非 `copy`）的行，后端会补一条
+移除历史。产出该行的内置提供者会补上类型专属动作（文件定位、复制路径、在终端打开、
+`[Desktop Action …]`、复制链接），外部主机自带的动作排在其后。
 
 无 `on_click` 的结果项不可交互（仅展示）。
 
