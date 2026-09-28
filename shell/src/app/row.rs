@@ -4,12 +4,9 @@ use wayrun_core::wire::{Action, ResultItem};
 
 use super::State;
 
-/// The selected row's fields that `select` and the launch command need.
+/// The selected row's commands: what usage records and what Enter runs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Launch {
-    pub title: String,
-    pub summary: Option<String>,
-    pub icon: Option<String>,
     /// The row's own command, recorded in usage so the counts stay keyed to it.
     pub target: Action,
     /// The command Enter runs: the remembered default action when the row has
@@ -39,13 +36,7 @@ impl State {
             .find(|action| action.default)
             .map(|action| action.action.clone())
             .unwrap_or_else(|| target.clone());
-        Some(Launch {
-            title: row.title.clone(),
-            summary: row.summary.clone(),
-            icon: row.icon.clone(),
-            target,
-            effective,
-        })
+        Some(Launch { target, effective })
     }
 
     pub fn apply_results(&mut self, items: Vec<ResultItem>, now: Instant) {

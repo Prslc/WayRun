@@ -42,9 +42,9 @@ pub fn dismiss() {
     notify("dismiss", Value::Null);
 }
 
-/// Record the row the user launched.
-pub fn select(item: &Value) {
-    notify("select", item.clone());
+/// Record the click the user made.
+pub fn record(command: &Action) {
+    notify("record", json!({ "on_click": command }));
 }
 
 /// Run one row or panel command.

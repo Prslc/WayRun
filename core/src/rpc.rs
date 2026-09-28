@@ -54,9 +54,13 @@ fn search_text(params: Option<&Value>) -> Result<String, ()> {
     }
 }
 
-fn select_payload(params: Option<Value>) -> Result<String, ()> {
+/// The `record` method's params: a `{"on_click": Action}` object.
+fn record_param(params: Option<&Value>) -> Result<Action, ()> {
     match params {
-        Some(obj @ Value::Object(_)) => Ok(obj.to_string()),
+        Some(Value::Object(map)) => map
+            .get("on_click")
+            .and_then(|value| serde_json::from_value(value.clone()).ok())
+            .ok_or(()),
         _ => Err(()),
     }
 }
@@ -125,14 +129,14 @@ pub async fn handle(
             // A dismissal ends the session, so the warm hosts go with it.
             crate::provider::resident::reap_all();
         }
-        "select" => {
-            let Ok(payload) = select_payload(params.cloned()) else {
+        "record" => {
+            let Ok(command) = record_param(params) else {
                 if has_id {
                     respond(tx, id, Err(INVALID_PARAMS)).await;
                 }
                 return;
             };
-            let _ = crate::system::db::usage::record(&payload);
+            let _ = crate::system::db::usage::record(&command);
             if has_id {
                 respond(tx, id, Ok(Value::Null)).await;
             }
@@ -417,10 +421,15 @@ mod tests {
     }
 
     #[test]
-    fn select_payload_accepts_item_object() {
-        let p: Value =
-            serde_json::from_str(r#"{"title":"x","on_click":{"type":"run","cmd":"ls"}}"#).unwrap();
-        assert!(select_payload(Some(p)).unwrap().contains("run"));
-        assert!(select_payload(Some(Value::String("run:ls".into()))).is_err());
+    fn record_param_reads_a_nested_command() {
+        let p: Value = serde_json::from_str(r#"{"on_click":{"type":"run","cmd":"ls"}}"#).unwrap();
+        assert_eq!(
+            record_param(Some(&p)).unwrap(),
+            Action::Run {
+                cmd: "ls".to_string()
+            }
+        );
+        let bare: Value = serde_json::from_str(r#"{"type":"run","cmd":"ls"}"#).unwrap();
+        assert!(record_param(Some(&bare)).is_err());
     }
 }

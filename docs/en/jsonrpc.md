@@ -15,7 +15,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 |--------|--------|--------|
 | `search` | `{"text"}` | array of result items; sent as a notification, streams a `results` notification |
 | `dismiss` | — | `null` (the launcher closed: drops any search still in flight) |
-| `select` | item object | `null` (records usage; a `copy` row is not) |
+| `record` | `{"on_click": Action}` | `null` (bumps that command's usage count; a `copy` command is not recorded) |
 | `command` | an [`Action`](#actions) object | `null` (runs one row or panel command) |
 | `default` | `{"scope","action_id"}` | `null` (remembers the default Enter action for a plugin; a null `action_id` clears it) |
 | `list_plugins` | — | plugin metadata; see [schema](#plugin-metadata-list_plugins) |
@@ -157,9 +157,9 @@ host's own entries are kept after them.
 
 An item without `on_click` is non-interactive (display only).
 
-Selecting an item records it in the usage counts that rank results. A row whose
-`on_click` is a `copy` action is exempt: its value is the copied text, not a
-target to re-open.
+`record` bumps the launch count of the command `on_click` names; the counts rank
+the default providers' results where they otherwise tie. A `copy` command is
+exempt: its value is the copied text, not a target to re-open.
 
 ### Icon specs
 

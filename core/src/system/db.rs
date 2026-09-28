@@ -12,18 +12,14 @@ use crate::system::fs::get_home;
 
 /// Bump when the wire types change; a mismatch drops every table, since a stored
 /// `on_click` is a serialized command and cannot survive.
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
-/// The schema every open ensures. `usage` is the ranked history behind an empty
-/// query, `defaults` the remembered Enter actions.
+/// The schema every open ensures. `usage` holds the per-action launch counts
+/// that rank results, `defaults` the remembered Enter actions.
 const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS usage (
-        key TEXT PRIMARY KEY,
-        on_click TEXT,
-        count INTEGER NOT NULL DEFAULT 1,
-        last_used_at TEXT NOT NULL DEFAULT (datetime('now')),
-        item_json TEXT NOT NULL
+        on_click TEXT PRIMARY KEY,
+        count INTEGER NOT NULL DEFAULT 1
     );
-    CREATE INDEX IF NOT EXISTS usage_on_click ON usage(on_click, key);
     CREATE TABLE IF NOT EXISTS defaults (
         scope TEXT PRIMARY KEY,
         action_id TEXT NOT NULL
@@ -32,7 +28,7 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS usage (
 fn db_path() -> Result<PathBuf> {
     let dir = get_home()?.join(".local/share/wayrun");
     std::fs::create_dir_all(&dir).context("creating the wayrun data directory")?;
-    Ok(dir.join("usage.db"))
+    Ok(dir.join("state.db"))
 }
 
 fn open_conn() -> Result<Connection> {
@@ -102,19 +98,14 @@ mod tests {
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(version, SCHEMA_VERSION);
-        // the schema is rebuilt with the version: the action-key index
-        assert!(index_exists(&conn, "usage", "usage_on_click"));
     }
 
     #[test]
     fn a_current_schema_keeps_its_rows() {
         let conn = Connection::open_in_memory().unwrap();
         prepare(&conn).unwrap();
-        conn.execute(
-            "INSERT INTO usage (key, on_click, item_json) VALUES ('k', 'c', '{}')",
-            [],
-        )
-        .unwrap();
+        conn.execute("INSERT INTO usage (on_click) VALUES ('run:x')", [])
+            .unwrap();
 
         prepare(&conn).unwrap();
 
@@ -123,13 +114,5 @@ mod tests {
                 .unwrap(),
             1
         );
-    }
-
-    fn index_exists(conn: &Connection, table: &str, index: &str) -> bool {
-        let mut stmt = conn
-            .prepare(&format!("PRAGMA index_list({table})"))
-            .unwrap();
-        let mut names = stmt.query_map([], |r| r.get::<_, String>(1)).unwrap();
-        names.any(|name| name.is_ok_and(|name| name == index))
     }
 }

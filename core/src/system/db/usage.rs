@@ -1,11 +1,12 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rusqlite::Connection;
 
 use super::with_db;
-use crate::wire::{Action, ResultItem};
+use crate::wire::Action;
 
-pub fn record(item_json: &str) -> Result<()> {
-    with_db(|conn| record_with(conn, item_json))
+/// Bump one command's launch count.
+pub fn record(command: &Action) -> Result<()> {
+    with_db(|conn| record_with(conn, command))
 }
 
 /// The usage counts behind the given action keys, for a caller ordering a whole
@@ -45,33 +46,16 @@ fn counts_with(
     Ok(counts)
 }
 
-fn record_with(conn: &Connection, item_json: &str) -> Result<()> {
-    let item: ResultItem = serde_json::from_str(item_json)?;
-    let command = item.on_click.as_ref().context("item missing on_click")?;
+fn record_with(conn: &Connection, command: &Action) -> Result<()> {
     // A copy is no re-launchable target, so it stays out of the counts.
     if matches!(command, Action::Copy { .. }) {
         return Ok(());
     }
-    let key = command.key();
-
-    // Key by display title so alternate launch actions for one app merge
-    // into a single entry; empty titles fall back to the command key.
-    let key_column = if item.title.is_empty() {
-        key.clone()
-    } else {
-        item.title.clone()
-    };
-
     conn.prepare_cached(
-        "INSERT INTO usage (key, on_click, count, last_used_at, item_json)
-         VALUES (?1, ?2, 1, datetime('now'), ?3)
-         ON CONFLICT(key) DO UPDATE SET
-             count = count + 1,
-             last_used_at = datetime('now'),
-             on_click = ?2,
-             item_json = ?3",
+        "INSERT INTO usage (on_click, count) VALUES (?1, 1)
+         ON CONFLICT(on_click) DO UPDATE SET count = count + 1",
     )?
-    .execute(rusqlite::params![key_column, key, item_json])?;
+    .execute([command.key()])?;
     Ok(())
 }
 
@@ -86,42 +70,58 @@ mod tests {
         conn
     }
 
-    fn run(cmd: &str) -> serde_json::Value {
-        serde_json::json!({ "type": "run", "cmd": cmd })
+    fn run(cmd: &str) -> Action {
+        Action::Run {
+            cmd: cmd.to_string(),
+        }
     }
 
-    fn item(title: &str, command: serde_json::Value) -> String {
-        serde_json::json!({ "title": title, "on_click": command }).to_string()
+    fn count(conn: &Connection, command: &Action) -> u32 {
+        conn.query_row(
+            "SELECT count FROM usage WHERE on_click = ?1",
+            [command.key()],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    fn rows(conn: &Connection) -> i64 {
+        conn.query_row("SELECT count(*) FROM usage", [], |r| r.get(0))
+            .unwrap()
     }
 
     #[test]
     fn record_accumulates_a_count() {
         let conn = test_conn();
-        let json = item("Firefox", run("firefox"));
-        record_with(&conn, &json).unwrap();
-        record_with(&conn, &json).unwrap();
+        let firefox = run("firefox");
+        record_with(&conn, &firefox).unwrap();
+        record_with(&conn, &firefox).unwrap();
 
-        let count: i64 = conn
-            .query_row("SELECT count FROM usage WHERE key = 'Firefox'", [], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        assert_eq!(count, 2);
+        assert_eq!(count(&conn, &firefox), 2);
+    }
+
+    #[test]
+    fn each_action_counts_on_its_own() {
+        let conn = test_conn();
+        let launch = Action::Launch {
+            desktop_id: "org.telegram.desktop.desktop".to_string(),
+        };
+        record_with(&conn, &run("Telegram --")).unwrap();
+        record_with(&conn, &launch).unwrap();
+        record_with(&conn, &launch).unwrap();
+
+        assert_eq!(count(&conn, &run("Telegram --")), 1);
+        assert_eq!(count(&conn, &launch), 2);
     }
 
     #[test]
     fn counts_span_more_than_one_batch() {
         let conn = test_conn();
         for i in 0..COUNT_BATCH + 3 {
-            record_with(&conn, &item(&format!("Row {i}"), run(&format!("cmd{i}")))).unwrap();
+            record_with(&conn, &run(&format!("cmd{i}"))).unwrap();
         }
         let keys: Vec<String> = (0..COUNT_BATCH + 3)
-            .map(|i| {
-                Action::Run {
-                    cmd: format!("cmd{i}"),
-                }
-                .key()
-            })
+            .map(|i| run(&format!("cmd{i}")).key())
             .collect();
 
         let counts = counts_with(&conn, &keys).unwrap();
@@ -131,77 +131,17 @@ mod tests {
     }
 
     #[test]
-    fn record_missing_on_click() {
+    fn a_copy_is_not_recorded() {
         let conn = test_conn();
-        assert!(record_with(&conn, r#"{"title":"no key"}"#).is_err());
-    }
+        record_with(
+            &conn,
+            &Action::Copy {
+                text: "clip".to_string(),
+            },
+        )
+        .unwrap();
+        record_with(&conn, &run("btop")).unwrap();
 
-    #[test]
-    fn same_title_actions_merge_into_one_entry() {
-        let conn = test_conn();
-        record_with(&conn, &item("Telegram", run("Telegram --"))).unwrap();
-        let launch = serde_json::json!({
-            "type": "launch",
-            "desktop_id": "org.telegram.desktop.desktop",
-        });
-        record_with(&conn, &item("Telegram", launch.clone())).unwrap();
-        record_with(&conn, &item("Telegram", launch)).unwrap();
-
-        let count: i64 = conn
-            .query_row("SELECT count FROM usage WHERE key = 'Telegram'", [], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        assert_eq!(count, 3);
-    }
-
-    #[test]
-    fn empty_title_falls_back_to_action() {
-        let conn = test_conn();
-        record_with(&conn, &item("", run("a"))).unwrap();
-        record_with(&conn, &item("", run("b"))).unwrap();
-        let rows: i64 = conn
-            .query_row("SELECT count(*) FROM usage", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(rows, 2);
-    }
-
-    #[test]
-    fn a_copy_row_is_not_recorded() {
-        let conn = test_conn();
-        let copy = serde_json::json!({
-            "title": "Clipboard",
-            "on_click": { "type": "copy", "text": "clip" },
-        })
-        .to_string();
-        record_with(&conn, &copy).unwrap();
-
-        // A URL, a launch, a command and a desktop action are all re-launchable targets.
-        for (title, command) in [
-            (
-                "Prslc/WayRun",
-                serde_json::json!({ "type": "open", "uri": "https://github.com/Prslc/WayRun" }),
-            ),
-            (
-                "Firefox",
-                serde_json::json!({ "type": "launch", "desktop_id": "firefox.desktop" }),
-            ),
-            ("btop", serde_json::json!({ "type": "run", "cmd": "btop" })),
-            (
-                "New Window",
-                serde_json::json!({
-                    "type": "desktop_action",
-                    "desktop_id": "firefox.desktop",
-                    "action_id": "new-window",
-                }),
-            ),
-        ] {
-            record_with(&conn, &item(title, command)).unwrap();
-        }
-
-        let rows: i64 = conn
-            .query_row("SELECT count(*) FROM usage", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(rows, 4, "only the recordable rows landed");
+        assert_eq!(rows(&conn), 1, "only the re-launchable command landed");
     }
 }

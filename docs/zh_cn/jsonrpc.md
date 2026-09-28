@@ -13,7 +13,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 |------|------|------|
 | `search` | `{"text"}` | 结果项数组；不带 `id` 时改为推送 `results` 通知 |
 | `dismiss` | — | `null`（启动器已关闭：丢弃仍在飞行中的搜索） |
-| `select` | 结果项对象 | `null`（记录使用；`copy` 行不记录） |
+| `record` | `{"on_click": Action}` | `null`（累加该命令的使用计数；`copy` 命令不记录） |
 | `command` | 一个 [`Action`](#动作) 对象 | `null`（执行一条行或面板命令） |
 | `default` | `{"scope","action_id"}` | `null`（记录某插件的默认 Enter 动作；`action_id` 为 null 则清除） |
 | `list_plugins` | — | 插件元数据；见 [schema](#插件元数据list_plugins) |
@@ -138,8 +138,8 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 
 无 `on_click` 的结果项不可交互（仅展示）。
 
-选中一项会把它记入用于排序的使用计数。`on_click` 为 `copy` 动作的行不记：
-它代表被复制的文本，而不是可再次打开的目标。
+`record` 累加 `on_click` 指名命令的使用计数；计数用于在默认提供者结果同分时排序。
+`copy` 命令不记：它代表被复制的文本，而不是可再次打开的目标。
 
 ### 图标规范
 

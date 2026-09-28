@@ -37,7 +37,7 @@ impl Shell {
             return;
         };
 
-        self.record_row_for(&launch, &launch.effective);
+        self.record_row_for(&launch.target, &launch.effective);
 
         // Enter runs the remembered default action when the row has one, but
         // usage above stays keyed to the row's own command.
@@ -48,17 +48,11 @@ impl Shell {
 
     /// Record a row in the usage counts, unless the command about to run is a
     /// clipboard write: a copy is no re-launchable target.
-    fn record_row_for(&self, launch: &app::Launch, runs: &Action) {
+    fn record_row_for(&self, target: &Action, runs: &Action) {
         if matches!(runs, Action::Copy { .. }) {
             return;
         }
-        let usage = serde_json::json!({
-            "title": launch.title,
-            "summary": launch.summary,
-            "on_click": launch.target,
-            "icon": launch.icon,
-        });
-        backend::select(&usage);
+        backend::record(target);
     }
 
     /// The surface outlives a launch by `EXIT_DELAY_MS`. Without it a non-resident
@@ -126,7 +120,7 @@ impl Shell {
     fn execute_action(&mut self, action: &ActionItem, now: Instant) {
         let command = &action.action;
         if let Some(launch) = self.app.selected_row() {
-            self.record_row_for(&launch, command);
+            self.record_row_for(&launch.target, command);
         }
         backend::command(command);
         self.schedule_dismiss(now);

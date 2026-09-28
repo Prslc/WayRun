@@ -17,7 +17,6 @@ use self::menu::PanelKey;
 
 pub use self::cursor::{Cursor, Hover, whole_rows};
 pub use self::menu::{Menu, effective_action, marked_entry};
-pub use self::row::Launch;
 
 /// Launch dismissals wait this long before the surface goes away.
 pub const EXIT_DELAY_MS: u64 = 150;
