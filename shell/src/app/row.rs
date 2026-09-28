@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use wayrun_core::wire::{Action, PanelAction, ResultItem};
+use wayrun_core::wire::{Action, ResultItem};
 
 use super::State;
 
@@ -37,10 +37,7 @@ impl State {
             .actions
             .iter()
             .find(|action| action.default)
-            .map(|action| {
-                let PanelAction::Execute { command } = &action.action;
-                command.clone()
-            })
+            .map(|action| action.action.clone())
             .unwrap_or_else(|| target.clone());
         Some(Launch {
             title: row.title.clone(),
@@ -140,10 +137,8 @@ mod tests {
         );
         row.actions = vec![ActionItem {
             title: "Open in terminal".to_string(),
-            action: PanelAction::Execute {
-                command: Action::Terminal {
-                    uri: uri.to_string(),
-                },
+            action: Action::Terminal {
+                uri: uri.to_string(),
             },
             icon: None,
             id: Some("terminal".to_string()),

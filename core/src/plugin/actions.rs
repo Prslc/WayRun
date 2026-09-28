@@ -1,6 +1,6 @@
 use super::registry::{Entry, REGISTRY, ensure_loaded};
 use crate::system::icon::find_icon_spec;
-use crate::wire::{ActionItem, PanelAction, ResultItem};
+use crate::wire::{ActionItem, ResultItem};
 use rust_i18n::t;
 
 /// Attach each row's action panel.
@@ -84,9 +84,7 @@ fn attach_actions(
             0,
             ActionItem {
                 title: t!("action.open"),
-                action: PanelAction::Execute {
-                    command: on_click.clone(),
-                },
+                action: on_click.clone(),
                 icon: Some("builtin:open".to_string()),
                 id: None,
                 plugin: owner.clone(),
@@ -131,10 +129,8 @@ mod tests {
         );
         let reveal = ActionItem {
             title: "Reveal in file manager".to_string(),
-            action: PanelAction::Execute {
-                command: Action::Reveal {
-                    uri: "file:///tmp/a.txt".to_string(),
-                },
+            action: Action::Reveal {
+                uri: "file:///tmp/a.txt".to_string(),
             },
             icon: None,
             id: Some("reveal".to_string()),
@@ -183,9 +179,7 @@ mod tests {
         );
         row.actions = vec![ActionItem {
             title: "Mark done".to_string(),
-            action: PanelAction::Execute {
-                command: run("done"),
-            },
+            action: run("done"),
             icon: None,
             id: Some("done".to_string()),
             plugin: Some("todo".to_string()),
@@ -215,9 +209,7 @@ mod tests {
         );
         row.actions = vec![ActionItem {
             title: "Mark done".to_string(),
-            action: PanelAction::Execute {
-                command: run("done"),
-            },
+            action: run("done"),
             icon: None,
             id: Some("done".to_string()),
             plugin: Some("todo".to_string()),
@@ -252,7 +244,7 @@ mod tests {
     fn file_action(title: &str, id: &str, command: Action) -> ActionItem {
         ActionItem {
             title: title.to_string(),
-            action: PanelAction::Execute { command },
+            action: command,
             icon: None,
             id: Some(id.to_string()),
             plugin: None,
@@ -299,10 +291,12 @@ mod tests {
         assert_eq!(open.title, t!("action.open"));
         assert!(open.id.is_none());
         assert_eq!(open.plugin.as_deref(), Some("file-search"));
-        assert!(matches!(
-            &open.action,
-            PanelAction::Execute { command } if command == &Action::Open { uri: uri.to_string() }
-        ));
+        assert_eq!(
+            open.action,
+            Action::Open {
+                uri: uri.to_string()
+            }
+        );
         let default = row.actions.iter().find(|a| a.default).unwrap();
         assert_eq!(default.id.as_deref(), Some("terminal"));
         assert_eq!(default.plugin.as_deref(), Some("file-search"));

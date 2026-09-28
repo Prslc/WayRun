@@ -38,7 +38,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 ## 动作
 
 `Action` 是用 `type` 字段标记的单个对象（`{"type": …}`），描述一行要执行什么。它既作
-`command` 方法的参数，也是结果项 `on_click` 的类型、面板 `execute` 动作所携带的内容：
+`command` 方法的参数，也是结果项 `on_click` 与面板条目 `action` 的类型：
 
 | `type` | 字段 | 效果 |
 |--------|------|------|
@@ -128,16 +128,11 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 | `actions` | array | 可选，`Shift+Enter` 二级菜单的次级命令 |
 | `badge` | string \| null | 可选，行右缘的状态图标 |
 
-`actions` 元素为 `{"title": string, "action": PanelAction, "icon"?: string}`，
+`actions` 元素为 `{"title": string, "action": Action, "icon"?: string}`，
 `icon` 与结果行的 `icon` 采用同样的规范解析。动作还可能带 `id`（稳定 kind）、
 `plugin`（归属插件，用于限定默认动作的作用域）与 `default`（为 true 表示 Enter 执行它）：
 `plugin` 与 `default` 由后端赋值，主机传来的这两个字段会被忽略；外部主机给自己的动作填 `id`
 即可使其可被设为默认。
-`PanelAction` 是以下之一：
-
-| `type` | 字段 | 含义 |
-|--------|------|------|
-| `execute` | `command` | 执行该 [`Action`](#动作) |
 
 产出该行的内置提供者会补上类型专属动作（文件定位、复制路径、在终端打开、
 `[Desktop Action …]`、复制链接），外部主机自带的动作排在其后。

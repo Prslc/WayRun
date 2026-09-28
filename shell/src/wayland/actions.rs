@@ -4,7 +4,7 @@ use calloop::timer::{TimeoutAction, Timer};
 
 use crate::app;
 use crate::session::backend;
-use wayrun_core::wire::{Action, ActionItem, PanelAction};
+use wayrun_core::wire::{Action, ActionItem};
 
 use super::Shell;
 
@@ -124,7 +124,7 @@ impl Shell {
 
     /// One action-panel command: record the row, run the action and dismiss.
     fn execute_action(&mut self, action: &ActionItem, now: Instant) {
-        let PanelAction::Execute { command } = &action.action;
+        let command = &action.action;
         if let Some(launch) = self.app.selected_row() {
             self.record_row_for(&launch, command);
         }

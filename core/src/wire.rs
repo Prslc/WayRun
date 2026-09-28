@@ -40,18 +40,11 @@ impl Action {
     }
 }
 
-/// A row's panel command: the action it executes.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum PanelAction {
-    Execute { command: Action },
-}
-
 /// One action-panel entry of a row, never run by Enter unless it is the default.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ActionItem {
     pub title: String,
-    pub action: PanelAction,
+    pub action: Action,
     /// The icon spec; the core resolves system lookups and passes a `builtin:`
     /// glyph through, like a row's `icon`.
     #[serde(default, skip_serializing_if = "Option::is_none")]

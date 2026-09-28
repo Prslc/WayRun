@@ -12,7 +12,7 @@ use gio::prelude::{AppInfoExt, IconExt};
 use crate::plugin::{Meta, Plugin, Rank, Ranked};
 use crate::system::desktop_action;
 use crate::system::icon::resolve;
-use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
+use crate::wire::{Action, ActionItem, ResultItem};
 use rust_i18n::t;
 
 use self::desktop::meta;
@@ -287,11 +287,9 @@ impl Plugin for AppSearch {
             .iter()
             .map(|action| ActionItem {
                 title: action.name.clone(),
-                action: PanelAction::Execute {
-                    command: Action::DesktopAction {
-                        desktop_id: desktop_id.clone(),
-                        action_id: action.id.clone(),
-                    },
+                action: Action::DesktopAction {
+                    desktop_id: desktop_id.clone(),
+                    action_id: action.id.clone(),
                 },
                 icon: app.icon_path(),
                 // scope the id to the app, so a remembered default stays with it

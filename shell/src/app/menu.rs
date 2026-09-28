@@ -1,4 +1,4 @@
-use wayrun_core::wire::{Action, ActionItem, PanelAction, ResultItem};
+use wayrun_core::wire::{Action, ActionItem, ResultItem};
 
 use super::State;
 use super::cursor::Cursor;
@@ -44,10 +44,7 @@ impl PanelKey {
 /// Whether a panel entry runs the row's own command: the core's leading "Open"
 /// entry and nothing else.
 pub(super) fn is_row_command(row: &ResultItem, action: &ActionItem) -> bool {
-    matches!(
-        &action.action,
-        PanelAction::Execute { command } if row.on_click.as_ref() == Some(command)
-    )
+    row.on_click.as_ref() == Some(&action.action)
 }
 
 /// The entry the panel dots: the remembered default, else the row's own command,
@@ -67,8 +64,7 @@ pub fn marked_entry(row: &ResultItem) -> Option<usize> {
 /// a remembered default changes.
 pub fn effective_action(row: &ResultItem) -> Option<&ActionItem> {
     let action = row.actions.iter().find(|action| action.default)?;
-    let PanelAction::Execute { command } = &action.action;
-    (row.on_click.as_ref() != Some(command)).then_some(action)
+    (row.on_click.as_ref() != Some(&action.action)).then_some(action)
 }
 
 impl State {
@@ -241,7 +237,7 @@ mod tests {
         let execute =
             |title: &str, command: Action, id: Option<&str>, plugin: Option<&str>| ActionItem {
                 title: title.to_string(),
-                action: PanelAction::Execute { command },
+                action: command,
                 icon: None,
                 id: id.map(str::to_string),
                 plugin: plugin.map(str::to_string),
@@ -398,10 +394,8 @@ mod tests {
         let uri = "file:///tmp/a.txt";
         let open = ActionItem {
             title: "Open".to_string(),
-            action: PanelAction::Execute {
-                command: Action::Open {
-                    uri: uri.to_string(),
-                },
+            action: Action::Open {
+                uri: uri.to_string(),
             },
             icon: None,
             id: None,
@@ -459,10 +453,8 @@ mod tests {
         row.actions = vec![
             ActionItem {
                 title: "Open".to_string(),
-                action: PanelAction::Execute {
-                    command: Action::Open {
-                        uri: uri.to_string(),
-                    },
+                action: Action::Open {
+                    uri: uri.to_string(),
                 },
                 icon: None,
                 id: None,
@@ -471,10 +463,8 @@ mod tests {
             },
             ActionItem {
                 title: "Mark done".to_string(),
-                action: PanelAction::Execute {
-                    command: Action::Run {
-                        cmd: "done".to_string(),
-                    },
+                action: Action::Run {
+                    cmd: "done".to_string(),
                 },
                 icon: None,
                 id: Some("done".to_string()),

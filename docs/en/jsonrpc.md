@@ -42,8 +42,8 @@ answers synchronously with the array, for one-shot clients.
 ## Actions
 
 An `Action` is one object tagged by its `type` field (`{"type": …}`), describing
-what a row runs. It is the params of the `command` method and the type of a
-result's `on_click` and of a panel `execute` action:
+what a row runs. It is the params of the `command` method, the type of a result's
+`on_click`, and the type of a panel entry's `action`:
 
 | `type` | Fields | Effect |
 |--------|--------|--------|
@@ -144,18 +144,13 @@ optional field), and `actions`/`badge` only when set:
 | `actions` | array | optional secondary commands for the `Shift+Enter` action panel |
 | `badge` | string \| null | optional status glyph at the row's right edge |
 
-An `actions` entry is `{"title": string, "action": PanelAction, "icon"?: string}`,
-with the same icon-spec resolution as a row's `icon`. An entry may also carry `id`
-(its stable kind), `plugin` (the owner, which scopes a remembered default) and
-`default` (true when Enter runs it). The core assigns `plugin` and `default` — a
-host's values for those are ignored — and a host sets `id` on its own actions to
-make them defaultable.
-
-A `PanelAction` is one of:
-
-| `type` | Fields | Meaning |
-|--------|--------|---------|
-| `execute` | `command` | run that [`Action`](#actions) |
+An `actions` entry is
+`{"title": string, "action": Action, "icon"?: string}`, with the same icon-spec
+resolution as a row's `icon`. An entry may also carry `id` (its stable kind),
+`plugin` (the owner, which scopes a remembered default) and `default` (true when
+Enter runs it). The core assigns `plugin` and `default` — a host's values for
+those are ignored — and a host sets `id` on its own actions to make them
+defaultable.
 
 The owning built-in provider adds its type-specific entries (a file reveal, copy
 path or open in terminal, a `[Desktop Action …]` group, a copy-link), and a

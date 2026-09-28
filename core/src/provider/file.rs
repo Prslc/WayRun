@@ -14,7 +14,7 @@ use crate::plugin::{Meta, Plugin};
 use crate::provider::push_lowered;
 use crate::system::fs::get_home;
 use crate::system::icon::{content_type_icon, resolve};
-use crate::wire::{Action, ActionItem, PanelAction, ResultItem};
+use crate::wire::{Action, ActionItem, ResultItem};
 use rust_i18n::t;
 
 // The index is a detail of this provider, but the registry has to know whether
@@ -92,9 +92,7 @@ fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
     vec![
         ActionItem {
             title: t!("action.terminal"),
-            action: PanelAction::Execute {
-                command: Action::Terminal { uri: uri.clone() },
-            },
+            action: Action::Terminal { uri: uri.clone() },
             icon: Some("builtin:terminal".to_string()),
             id: Some("terminal".to_string()),
             plugin: None,
@@ -102,9 +100,7 @@ fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
         },
         ActionItem {
             title: t!("action.reveal"),
-            action: PanelAction::Execute {
-                command: Action::Reveal { uri: uri.clone() },
-            },
+            action: Action::Reveal { uri: uri.clone() },
             icon: Some("builtin:reveal".to_string()),
             id: Some("reveal".to_string()),
             plugin: None,
@@ -112,10 +108,8 @@ fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
         },
         ActionItem {
             title: t!("action.copy_path"),
-            action: PanelAction::Execute {
-                command: Action::Copy {
-                    text: path.into_owned(),
-                },
+            action: Action::Copy {
+                text: path.into_owned(),
             },
             icon: Some("builtin:copy".to_string()),
             id: Some("copy_path".to_string()),
@@ -455,26 +449,20 @@ mod tests {
         );
         assert_eq!(
             actions[0].action,
-            PanelAction::Execute {
-                command: Action::Terminal {
-                    uri: "file:///tmp/a.txt".to_string()
-                }
+            Action::Terminal {
+                uri: "file:///tmp/a.txt".to_string()
             }
         );
         assert_eq!(
             actions[1].action,
-            PanelAction::Execute {
-                command: Action::Reveal {
-                    uri: "file:///tmp/a.txt".to_string()
-                }
+            Action::Reveal {
+                uri: "file:///tmp/a.txt".to_string()
             }
         );
         assert_eq!(
             actions[2].action,
-            PanelAction::Execute {
-                command: Action::Copy {
-                    text: "/tmp/a.txt".to_string()
-                }
+            Action::Copy {
+                text: "/tmp/a.txt".to_string()
             }
         );
 
@@ -499,10 +487,8 @@ mod tests {
             .expect("the row offers a copy");
         assert_eq!(
             copy.action,
-            PanelAction::Execute {
-                command: Action::Copy {
-                    text: "/tmp/a b".to_string()
-                }
+            Action::Copy {
+                text: "/tmp/a b".to_string()
             }
         );
     }

@@ -365,9 +365,9 @@ mod tests {
                 "on_click": {"type":"run","cmd":"x"},
                 "badge": "builtin:bookmark",
                 "actions": [
-                    {"title":"a", "action":{"type":"execute","command":{"type":"run","cmd":"y"}}, "icon": "builtin:open"},
-                    {"title":"b", "action":{"type":"execute","command":{"type":"run","cmd":"z"}}, "icon": "/tmp/a.svg"},
-                    {"title":"c", "action":{"type":"execute","command":{"type":"run","cmd":"w"}}, "icon": "firefox"},
+                    {"title":"a", "action":{"type":"run","cmd":"y"}, "icon": "builtin:open"},
+                    {"title":"b", "action":{"type":"run","cmd":"z"}, "icon": "/tmp/a.svg"},
+                    {"title":"c", "action":{"type":"run","cmd":"w"}, "icon": "firefox"},
                 ],
             }]
         });

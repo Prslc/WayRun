@@ -298,7 +298,7 @@ pub(super) fn draw_footer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wayrun_core::wire::{Action, ActionItem, PanelAction, ResultItem};
+    use wayrun_core::wire::{Action, ActionItem, ResultItem};
 
     #[test]
     fn the_footer_separates_no_results_from_an_untouched_field() {
@@ -367,9 +367,7 @@ mod tests {
             icon: None,
             actions: vec![ActionItem {
                 title: "Open in terminal".into(),
-                action: PanelAction::Execute {
-                    command: Action::Terminal { uri: uri.into() },
-                },
+                action: Action::Terminal { uri: uri.into() },
                 icon: None,
                 id: Some("terminal".into()),
                 plugin: Some("file-search".into()),
@@ -386,9 +384,7 @@ mod tests {
         state.close_actions();
 
         // a default that runs the row's own command is not a different outcome
-        row.actions[0].action = PanelAction::Execute {
-            command: Action::Open { uri: uri.into() },
-        };
+        row.actions[0].action = Action::Open { uri: uri.into() };
         state.apply_results(vec![row.clone()], now);
         assert_eq!(effective_label(&state), None);
 
