@@ -57,7 +57,8 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 的处理器会在终端中启动。
 
 `search` 的 `params` 是带 `text` 键的对象（非空字符串）。缺省、空 `text`、裸字符串、
-`{"query": …}`、非字符串 `text` 都会返回 `-32602`。
+`{"query": …}`、非字符串 `text` 都会返回 `-32602`。以通知形式发送空 `text` 会取消在途
+搜索，清空的输入框不会再收到旧载荷。
 
 ## 插件元数据（`list_plugins`）
 

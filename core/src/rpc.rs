@@ -116,10 +116,13 @@ pub async fn handle(
                         search.request(&text);
                     }
                 }
-                // an empty text is not a search
+                // an empty text is not a search; a cleared field cancels the
+                // pending one, so its payload cannot land in an empty list
                 _ => {
                     if has_id {
                         respond(tx, id, Err(INVALID_PARAMS)).await;
+                    } else {
+                        search.cancel();
                     }
                 }
             }
@@ -313,6 +316,32 @@ mod tests {
     async fn a_search_notification_queues_the_query_without_a_reply() {
         let msgs = run(r#"{"jsonrpc":"2.0","method":"search","params":{"text":"x"}}"#).await;
         assert!(msgs.is_empty(), "the worker streams the payload later");
+    }
+
+    #[tokio::test]
+    async fn an_empty_search_line_cancels_the_pending_search() {
+        let (tx, mut rx) = mpsc::channel::<String>(32);
+        let search = Search::spawn(tx.clone());
+        let mut pending = Vec::new();
+        handle(
+            r#"{"jsonrpc":"2.0","method":"search","params":{"text":"x"}}"#,
+            &tx,
+            &search,
+            &mut pending,
+        )
+        .await;
+        handle(
+            r#"{"jsonrpc":"2.0","method":"search","params":{"text":""}}"#,
+            &tx,
+            &search,
+            &mut pending,
+        )
+        .await;
+
+        // the cancel lands before the test yields, so the query's payload is
+        // superseded: nothing may stream
+        let outcome = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
+        assert!(outcome.is_err(), "the cancelled payload must not stream");
     }
 
     #[tokio::test]

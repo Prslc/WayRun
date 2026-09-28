@@ -22,9 +22,8 @@ impl Shell {
             // No query is no result set: the list clears in place.
             self.app.apply_results(Vec::new(), Instant::now());
             self.redraw();
-        } else {
-            backend::search(&self.app.query);
         }
+        backend::search(&self.app.query);
     }
 
     /// Usage recording first, then exactly one command line to the core.

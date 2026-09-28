@@ -64,7 +64,8 @@ survive; a `Terminal=true` handler is started inside a terminal.
 
 `search` takes an object with a `text` key (a non-empty string). An absent
 `params`, an empty `text`, a bare string, `{"query": …}`, or a non-string `text`
-returns `-32602`.
+returns `-32602`. A notification with an empty `text` cancels any pending
+search, so a cleared field never receives a stale payload.
 
 ## Plugin metadata (`list_plugins`)
 
