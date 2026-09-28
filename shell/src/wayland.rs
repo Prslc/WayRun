@@ -304,6 +304,11 @@ impl Shell {
                 if self.layer.is_none() {
                     return;
                 }
+                // Nor may one land in an empty field: a search superseded by a
+                // clear can have been emitted before the cancel reached the core.
+                if self.app.query.is_empty() {
+                    return;
+                }
                 let now = Instant::now();
                 self.app.apply_results(items, now);
                 let font = self.app.appearance.font;
