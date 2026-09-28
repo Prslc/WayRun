@@ -159,17 +159,16 @@ mod tests {
     }
 
     #[test]
-    fn present_nulls_and_the_ephemeral_flag_do_not_reject_the_payload() {
-        // Help rows carry `on_click: null`, and usage opt-out rows carry
-        // `ephemeral: true`; a present `null` must not fail the whole `Vec`.
-        let line = r#"{"jsonrpc":"2.0","method":"results","params":[{"title":"Calculator","summary":"* (default)","on_click":null,"icon":null,"ephemeral":true}]}"#;
+    fn present_nulls_do_not_reject_the_payload() {
+        // Help rows carry `on_click: null`; a present `null` must not fail the
+        // whole `Vec`.
+        let line = r#"{"jsonrpc":"2.0","method":"results","params":[{"title":"Calculator","summary":"* (default)","on_click":null,"icon":null}]}"#;
         match parse(line).unwrap() {
             BackendEvent::Results(items) => {
                 assert_eq!(items.len(), 1);
                 assert_eq!(items[0].title, "Calculator");
                 assert_eq!(items[0].on_click, None);
                 assert_eq!(items[0].icon, None);
-                assert!(items[0].ephemeral);
             }
             other => panic!("expected results, got {other:?}"),
         }

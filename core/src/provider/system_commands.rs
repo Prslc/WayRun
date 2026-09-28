@@ -116,7 +116,6 @@ fn do_search(input: &str) -> Vec<(Rank, ResultItem)> {
                         cmd: (*cmd).to_string(),
                     }),
                     icon: find_icon_spec(icon),
-                    ephemeral: true,
                     actions: Vec::new(),
                     badge: None,
                 },

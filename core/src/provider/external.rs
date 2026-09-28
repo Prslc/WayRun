@@ -386,19 +386,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn an_ephemeral_host_row_stays_ephemeral() {
-        let response = serde_json::json!({
-            "result": [
-                { "title": "repo", "on_click": {"type":"open","uri":"https://github.com/x/y"}, "ephemeral": true },
-                { "title": "Firefox", "on_click": {"type":"launch","desktop_id":"firefox.desktop"} },
-            ]
-        });
-        let items = parse_result_items(response, "system-search", "").unwrap();
-        assert!(items[0].ephemeral, "the host's flag is carried through");
-        assert!(!items[1].ephemeral, "an absent flag means record it");
-    }
-
     /// The golden corpus the Python SDK pins on its side (WayRun-Plugin,
     /// `tests/test_golden.py`); both ends accept the same shapes.
     #[test]
@@ -468,7 +455,10 @@ mod tests {
                 uri: "file:///home/u".to_string()
             })
         );
-        assert!(items[8].ephemeral);
+        assert_eq!(
+            items[8].title, "ephemeral",
+            "a stale field an old host sends is ignored"
+        );
         assert!(items[9].summary.is_none() && items[9].on_click.is_none());
         assert_eq!(
             items[9].icon.as_deref(),

@@ -365,7 +365,6 @@ mod tests {
             summary: None,
             on_click: Some(Action::Open { uri: uri.into() }),
             icon: None,
-            ephemeral: false,
             actions: vec![ActionItem {
                 title: "Open in terminal".into(),
                 action: PanelAction::Execute {

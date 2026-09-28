@@ -15,7 +15,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 |--------|--------|--------|
 | `search` | `{"text"}` | array of result items; sent as a notification, streams a `results` notification |
 | `dismiss` | — | `null` (the launcher closed: drops any search still in flight) |
-| `select` | item object | `null` (records usage; `ephemeral` and `copy` rows are not) |
+| `select` | item object | `null` (records usage; a `copy` row is not) |
 | `command` | an [`Action`](#actions) object | `null` (runs one row or panel command) |
 | `default` | `{"scope","action_id"}` | `null` (remembers the default Enter action for a plugin; a null `action_id` clears it) |
 | `list_plugins` | — | plugin metadata; see [schema](#plugin-metadata-list_plugins) |
@@ -132,7 +132,7 @@ identity and its rows.
 ## Result items
 
 `search`, and a host's `top`, return an array of items. Every item is an object
-with these keys — the first five are always present (`null` for an absent
+with these keys — the first four are always present (`null` for an absent
 optional field), and `actions`/`badge` only when set:
 
 | Key | Type | Meaning |
@@ -141,7 +141,6 @@ optional field), and `actions`/`badge` only when set:
 | `summary` | string \| null | secondary line (command, path, description, …) |
 | `on_click` | [`Action`](#actions) \| null | action bound to Enter |
 | `icon` | string \| null | the icon spec, an absolute path or a `builtin:` glyph; see [Icon specs](#icon-specs) |
-| `ephemeral` | bool | when true, selecting this row is not recorded in usage history |
 | `actions` | array | optional secondary commands for the `Shift+Enter` action panel |
 | `badge` | string \| null | optional status glyph at the row's right edge |
 
@@ -164,10 +163,9 @@ host's own entries are kept after them.
 
 An item without `on_click` is non-interactive (display only).
 
-Selecting an item records it in the usage counts that rank results. Two kinds of
-row are exempt: one the host marked `ephemeral: true` (a one-shot search hit,
-say), and one whose `on_click` is a `copy` action (its value is the copied text,
-not a target to re-open).
+Selecting an item records it in the usage counts that rank results. A row whose
+`on_click` is a `copy` action is exempt: its value is the copied text, not a
+target to re-open.
 
 ### Icon specs
 

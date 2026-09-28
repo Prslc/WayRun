@@ -57,7 +57,6 @@ impl Shell {
             "summary": launch.summary,
             "on_click": launch.target,
             "icon": launch.icon,
-            "ephemeral": launch.ephemeral,
         });
         backend::select(&usage);
     }

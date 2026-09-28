@@ -45,18 +45,14 @@ fn counts_with(
     Ok(counts)
 }
 
-/// An `ephemeral` row or a `copy` command is not re-launchable and stays out of
-/// history; the field/variant carries the semantics for every source.
-pub(crate) fn is_recordable(ephemeral: bool, command: Option<&Action>) -> bool {
-    !ephemeral && !matches!(command, Some(Action::Copy { .. }))
-}
-
 fn record_with(conn: &Connection, item_json: &str) -> Result<()> {
     let item: ResultItem = serde_json::from_str(item_json)?;
-    if !is_recordable(item.ephemeral, item.on_click.as_ref()) {
+    let command = item.on_click.as_ref().context("item missing on_click")?;
+    // A copy is no re-launchable target, so it stays out of the counts.
+    if matches!(command, Action::Copy { .. }) {
         return Ok(());
     }
-    let key = item.on_click.context("item missing on_click")?.key();
+    let key = command.key();
 
     // Key by display title so alternate launch actions for one app merge
     // into a single entry; empty titles fall back to the command key.
@@ -171,25 +167,16 @@ mod tests {
     }
 
     #[test]
-    fn one_shot_rows_are_never_recorded() {
+    fn a_copy_row_is_not_recorded() {
         let conn = test_conn();
         let copy = serde_json::json!({
             "title": "Clipboard",
             "on_click": { "type": "copy", "text": "clip" },
-            "ephemeral": false,
-        })
-        .to_string();
-        let github = serde_json::json!({
-            "title": "github hit",
-            "on_click": { "type": "open", "uri": "https://github.com/Prslc/WayRun" },
-            "ephemeral": true,
         })
         .to_string();
         record_with(&conn, &copy).unwrap();
-        record_with(&conn, &github).unwrap();
 
-        // A URL the host did not mark, plus a launch, a command and a desktop
-        // action, are all re-launchable targets.
+        // A URL, a launch, a command and a desktop action are all re-launchable targets.
         for (title, command) in [
             (
                 "Prslc/WayRun",

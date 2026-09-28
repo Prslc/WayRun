@@ -10,12 +10,11 @@ pub struct Launch {
     pub title: String,
     pub summary: Option<String>,
     pub icon: Option<String>,
-    /// The row's own command, recorded in usage so history and forget stay keyed to it.
+    /// The row's own command, recorded in usage so the counts stay keyed to it.
     pub target: Action,
     /// The command Enter runs: the remembered default action when the row has
     /// one, else `target`.
     pub effective: Action,
-    pub ephemeral: bool,
 }
 
 /// A blank icon spec means "no icon", so a re-send compares equal.
@@ -49,7 +48,6 @@ impl State {
             icon: row.icon.clone(),
             target,
             effective,
-            ephemeral: row.ephemeral,
         })
     }
 
@@ -162,28 +160,12 @@ mod tests {
                 uri: uri.to_string()
             }
         );
-        // what usage records, so history and forget stay keyed to the row
+        // what usage records, so the counts stay keyed to the row
         assert_eq!(
             launch.target,
             Action::Open {
                 uri: uri.to_string()
             }
         );
-    }
-
-    #[test]
-    fn an_ephemeral_row_is_forwarded_when_selected() {
-        let mut state = state();
-        let mut row = item(
-            "repo",
-            None,
-            Some(Action::Open {
-                uri: "https://x".to_string(),
-            }),
-            None,
-        );
-        row.ephemeral = true;
-        state.apply_results(vec![row], std::time::Instant::now());
-        assert!(state.selected_row().unwrap().ephemeral);
     }
 }

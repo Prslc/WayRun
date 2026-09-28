@@ -13,7 +13,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 |------|------|------|
 | `search` | `{"text"}` | 结果项数组；不带 `id` 时改为推送 `results` 通知 |
 | `dismiss` | — | `null`（启动器已关闭：丢弃仍在飞行中的搜索） |
-| `select` | 结果项对象 | `null`（记录使用；`ephemeral` 与 `copy` 行不记录） |
+| `select` | 结果项对象 | `null`（记录使用；`copy` 行不记录） |
 | `command` | 一个 [`Action`](#动作) 对象 | `null`（执行一条行或面板命令） |
 | `default` | `{"scope","action_id"}` | `null`（记录某插件的默认 Enter 动作；`action_id` 为 null 则清除） |
 | `list_plugins` | — | 插件元数据；见 [schema](#插件元数据list_plugins) |
@@ -116,7 +116,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 
 ## 结果项
 
-`search` 与主机的 `top` 返回结果项数组。每个结果项是含以下键的对象——前五个**始终都在**，
+`search` 与主机的 `top` 返回结果项数组。每个结果项是含以下键的对象——前四个**始终都在**，
 缺省的可选字段为 `null`（而非省略）；`actions`/`badge` 仅在设置时出现：
 
 | 键 | 类型 | 含义 |
@@ -125,7 +125,6 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 | `summary` | string \| null | 副行（命令、路径、描述……） |
 | `on_click` | [`Action`](#动作) \| null | Enter 绑定的动作 |
 | `icon` | string \| null | 图标规范：绝对路径或 `builtin:` 字形；见 [图标规范](#图标规范) |
-| `ephemeral` | bool | 为 true 时，选中该项不记入使用历史 |
 | `actions` | array | 可选，`Shift+Enter` 二级菜单的次级命令 |
 | `badge` | string \| null | 可选，行右缘的状态图标 |
 
@@ -145,9 +144,8 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 
 无 `on_click` 的结果项不可交互（仅展示）。
 
-选中一项会把它记入用于排序的使用计数。有两类行不记：主机标记
-`ephemeral: true` 的行（如一次性的搜索结果），以及 `on_click` 为 `copy` 动作的行
-（它代表被复制的文本，而不是可再次打开的目标）。
+选中一项会把它记入用于排序的使用计数。`on_click` 为 `copy` 动作的行不记：
+它代表被复制的文本，而不是可再次打开的目标。
 
 ### 图标规范
 

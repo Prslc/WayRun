@@ -74,7 +74,6 @@ fn item(title: &str, command: crate::wire::Action) -> ResultItem {
         summary: None,
         on_click: Some(command),
         icon: None,
-        ephemeral: false,
         actions: Vec::new(),
         badge: None,
     }

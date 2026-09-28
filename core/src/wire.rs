@@ -78,10 +78,6 @@ pub struct ResultItem {
     pub summary: Option<String>,
     pub on_click: Option<Action>,
     pub icon: Option<String>,
-    /// The host asked for this row not to enter usage history — a one-shot
-    /// search hit, for instance. Absent on the wire means "record it".
-    #[serde(default)]
-    pub ephemeral: bool,
     /// Secondary commands for the row's action panel. Built-ins are attached by
     /// the core before emitting; a host may supply its own.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

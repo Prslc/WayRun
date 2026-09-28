@@ -181,7 +181,6 @@ fn row_for(binary: &Binary, args: &str) -> ResultItem {
         summary: Some(run_cmd.clone()),
         on_click: Some(action_for(desktop_id, terminal, !args.is_empty(), run_cmd)),
         icon: None,
-        ephemeral: false,
         actions: Vec::new(),
         badge: None,
     }

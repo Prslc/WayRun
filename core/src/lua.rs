@@ -770,7 +770,6 @@ mod tests {
         let rows = search(&host, "demo", "world");
         assert_eq!(rows[0]["title"], "Hello world");
         assert_eq!(rows[0]["on_click"]["type"], "open");
-        assert_eq!(rows[0]["ephemeral"], false);
     }
 
     #[test]
