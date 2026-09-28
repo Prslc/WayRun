@@ -239,13 +239,15 @@ fn fs_lib(lua: &Lua, scope: Scope, guard: areas::Guard) -> mlua::Result<Table> {
             let Ok(entries) = std::fs::read_dir(&dir) else {
                 return Ok(Value::Nil);
             };
+            // readdir order is unspecified; sort so the listing is stable.
+            let mut names: Vec<String> = entries
+                .flatten()
+                .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
+                .collect();
+            names.sort();
             let list = lua.create_table()?;
-            let mut at = 0;
-            for entry in entries.flatten() {
-                if let Some(name) = entry.file_name().to_str() {
-                    at += 1;
-                    list.set(at, name.to_string())?;
-                }
+            for (at, name) in names.into_iter().enumerate() {
+                list.set(at + 1, name)?;
             }
             Ok(Value::Table(list))
         })?,
