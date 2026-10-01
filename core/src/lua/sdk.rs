@@ -294,6 +294,9 @@ fn fs_lib(lua: &Lua, scope: Scope, guard: areas::Guard) -> mlua::Result<Table> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+    use std::path::Path;
+
     use super::*;
 
     #[test]
@@ -317,5 +320,88 @@ mod tests {
         assert!(scoped_read(&roots, "a/../b").is_err());
         assert!(scoped_read(&roots, "/etc/hostname").is_err());
         assert!(scoped_read(&roots, "").is_err());
+    }
+
+    /// Every name the sandbox binds, one level into a sub-table: the leaves the
+    /// reference page has to name, read off the built table, not the source.
+    fn sdk_names() -> BTreeSet<String> {
+        let lua = Lua::new_with(mlua::StdLib::ALL_SAFE, mlua::LuaOptions::default()).unwrap();
+        let table = build(
+            &lua,
+            "/test/script.lua",
+            Rc::new(RefCell::new(Vec::new())),
+            Rc::new(RefCell::new(None)),
+            Rc::new(RefCell::new(HashMap::new())),
+            Rc::new(RefCell::new(HashMap::new())),
+            Rc::new(RefCell::new(HashMap::new())),
+        )
+        .unwrap();
+        let mut names = BTreeSet::new();
+        for pair in table.pairs::<String, Value>() {
+            let (name, value) = pair.unwrap();
+            match value {
+                Value::Table(sub) => {
+                    for member in sub.pairs::<String, Value>() {
+                        names.insert(format!("{name}.{}", member.unwrap().0));
+                    }
+                }
+                _ => {
+                    names.insert(name);
+                }
+            }
+        }
+        names
+    }
+
+    /// Every `wayrun.<name>` a page writes, in prose or in a table cell.
+    fn page_names(text: &str) -> BTreeSet<String> {
+        let mut names = BTreeSet::new();
+        let mut rest = text;
+        while let Some(at) = rest.find("wayrun.") {
+            rest = &rest[at + "wayrun.".len()..];
+            let name: String = rest
+                .chars()
+                .take_while(|c| {
+                    c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_' || *c == '.'
+                })
+                .collect();
+            if !name.is_empty() {
+                names.insert(name);
+            }
+        }
+        names
+    }
+
+    fn page(locale: &str) -> String {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("the core lives in the workspace")
+            .join("docs")
+            .join(locale)
+            .join("lua.md");
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
+    }
+
+    #[test]
+    fn the_lua_page_names_every_binding() {
+        let names = sdk_names();
+        // a scan that found nothing would make this vacuous
+        assert!(names.len() > 20, "found only {} bindings", names.len());
+        let documented = page_names(&page("en"));
+        let missing: Vec<&String> = names.difference(&documented).collect();
+        assert!(missing.is_empty(), "bound but undocumented: {missing:?}");
+    }
+
+    #[test]
+    fn nothing_the_lua_page_names_is_missing_from_the_sdk() {
+        let names = sdk_names();
+        let documented = page_names(&page("en"));
+        let stale: Vec<&String> = documented.difference(&names).collect();
+        assert!(stale.is_empty(), "documented but not bound: {stale:?}");
+    }
+
+    #[test]
+    fn the_two_lua_pages_name_the_same_bindings() {
+        assert_eq!(page_names(&page("en")), page_names(&page("zh_cn")));
     }
 }
