@@ -7,6 +7,152 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-01
+
+### Added
+
+- The plugin contract carries a version. `wire::PLUGIN_API` is one number both
+  plugin surfaces report — a host from `list_plugins`'s `api`, a Lua script from
+  its plugin table's `api` — and the core logs a mismatch against it rather than
+  refusing the plugin, which may still work; a plugin written before versioning
+  counts as `0` and is told so until it states what it means. Lua reads the
+  current number as `wayrun.api`, so one script can span two launcher versions.
+  It moves when a plugin can observe the change, not for an addition or a
+  launcher-internal change: adding a binding leaves it alone, while tightening a
+  sandbox rule moves it. See `plugins.md` and `jsonrpc.md`.
+- A Lua plugin declares the areas it may read (`read`: absolute paths or
+  `~/…`, no patterns) and the environment names it may read (`env`: exact
+  names, no patterns). A path is resolved through symlinks, so a link cannot
+  escape, and the plugin's own directory and its script's directory are
+  implicit. A `sqlite` handle answers only for a plugin that could have
+  opened its source itself, so a sibling cannot borrow another plugin's
+  snapshot. See `plugins.md`.
+- `wayrun.kv` keeps strings under keys in a SQLite database inside the
+  plugin's own directory, with an optional TTL per entry, so a cache can
+  outlive one show: it is the sandbox's only write, bounded to that directory,
+  its keys not paths. `kv.keys` and `kv.pairs` enumerate the store as ordered
+  arrays with expired rows filtered out, so a plugin keeping a list of its own
+  no longer maintains an index key by hand.
+- `wayrun.http.post` carries a JSON, form or raw body, and both verbs take an
+  options table — `timeout_ms`, `headers`, and a `ttl` on `get` that caches a
+  2xx reply in the plugin's own key-value store. A reply's response headers
+  come back lowercased and its body as raw bytes, and the timeout defaults to
+  two seconds, down from five, clamped inside the host call's own ceiling.
+  A `headers` sub-table among `params` and a bare timeout as the third
+  argument both still work. The one network exit is `ureq` now — a connection
+  pool, system-root TLS and gzip — where `minreq` was, so request header
+  names go out lowercased. See `resident.md`.
+- `wayrun.which(name)` answers an executable's path from the host's `$PATH` —
+  the same one a `run` row's command will see — or `nil`, and
+  `wayrun.fuzzy.match(query, candidates)` ranks a script's own candidates by
+  the built-ins' match kinds, best first, ties keeping the input order.
+- `wayrun.crypto` answers `sha256`, `md5` and `hmac_sha256` as hex digests
+  over raw bytes, plus `base64_encode`/`base64_decode`, where a decode
+  answers `nil` on garbage rather than raising, so the translation and base64
+  plugins no longer hand-roll them.
+
+### Changed
+
+- **Breaking**: the empty-query launch history is gone. An empty query returns
+  no rows and clears the list locally, and the `top` and `forget` methods, the
+  history read path, the host forget relay, the panel's launcher-owned
+  *Remove from history* entry and the `builtin:remove` glyph go with it. A
+  host's own `top` default view is a different method and stays. See
+  `jsonrpc.md`.
+- **Breaking**: pins are gone, with the `pin`/`unpin` methods, the pin table
+  and the panel's *Pin to top*/*Unpin* entries. A pin's scope was the exact
+  trimmed query, so a pinned row could only be summoned by retyping that
+  string, and pinning froze a copy of the row beside its live result; the
+  action panel covers the same ground with entries a plugin owns and can make
+  default.
+- **Breaking**: `select` is `record`, taking `{"on_click": Action}`, and the
+  database moves to `state.db` with the `usage` table shrunk to `(on_click,
+  count)`. The old `usage.db` is left where it is and no longer read, so the
+  counts and the remembered defaults start over once. See `jsonrpc.md`.
+- **Breaking**: an `actions` entry's `action` is an `Action` object
+  (`{"type":"run",…}`) rather than `{"type":"execute","command":{…}}`;
+  `ResultItem` loses its `badge` and `ephemeral` fields, and a row is exempt
+  from recording only when its command is a `copy`. A host that sets either
+  field is ignored rather than obeyed: the badge's only producer was the pin
+  that just went, and with history gone the counts are the whole story.
+- **Breaking**: `wayrun.env` raises for a name the calling plugin has not
+  declared, and `fs.list`, `fs.stat`, `sqlite.snapshot` and `sqlite.query`
+  refuse a path — or a handle whose source lies — outside its declared `read`
+  areas. A script that read the environment or the filesystem without
+  declaring them must declare them now.
+- **Breaking**: `wayrun.icon()` no longer answers a `builtin:` glyph, and a
+  host's icon must be an absolute path — a file it ships, or a theme icon or
+  `papirus:` spec that `wayrun.icon()` resolved. The built-in glyphs render in
+  the shell now, from its own compiled SVGs, and the core keeps only the
+  vocabulary (`wire::BUILTIN_GLYPHS`) it validates a spec against. The
+  `bookmark`, `clock` and `globe` glyphs went with the plugins that shipped
+  them, the `images/` fallback next to the executable, under an XDG data dir
+  or in the dev tree is gone, and a glyph no longer touches the cache
+  directory, so a show writes nothing and a missing or unwritable cache no
+  longer costs a row its placeholder. See `plugins.md`.
+- **Breaking**: `wayrun.t` is gone: a Lua script carries its own text. The
+  table it read was the launcher's own key set, which had a Lua-side owner
+  only while the bundled plugins were in tree; plugin-side localisation would
+  arrive as a locale accessor instead.
+- **Breaking**: `theme.toml` keeps only the keys a user reaches for. `[colors]`
+  keeps the three base roles plus `dim`, and every other surface derives from
+  its role at a shipped alpha; `[layout]` keeps `width`, `radius`, `top_ratio`,
+  `align` and `max_rows`; `[motion]` keeps `reduced`. The width triple folds
+  into one key, `follow_system` goes (an unset key already follows the system,
+  per key), and the stroke, offset and derived-radius keys become constants.
+  Every dropped key is inert rather than an error, and an untouched file still
+  renders the same frame. See `theme.md`.
+- **Breaking**: `config.toml`'s `[web_search]` table goes, with
+  `wayrun.web_search_engine()`: the engine choice drives the web-search plugin
+  alone, which keeps its own setting now. See `config.md`.
+- The card is one surface: the inner field rectangle is never drawn, the search
+  line sits above the rows, and a pristine card rests at the height it fills
+  instead of reserving a gap and a footer band it would not fill. The `✕` clear
+  button goes with it (Ctrl+A plus Delete, or backspacing, still clear the
+  field), so `theme.toml`'s `[colors] field` and `[layout] field_radius` are
+  inert.
+- The keyword chip goes too — it echoed the prefix the typed text already
+  stated, so `[layout] chip_radius` is inert — and the footer renders no hints
+  while the field is untouched, the old help line having become the whole
+  message on an empty card. The placeholder is "Type to search": the line it
+  replaces promised a web search a given plugin set may not have installed.
+- The result list draws no default dot. A remembered default is filed per
+  plugin scope, so it covers every row that scope decorates at once and could
+  never single one out; the panel still marks the effective entry and the
+  footer still names the selected row's Enter action.
+- The README demo is re-recorded.
+- The Lua plugin guide moved here, beside the SDK it documents: `lua.md` now
+  carries the plugin table, the `wayrun` table, the sandbox and registration,
+  and a guard test holds its binding table to the table the sandbox builds, so a
+  binding added without a row is a red test rather than a stale page. The
+  WayRun-Plugins workspace keeps the Python framework and both example sets. The
+  reference material the two repos had each restated — the `Action` shapes, the
+  result-item keys, the icon rules, the `plugins.toml` fields — now has one home
+  each, and the new page links instead of copying.
+- The tree follows the 2018 module shape — every `foo/mod.rs` is `foo.rs`
+  beside its `foo/` directory — and the layer-named `model.rs` files fold into
+  the module they serve: `Meta` joins the `Plugin` trait, the `plugins.toml`
+  schema and the host cache join the registry, both `config/model.rs` merge
+  into their `config.rs`. The index builder renames to `builder.rs`, which a
+  `build.rs` reads as a Cargo build script. No behaviour change.
+- The resident core's icon memo drops whole at 4096 distinct specs: a host's
+  `wayrun.icon()` was the one caller that could mint keys without bound.
+
+### Fixed
+
+- A cleared query no longer shows rows under it. An empty `text` sent as a
+  notification cancels the pending search at the core, where it was previously
+  ignored, and the shell drops any payload that lands while its query is
+  empty. See `jsonrpc.md`.
+- `fs.list` sorts the names it hands to Lua, and the `$PATH` ranking falls back
+  to the name when hits share their kind and length, so a listing and a row
+  order no longer follow readdir or `$PATH` order, which differ per machine.
+- `wayrun.sqlite` reuses one snapshot handle per source, whose connection
+  follows its newest copy, instead of opening a connection per call in a
+  resident host; pruning leaves another source's copies alone.
+- A one-shot external host's stderr joins the journal, as a resident host's
+  already did, so `wayrun.log` reaches it on both paths.
+
 ## [0.6.0] - 2026-09-26
 
 ### Added
@@ -452,7 +598,10 @@ and, with `--core`, the backend service.
 - Resident mode over `$XDG_RUNTIME_DIR/wayrun.sock` for zero cold-start
   (`wayrun toggle`).
 
-[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Prslc/WayRun/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/Prslc/WayRun/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/Prslc/WayRun/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Prslc/WayRun/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/Prslc/WayRun/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Prslc/WayRun/compare/v0.2.0...v0.3.0
