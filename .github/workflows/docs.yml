@@ -1,0 +1,51 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**.md"
+      - "docs/**"
+  pull_request:
+    paths:
+      - "**.md"
+      - "docs/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lua-guide:
+    name: Lua guide
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libssl-dev \
+            libxkbcommon-dev \
+            libglib2.0-dev \
+            libsqlite3-dev \
+            fonts-dejavu-core
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace
+
+      # `ci.yml` ignores `docs/**`, so the guard that reads `docs/lua.md` runs
+      # here or a docs-only edit would never be checked against the sandbox.
+      - name: cargo test (Lua guide guard)
+        run: cargo test --locked -p wayrun-core lua_page
