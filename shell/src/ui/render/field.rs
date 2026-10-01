@@ -5,10 +5,10 @@ use cosmic_text::Weight;
 use rust_i18n::t;
 use tiny_skia::Pixmap;
 
-use crate::app::{Hover, State};
+use crate::app::State;
 use crate::ui::text::TextEngine;
 
-use super::canvas::{CLEAR_GLYPH, Canvas, Rect, TEXT_INSET};
+use super::canvas::{Canvas, Rect, TEXT_INSET};
 
 pub(super) fn draw_magnifier(
     canvas: &Canvas,
@@ -36,7 +36,7 @@ pub(super) fn draw_magnifier(
 /// The field's text area: left edge and width. The field is single-line, so a
 /// wider query scrolls inside the box rather than clipping the caret.
 fn text_area(field: Rect) -> (f32, f32) {
-    (field.x + TEXT_INSET, field.w - TEXT_INSET - 40.0)
+    (field.x + TEXT_INSET, field.w - TEXT_INSET - 12.0)
 }
 
 /// The field's placeholder, translated once: it is drawn every frame while empty.
@@ -196,73 +196,6 @@ pub fn draw_caret(pixmap: &mut Pixmap, state: &State, text: &mut TextEngine, now
     };
     let (caret, _) = caret_box(state, text);
     canvas.fill_rect(pixmap, caret, state.fade(state.theme.fg, 1.0, now));
-}
-
-pub(super) fn draw_toolbar(
-    canvas: &Canvas,
-    pixmap: &mut Pixmap,
-    state: &State,
-    text: &mut TextEngine,
-    now: Instant,
-) {
-    let font = state.appearance.font.suggestion() * canvas.scale;
-    let (cx, cy, r) = state.appearance.layout.clear_circle(state.surface);
-    // A keyword prefix implies a non-empty query, so the ✕ is always drawn when
-    // the chip is: the chip sits against the button's left edge.
-    let right = cx - r - 6.0;
-
-    if !state.query.is_empty() {
-        let circle = Rect {
-            x: cx - r,
-            y: cy - r,
-            w: 2.0 * r,
-            h: 2.0 * r,
-        };
-        let hovered = state.hovered == Some(Hover::Clear);
-        canvas.fill_round(
-            pixmap,
-            circle,
-            r,
-            state.fade(state.theme.fg, if hovered { 0.18 } else { 0.10 }, now),
-        );
-
-        let shaped = text.shape(CLEAR_GLYPH, 12.0 * canvas.scale, Weight::NORMAL);
-        // the ×'s ink sits above and left of its line box; these shifts put the
-        // centred box back on the circle
-        text.draw(
-            pixmap,
-            &shaped,
-            state.fade_rgba(state.surfaces.muted, now),
-            canvas.px(circle.x + r) - shaped.width / 2.0 + 0.5,
-            canvas.px(circle.center_y()) - shaped.height / 2.0 + canvas.px(1.5),
-            None,
-        );
-    }
-
-    let Some(prefix) = state.keyword_prefix() else {
-        return;
-    };
-    let shaped = text.shape(prefix, font, Weight::BOLD);
-    let chip = Rect {
-        x: right - shaped.width / canvas.scale - 16.0,
-        y: cy - 12.0,
-        w: shaped.width / canvas.scale + 16.0,
-        h: 24.0,
-    };
-    canvas.fill_round(
-        pixmap,
-        chip,
-        state.appearance.layout.chip_radius(),
-        state.fade(state.theme.primary, 0.16, now),
-    );
-    text.draw(
-        pixmap,
-        &shaped,
-        state.fade(state.theme.primary, 1.0, now),
-        canvas.px(chip.x) + canvas.px(8.0),
-        canvas.px(chip.center_y()) - shaped.height / 2.0,
-        None,
-    );
 }
 
 #[cfg(test)]

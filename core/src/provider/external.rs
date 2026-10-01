@@ -6,8 +6,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 use crate::plugin::{Meta, Plugin};
-use crate::system::icon::host_icon_path;
-use crate::wire::{Action, ResultItem};
+use crate::system::icon::host_icon_spec;
+use crate::wire::ResultItem;
 use rust_i18n::t;
 
 /// Identity of one plugin as described by an external host's `list_plugins`.
@@ -18,6 +18,7 @@ pub struct HostMeta {
     pub name: String,
     pub icon: String,
     pub ready: String,
+    pub api: u32,
 }
 
 /// `(mtime, size)` of the resolved `command`, to validate a cached identity.
@@ -47,15 +48,25 @@ impl External {
     /// missing identity degrades to the id as display name.
     pub fn new(id: &str, command: String, discovered: Option<HostMeta>, resident: bool) -> Self {
         let (name, icon, ready) = match discovered {
-            Some(m) => (m.name, m.icon, m.ready),
+            Some(m) => {
+                if m.api != crate::wire::PLUGIN_API {
+                    eprintln!(
+                        "wayrun-core: plugin {id}: api {}, this launcher speaks {}",
+                        m.api,
+                        crate::wire::PLUGIN_API
+                    );
+                }
+                (m.name, m.icon, m.ready)
+            }
             None => (
                 id.to_string(),
                 String::new(),
                 t!("plugin.external.ready", command = command),
             ),
         };
-        // A symbolic identity icon is a miss: a host ships its own absolute paths.
-        let icon = host_icon_path(&icon).unwrap_or_default();
+        // An unrenderable identity icon is a miss: a host names a file it ships
+        // or a compiled glyph, nothing else.
+        let icon = host_icon_spec(&icon).unwrap_or_default();
         Self {
             meta: Meta {
                 id: id.to_string().into(),
@@ -96,18 +107,11 @@ impl Plugin for External {
         let resident = self.resident;
         Box::pin(async move { query_default(&command, resident, &plugin, &icon).await })
     }
-
-    fn forget(&self, command: &Action) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + '_>> {
-        let host = self.command.clone();
-        let command = command.clone();
-        let resident = self.resident;
-        Box::pin(async move { forget_external(&host, resident, &command).await })
-    }
 }
 
 /// Ceiling for one host call: a stalled host must cost seconds, never the
 /// session. Discovery holds the registry's init lock until it returns.
-const HOST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+pub(crate) const HOST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// One call against a host: `resident` keeps the process across calls; the
 /// default spawns it fresh, so nothing a host kept outlives the call.
@@ -140,7 +144,7 @@ async fn rpc_call_within(
         .kill_on_drop(true)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit())
         .spawn()
         .ok()?; // command not found -> no host
 
@@ -213,6 +217,7 @@ pub async fn discover(command: &str, resident: bool) -> Vec<HostMeta> {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string(),
+                api: entry.get("api").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
             })
         })
         .collect()
@@ -236,14 +241,13 @@ fn parse_result_items(
         .into_iter()
         .filter_map(|item| serde_json::from_value(item).ok())
         .collect();
-    let identity = host_icon_path(icon);
+    let identity = host_icon_spec(icon);
     let owner = plugin.to_string();
     for item in &mut parsed {
         let spec = item.icon.as_deref().unwrap_or("");
         item.icon = resolve_item_icon(spec, identity.clone());
-        item.badge = item.badge.as_deref().and_then(host_icon_path);
         for action in &mut item.actions {
-            action.icon = action.icon.as_deref().and_then(host_icon_path);
+            action.icon = action.icon.as_deref().and_then(host_icon_spec);
             // The core owns this field; whatever the host sent is ignored.
             action.plugin = Some(owner.clone());
         }
@@ -297,15 +301,6 @@ async fn query_default(
     Ok(parse_result_items(response, plugin, icon))
 }
 
-/// First shell token of a `run` command (argv0), or `None` for any other
-/// variant; hosts emit single-token commands, so a whitespace split suffices.
-fn run_argv0(command: &Action) -> Option<&str> {
-    let Action::Run { cmd } = command else {
-        return None;
-    };
-    cmd.split_whitespace().next()
-}
-
 /// Resolve a plugins.toml `command` to an absolute path when it is a bare
 /// name (PATH lookup); absolute paths pass through unchanged.
 fn resolve_command(command: &str) -> String {
@@ -323,31 +318,13 @@ fn resolve_command(command: &str) -> String {
     command.to_string()
 }
 
-/// Relay a row's removal to its host: the command must be a `run` whose first
-/// token is this host's `command`. `true` when the host acknowledged it.
-async fn forget_external(command: &str, resident: bool, row: &Action) -> Result<bool> {
-    let Some(argv0) = run_argv0(row) else {
-        return Ok(false);
-    };
-    let resolved = resolve_command(command);
-    if argv0 != command && argv0 != resolved {
-        return Ok(false);
-    }
-    let request = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "forget",
-        "params": { "on_click": row },
-        "id": 1,
-    });
-    let response = host_call(command, resident, &request, HOST_TIMEOUT).await;
-    Ok(response.is_some_and(|reply| reply.get("error").is_none()))
-}
 fn resolve_item_icon(icon: &str, fallback: Option<String>) -> Option<String> {
-    host_icon_path(icon).or(fallback)
+    host_icon_spec(icon).or(fallback)
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wire::Action;
 
     #[test]
     fn empty_icon_falls_back_to_plugin_icon() {
@@ -375,28 +352,27 @@ mod tests {
     }
 
     #[test]
-    fn a_symbolic_spec_is_no_icon_for_a_host() {
+    fn a_theme_glyph_or_papirus_spec_is_no_icon_for_a_host() {
         // the core resolves these for its own rows, but not for an external host
         assert_eq!(resolve_item_icon("papirus:folder-open", None), None);
-        assert_eq!(resolve_item_icon("builtin:power", None), None);
         assert_eq!(resolve_item_icon("firefox", None), None);
+        assert_eq!(resolve_item_icon("builtin:power", None), None);
     }
 
     #[test]
-    fn a_hosts_action_and_badge_icons_must_be_absolute() {
+    fn a_hosts_action_icons_take_paths_only() {
         let response = serde_json::json!({
             "result": [{
                 "title": "r",
                 "on_click": {"type":"run","cmd":"x"},
-                "badge": "builtin:pin",
                 "actions": [
-                    {"title":"a", "action":{"type":"execute","command":{"type":"run","cmd":"y"}}, "icon": "builtin:open"},
-                    {"title":"b", "action":{"type":"execute","command":{"type":"run","cmd":"z"}}, "icon": "/tmp/a.svg"},
+                    {"title":"a", "action":{"type":"run","cmd":"y"}, "icon": "builtin:open"},
+                    {"title":"b", "action":{"type":"run","cmd":"z"}, "icon": "/tmp/a.svg"},
+                    {"title":"c", "action":{"type":"run","cmd":"w"}, "icon": "firefox"},
                 ],
             }]
         });
         let items = parse_result_items(response, "system-search", "").unwrap();
-        assert!(items[0].badge.is_none(), "a symbolic badge is dropped");
         assert_eq!(
             items[0].actions[0].plugin.as_deref(),
             Some("system-search"),
@@ -404,22 +380,13 @@ mod tests {
         );
         assert!(
             items[0].actions[0].icon.is_none(),
-            "a symbolic action icon is dropped"
+            "a glyph is no host icon"
         );
         assert_eq!(items[0].actions[1].icon.as_deref(), Some("/tmp/a.svg"));
-    }
-
-    #[test]
-    fn an_ephemeral_host_row_stays_ephemeral() {
-        let response = serde_json::json!({
-            "result": [
-                { "title": "repo", "on_click": {"type":"open","uri":"https://github.com/x/y"}, "ephemeral": true },
-                { "title": "Firefox", "on_click": {"type":"launch","desktop_id":"firefox.desktop"} },
-            ]
-        });
-        let items = parse_result_items(response, "system-search", "").unwrap();
-        assert!(items[0].ephemeral, "the host's flag is carried through");
-        assert!(!items[1].ephemeral, "an absent flag means record it");
+        assert!(
+            items[0].actions[2].icon.is_none(),
+            "a theme name is no host icon"
+        );
     }
 
     /// The golden corpus the Python SDK pins on its side (WayRun-Plugin,
@@ -491,29 +458,16 @@ mod tests {
                 uri: "file:///home/u".to_string()
             })
         );
-        assert!(items[8].ephemeral);
+        assert_eq!(
+            items[8].title, "ephemeral",
+            "a stale field an old host sends is ignored"
+        );
         assert!(items[9].summary.is_none() && items[9].on_click.is_none());
         assert_eq!(
             items[9].icon.as_deref(),
             Some("/opt/identity.svg"),
             "an unset icon falls back to the identity"
         );
-    }
-
-    /// A host that answers the way a plugin framework does: it consumes the
-    /// request and prints one response line.
-    fn host(dir: &tempfile::TempDir, reply: &str) -> String {
-        use std::io::Write;
-        let path = dir.path().join("host.sh");
-        let mut file = std::fs::File::create(&path).unwrap();
-        writeln!(file, "#!/bin/sh").unwrap();
-        writeln!(file, "cat >/dev/null").unwrap();
-        writeln!(file, "printf '%s\\n' '{reply}'").unwrap();
-        drop(file);
-        let mut perms = std::fs::metadata(&path).unwrap().permissions();
-        std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
-        std::fs::set_permissions(&path, perms).unwrap();
-        path.display().to_string()
     }
 
     #[tokio::test]
@@ -525,48 +479,12 @@ mod tests {
         assert!(items.is_empty());
     }
 
-    #[tokio::test]
-    async fn a_row_another_command_owns_is_left_alone() {
-        // No host is contacted: the on_click's command is not this one.
-        let row = Action::Run {
-            cmd: "/bin/other del 1".to_string(),
-        };
-        let owned = forget_external("/usr/bin/definitely-not-this", false, &row)
-            .await
-            .unwrap();
-        assert!(!owned);
-    }
-
-    #[tokio::test]
-    async fn a_host_that_answers_owns_the_row() {
-        let dir = tempfile::tempdir().unwrap();
-        let command = host(&dir, r#"{"jsonrpc":"2.0","result":null,"id":1}"#);
-        let row = Action::Run {
-            cmd: format!("{command} del 1"),
-        };
-        let owned = forget_external(&command, false, &row).await.unwrap();
-        assert!(owned, "the host dropped its own data, so the row may leave");
-    }
-
-    #[tokio::test]
-    async fn a_host_without_a_forget_method_disowns_the_row() {
-        let dir = tempfile::tempdir().unwrap();
-        let reply =
-            r#"{"jsonrpc":"2.0","error":{"code":-32601,"message":"Method not found"},"id":1}"#;
-        let command = host(&dir, reply);
-        let row = Action::Run {
-            cmd: format!("{command} del 1"),
-        };
-        let owned = forget_external(&command, false, &row).await.unwrap();
-        assert!(!owned, "-32601 means the row is not this host's to drop");
-    }
-
     /// A host that never answers must cost the deadline, not the session.
     #[tokio::test]
     async fn a_stalled_host_is_given_up_on() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("stall.sh");
-        std::fs::write(&path, "#!/bin/sh\ncat >/dev/null\nsleep 600\n").unwrap();
+        std::fs::write(&path, "#!/bin/sh\ncat >/dev/null\nexec sleep 600\n").unwrap();
         let mut perms = std::fs::metadata(&path).unwrap().permissions();
         std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
         std::fs::set_permissions(&path, perms).unwrap();

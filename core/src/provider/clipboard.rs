@@ -75,9 +75,7 @@ impl Entry {
                 cmd: format!("sh -c 'cliphist decode {} | wl-copy'", self.id),
             }),
             icon: icon.clone(),
-            ephemeral: true,
             actions: Vec::new(),
-            badge: None,
         }
     }
 }
@@ -158,7 +156,6 @@ mod tests {
         };
         assert!(cmd.contains("decode 1"));
         assert_eq!(entries[1].title, "screenshot");
-        assert!(row.ephemeral);
     }
 
     #[test]

@@ -134,9 +134,7 @@ fn row(compositor: &dyn Compositor, window: &Window) -> ResultItem {
             cmd: shell_join(&compositor.focus_argv(&window.id)),
         }),
         icon: window.app_id.as_deref().and_then(app_icon),
-        ephemeral: true,
         actions: Vec::new(),
-        badge: None,
     }
 }
 

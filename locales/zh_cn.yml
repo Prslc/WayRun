@@ -36,9 +36,6 @@ command.shutdown: 关机
 command.logout: 注销
 
 action.open: 打开
-action.pin: 置顶
-action.unpin: 取消置顶
-action.remove_history: 从历史记录中移除
 action.copy_path: 复制路径
 action.reveal: 在文件管理器中显示
 action.terminal: 在终端中打开
@@ -49,7 +46,7 @@ help.line_default: "%{usage} - %{ready} · Enter: %{action}"
 
 window.untitled: 无标题
 
-field.placeholder: 搜索应用、文件、网页…
+field.placeholder: 输入以搜索…
 
 footer.launch: 打开
 footer.actions: 动作
@@ -57,7 +54,6 @@ footer.run: 运行
 footer.default: 设为默认
 footer.clear_default: 清除默认
 footer.back: 返回
-footer.help: 输入 ? 查看帮助
 footer.no_results: 无匹配结果
 footer.count_action_one: 1 个动作
 footer.count_action_many: "%{count} 个动作"

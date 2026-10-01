@@ -17,7 +17,6 @@ use self::menu::PanelKey;
 
 pub use self::cursor::{Cursor, Hover, whole_rows};
 pub use self::menu::{Menu, effective_action, marked_entry};
-pub use self::row::Launch;
 
 /// Launch dismissals wait this long before the surface goes away.
 pub const EXIT_DELAY_MS: u64 = 150;
@@ -99,7 +98,7 @@ impl State {
         let mode = Mode::default();
         let colors = appearance.colors.for_mode(mode);
         let surfaces = Surfaces::resolve(theme, &colors);
-        let card = appearance.layout.content_h(0);
+        let card = appearance.layout.empty_h();
         Self {
             query: String::new(),
             caret: 0,
@@ -148,11 +147,14 @@ impl State {
         self.fractional.is_some()
     }
 
-    /// The card's resting height (panel when open, else the list). The footer,
-    /// blur region and reflow all read it, so they agree with the drawn frame.
+    /// The card's resting height (panel when open, the field alone while the
+    /// query is untouched, else the list). The footer, blur region and reflow read it.
     pub fn content_height(&self) -> f32 {
         match &self.menu {
             Some(menu) => self.appearance.layout.panel_h(menu.actions.len()),
+            None if self.rows.is_empty() && self.query.is_empty() => {
+                self.appearance.layout.empty_h()
+            }
             None => self.appearance.layout.content_h(self.rows.len()),
         }
     }
@@ -164,7 +166,7 @@ impl State {
         }
 
         let elapsed = now.saturating_duration_since(self.card_at).as_secs_f32() * 1000.0;
-        let t = (elapsed / self.appearance.reflow_ms as f32).clamp(0.0, 1.0);
+        let t = (elapsed / self::appearance::REFLOW_MS as f32).clamp(0.0, 1.0);
         self.card_from + (to - self.card_from) * ease_out_cubic(t)
     }
 
@@ -196,8 +198,7 @@ impl State {
         // The surface is gone, so nothing is composing on it any more.
         self.preedit = None;
         self.preedit_active = false;
-        // With a long history the payload is megabytes, and the rest of a
-        // dismissal already frees what a hidden launcher holds.
+        // A show starts from an empty list: an empty query fetches nothing.
         self.rows = Vec::new();
     }
 

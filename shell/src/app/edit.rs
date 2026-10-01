@@ -155,35 +155,10 @@ impl State {
         self.caret = self.query.len();
     }
 
-    pub fn clear_query(&mut self) {
-        self.query.clear();
-        self.caret = 0;
-        self.anchor = None;
-    }
-
     /// The text before the caret, which is what the IME wants as surrounding
     /// text (only its byte length is reported, since nothing tracks it).
     pub fn before_caret(&self) -> &str {
         &self.query[..self.caret]
-    }
-
-    /// The active keyword prefix (`b`, `h`, `f`, …): `^([a-zA-Z]{1,3})\s`.
-    pub fn keyword_prefix(&self) -> Option<&str> {
-        let end = self
-            .query
-            .as_bytes()
-            .iter()
-            .take(4)
-            .position(|byte| *byte == b' ')?;
-        if end == 0
-            || !self.query.as_bytes()[..end]
-                .iter()
-                .all(u8::is_ascii_alphabetic)
-        {
-            return None;
-        }
-
-        Some(&self.query[..end])
     }
 }
 
@@ -247,9 +222,6 @@ mod tests {
         state.right();
         state.right();
         assert_eq!(state.caret, "文".len());
-
-        state.clear_query();
-        assert!(state.query.is_empty() && state.caret == 0);
     }
 
     #[test]
@@ -332,9 +304,6 @@ mod tests {
         assert_eq!(state.selection(), None);
 
         // anchored in the middle, extending the other way flips the ends
-        state.clear_query();
-        state.insert("abc");
-        state.home();
         state.right();
         state.right();
         state.extend_home();
@@ -343,20 +312,5 @@ mod tests {
         assert_eq!(state.selection(), Some((1, 2)));
         state.extend_right();
         assert_eq!(state.selection(), None, "back at the anchor");
-    }
-
-    #[test]
-    fn a_keyword_prefix_is_one_to_three_letters_and_a_space() {
-        let mut state = state();
-        state.query = "b firefox".into();
-        assert_eq!(state.keyword_prefix(), Some("b"));
-        state.query = "tr 你好".into();
-        assert_eq!(state.keyword_prefix(), Some("tr"));
-        state.query = "abcd ".into();
-        assert_eq!(state.keyword_prefix(), None);
-        state.query = "1 x".into();
-        assert_eq!(state.keyword_prefix(), None);
-        state.query = "b".into();
-        assert_eq!(state.keyword_prefix(), None);
     }
 }

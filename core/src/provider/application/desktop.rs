@@ -1,4 +1,4 @@
-use super::model::{DesktopAction, DesktopMeta, Field};
+use super::{DesktopAction, DesktopMeta, Field};
 use crate::system::desktop_action::Details;
 
 /// The scoring surfaces of one app's `.desktop` extras. `desktop_action` owns the

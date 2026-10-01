@@ -1,4 +1,4 @@
-use wayrun_core::wire::{Action, ActionItem, PanelAction, ResultItem};
+use wayrun_core::wire::{Action, ActionItem, ResultItem};
 
 use super::State;
 
@@ -19,9 +19,7 @@ pub(super) fn item(
         summary: summary.map(str::to_string),
         on_click,
         icon: icon.map(str::to_string),
-        ephemeral: false,
         actions: Vec::new(),
-        badge: None,
     }
 }
 
@@ -36,9 +34,7 @@ pub(super) fn with_actions(mut row: ResultItem, titles: &[&str]) -> ResultItem {
         .iter()
         .map(|title| ActionItem {
             title: title.to_string(),
-            action: PanelAction::Execute {
-                command: run(title),
-            },
+            action: run(title),
             icon: None,
             id: None,
             plugin: None,
@@ -66,34 +62,10 @@ pub(super) fn file_row(uri: &str, actions: Vec<ActionItem>) -> ResultItem {
 pub(super) fn plugin_action(title: &str, command: Action, id: &str, default: bool) -> ActionItem {
     ActionItem {
         title: title.to_string(),
-        action: PanelAction::Execute { command },
+        action: command,
         icon: None,
         id: Some(id.to_string()),
         plugin: Some("file-search".to_string()),
         default,
-    }
-}
-
-pub(super) fn pin_entry(uri: &str, unpin: bool) -> ActionItem {
-    let on_click = Action::Open {
-        uri: uri.to_string(),
-    };
-    let action = if unpin {
-        PanelAction::Unpin {
-            scope: "f a".to_string(),
-            on_click,
-        }
-    } else {
-        PanelAction::Pin {
-            scope: "f a".to_string(),
-        }
-    };
-    ActionItem {
-        title: if unpin { "Unpin" } else { "Pin to top" }.to_string(),
-        action,
-        icon: None,
-        id: None,
-        plugin: None,
-        default: false,
     }
 }

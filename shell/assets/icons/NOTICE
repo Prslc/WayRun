@@ -11,25 +11,19 @@ tinting them.
 Local name    Source
 ----------    ------
 app           original (WayRun's launcher mark, not from Material Symbols)
-bookmark      bookmark
 calculator    calculate
 clipboard     content-paste
-clock         history
 copy          content-copy
 file          description
 folder        folder
-globe         public
 lock          lock
 logout        logout
 open          open-in-new
-pin           keep
 power         power-settings-new
 reboot        restart-alt
-remove        delete
 reveal        folder-open
 suspend       bedtime
 terminal      terminal
-unpin         keep-off
 window        window
 
 The `app` mark is WayRun's own work and carries no third-party licence; every

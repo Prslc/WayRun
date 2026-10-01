@@ -54,9 +54,8 @@ enabled = true
 结果行可以携带次级命令，显示在 `Shift+Enter` 二级菜单中。不同类型的菜单各不相同：
 `file-search`/`path-search` 提供“在终端中打开”“在文件管理器中显示”与“复制路径”，
 `app-search` 列出该条目的 `[Desktop Action …]`，外部主机的行则按所带的 `actions`
-提供（工作区的 `web.lua` 提供“复制链接”），
-每个可操作的行都会补上启动器级别的置顶/取消置顶，空查询历史来源的行还会多一条“从历史中移除”。
-菜单最前是行自身的命令，外部主机自带的动作排在插件自身动作之后，启动器级条目在最后。
+提供（工作区的 `web.lua` 提供“复制链接”）。菜单最前是行自身的命令，外部主机自带的
+动作排在插件自身动作之后。
 
 给动作填上 `id`，用户就能用 `Alt+Enter` 把它设为默认 Enter 动作；菜单里的 **打开**（行原本的
 命令）在这个手势下表示取消默认。见 [jsonrpc.md](jsonrpc.md#结果项) 的 `actions` 字段。
@@ -71,11 +70,20 @@ enabled = true
 关闭时、空闲两分钟后、或调用崩溃/卡死时，进程会被回收，下一次调用重新启动。两种模式下主机都必须
 对单次调用无状态，但常驻进程内可以自行缓存。
 
-身份 `icon` 与每条结果的 `icon` 都必须是主机**自己准备**的图标文件的绝对路径，动作的 `icon`
-与行的 `badge` 同理。主题图标名、`papirus:` 规范、`builtin:` 字形一律视为无图标。结果行自身
-没有图标时，改用所属插件的身份图标；身份图标也没有时，回退到编入二进制的占位图。
+身份 `icon` 与每条结果的 `icon` 都必须是绝对路径：主机**自己准备**的图标文件
+（`wayrun.script_dir()` 可定位脚本自身目录），或经 Lua SDK 的 `wayrun.icon()`
+解析出的主题图标；动作的 `icon` 同理。`builtin:` 字形、未经解析的主题图标名与
+`papirus:` 规范一律视为无图标。结果行自身没有图标时，改用
+所属插件的身份图标；身份图标也没有时，回退到编入二进制的占位图。
+
+每个插件都要声明自己所针对的 API 版本——主机在 `list_plugins` 身份中声明，Lua
+脚本在插件表中声明——与启动器自身版本不匹配时只记录日志，不拒绝该插件（它仍可能
+正常工作）。只有当插件**能观察到**的接口发生变化（绑定、签名、字段、沙箱规则）时
+该数字才变动，纯新增或启动器内部改动不会：新增 `wayrun.crypto` 不动它，而
+`wayrun.env` 收紧读取范围会动。没有版本号的旧插件算作 `0`，因此在你为它写明版本
+之前会一直收到提示。Lua 可在运行时通过 `wayrun.api` 读取当前版本。
 
 主机可以手写。[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区提供了一套
-Python 框架、Lua 与 Python 示例及模板（`template/`、`template.lua`），可复制起步。
-主机协议是 [jsonrpc.md](jsonrpc.md)
-中记录的 JSON-RPC 子集：`search`、`top`、`select`、`forget`、`list_plugins`。
+Python 框架、示例与模板（`template/`、`template.lua`），可复制起步。Lua 插件是一等
+公民——二进制自身承载脚本，见 [lua.md](lua.md)。主机协议是 [jsonrpc.md](jsonrpc.md)
+中记录的 JSON-RPC 子集：`search`、`top`、`list_plugins`。

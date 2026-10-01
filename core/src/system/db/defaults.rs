@@ -10,7 +10,7 @@ pub fn set(scope: &str, action_id: &str) -> Result<()> {
     with_db(|conn| set_with(conn, scope, action_id))
 }
 
-/// Forget a scope's default action.
+/// Clear a scope's default action.
 pub fn clear(scope: &str) -> Result<()> {
     with_db(|conn| clear_with(conn, scope))
 }

@@ -14,14 +14,10 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 | Method | Params | Result |
 |--------|--------|--------|
 | `search` | `{"text"}` | array of result items; sent as a notification, streams a `results` notification |
-| `top` | — | most-used items; sent as a notification, streams a `results` notification |
-| `dismiss` | — | `null` (the launcher closed: drops the remembered payload and any search still in flight) |
-| `select` | item object | `null` (records usage; `ephemeral` and `copy` rows are not) |
+| `dismiss` | — | `null` (the launcher closed: drops any search still in flight) |
+| `record` | `{"on_click": Action}` | `null` (bumps that command's usage count; a `copy` command is not recorded) |
 | `command` | an [`Action`](#actions) object | `null` (runs one row or panel command) |
-| `pin` | `{"scope","on_click": Action}` | `{"pinned": bool}` (pins a row of that query's payload) |
-| `unpin` | `{"scope","on_click": Action}` | `{"unpinned": bool}` |
 | `default` | `{"scope","action_id"}` | `null` (remembers the default Enter action for a plugin; a null `action_id` clears it) |
-| `forget` | `{"on_click": Action}` | `{"forgotten": bool}` |
 | `list_plugins` | — | plugin metadata; see [schema](#plugin-metadata-list_plugins) |
 | `theme` | — | theme colors |
 | `ping` | — | `"pong"` |
@@ -39,15 +35,15 @@ The core also pushes JSON-RPC notifications (no `id`):
 | `theme` | theme colors | the resolved theme, on connect and on every palette change |
 | `results` | array of result items | a search payload |
 
-`search` and `top` sent **without** an `id` are streaming: the core aborts any
-pending search, then answers with a `results` notification. Sent **with** an
-`id` they answer synchronously with the array, for one-shot clients.
+`search` sent **without** an `id` is streaming: the core aborts any pending
+search, then answers with a `results` notification. Sent **with** an `id` it
+answers synchronously with the array, for one-shot clients.
 
 ## Actions
 
 An `Action` is one object tagged by its `type` field (`{"type": …}`), describing
-what a row runs. It is the params of the `command` method and the type of a
-result's `on_click` and of a panel `execute` action:
+what a row runs. It is the params of the `command` method, the type of a result's
+`on_click`, and the type of a panel entry's `action`:
 
 | `type` | Fields | Effect |
 |--------|--------|--------|
@@ -68,26 +64,8 @@ survive; a `Terminal=true` handler is started inside a terminal.
 
 `search` takes an object with a `text` key (a non-empty string). An absent
 `params`, an empty `text`, a bare string, `{"query": …}`, or a non-string `text`
-returns `-32602`. Use `top` for the most-used items — `search` does not serve a
-default view.
-
-`forget` drops a row from usage history. When the `on_click` is a `run` action
-whose first token is a registered external host's `command`, the core also relays
-a `forget` request to that host so it can delete its own data — e.g. the todo
-plugin removes the todo. The answer says whether anything was really dropped:
-`true` when a history row was deleted **or** a host that owns the row answered
-without an error, `false` otherwise. A host without a `forget` method answers
-`-32601`, which counts as "not mine" — the launcher keeps such a row in the list
-rather than claiming a deletion nobody made.
-
-`pin` stores a row under an exact query string (`scope` is the whole trimmed
-input; `""` is the empty-query history), keyed by the command `on_click` names:
-the core looks the row up in the payload it last emitted for that scope, so a
-client never has to echo a row back, and a command that payload no longer holds
-answers `pinned: false`. `unpin` removes a pin by the same key. A later `search`
-whose `text` trims to that same string prepends the pins, most recently pinned
-first, deduplicated against the fresh results, and decorates them with their
-`actions`; a bare keyword does not match.
+returns `-32602`. A notification with an empty `text` cancels any pending
+search, so a cleared field never receives a stale payload.
 
 ## Plugin metadata (`list_plugins`)
 
@@ -101,7 +79,7 @@ Called on the core's stdin, it answers with the current registry:
 |-----|------|---------|
 | `id` | string | plugin id, matches the `plugins.toml` entry |
 | `name` | string | display name |
-| `icon` | string | icon absolute path |
+| `icon` | string | the identity icon spec: absolute path or `builtin:` glyph |
 | `keyword` | string | trigger prefix (empty = default) |
 | `enabled` | bool | whether the plugin is active |
 
@@ -110,15 +88,21 @@ Called on the core's stdin, it answers with the current registry:
 When a `plugins.toml` entry declares `command`, the core spawns the host and
 calls `list_plugins` once to discover identity. A Python framework and example
 hosts that speak this contract live in the
-[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace; the
-response `result` is an array of objects:
+[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace; a Lua plugin
+is hosted by the launcher itself and answers the same call — see
+[lua.md](lua.md). The response `result` is an array of objects:
 
 | Key | Type | Meaning |
 |-----|------|---------|
 | `id` | string (required) | plugin id — must match the `plugins.toml` entry id, or the identity is ignored |
 | `name` | string | display name (empty → falls back to the configured id) |
-| `icon` | string | absolute path to an icon the host ships (see [Icon specs](#icon-specs)) |
+| `icon` | string | an absolute path to an icon the host ships (see [Icon specs](#icon-specs)) |
 | `description` | string | ready hint shown in the `?` list and the keyword+space hint |
+| `api` | number | the plugin API the host targets; absent means `0`, before versioning |
+
+`api` is compared against the launcher's own plugin API version. A mismatch is
+logged on stderr and never refuses the plugin, which may still work; the rule for
+when the number moves is in [plugins.md](plugins.md).
 
 A host with no `list_plugins`, or with no id matching its entry, still works —
 searches are forwarded and results parsed — but its identity falls back to the
@@ -137,12 +121,10 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 # -> {"jsonrpc":"2.0","result":[{"title":…,"summary":…,"on_click":…,"icon":…}],"id":1}
 ```
 
-This `top` call is a core → host request — distinct from the core's own `top`
-RPC (most-used usage history), which serves the empty-launcher view. A host
-declares a default view by serving `top` (registering it via the plugin
-framework's `@plugin.method("top")`); the response `result` is an array of
-result items with the same [schema](#result-items) as `search`, icons
-included.
+This `top` call is a core → host request: a host declares a default view by
+serving `top` (registering it via the plugin framework's
+`@plugin.method("top")`); the response `result` is an array of result items with
+the same [schema](#result-items) as `search`, icons included.
 
 When the host returns a non-empty default view it is shown instead of the
 keyword+space identity hint. Otherwise — a host without `top` (unknown method
@@ -156,58 +138,44 @@ identity and its rows.
 
 ## Result items
 
-`search` and `top` return an array of items. Every item is an object with these
-keys — the first five are always present (`null` for an absent optional field),
-and `actions`/`badge` only when set:
+`search`, and a host's `top`, return an array of items. Every item is an object
+with these keys — the first four are always present (`null` for an absent
+optional field), and `actions` only when set:
 
 | Key | Type | Meaning |
 |-----|------|---------|
 | `title` | string | primary label (app name, command, file name, …) |
 | `summary` | string \| null | secondary line (command, path, description, …) |
 | `on_click` | [`Action`](#actions) \| null | action bound to Enter |
-| `icon` | string \| null | absolute path to an icon image; see [Icon specs](#icon-specs) |
-| `ephemeral` | bool | when true, selecting this row is not recorded in usage history |
+| `icon` | string \| null | the icon spec, an absolute path or a `builtin:` glyph; see [Icon specs](#icon-specs) |
 | `actions` | array | optional secondary commands for the `Shift+Enter` action panel |
-| `badge` | string \| null | optional status glyph at the row's right edge (a pin for a pinned row) |
 
-An `actions` entry is `{"title": string, "action": PanelAction, "icon"?: string}`,
-with the same icon-spec resolution as a row's `icon`. An entry may also carry `id`
-(its stable kind), `plugin` (the owner, which scopes a remembered default) and
-`default` (true when Enter runs it). The core assigns `plugin` and `default` — a
-host's values for those are ignored — and a host sets `id` on its own actions to
-make them defaultable.
+An `actions` entry is
+`{"title": string, "action": Action, "icon"?: string}`, with the same icon-spec
+resolution as a row's `icon`. An entry may also carry `id` (its stable kind),
+`plugin` (the owner, which scopes a remembered default) and `default` (true when
+Enter runs it). The core assigns `plugin` and `default` — a host's values for
+those are ignored — and a host sets `id` on its own actions to make them
+defaultable.
 
-A `PanelAction` is one of:
-
-| `type` | Fields | Meaning |
-|--------|--------|---------|
-| `execute` | `command` | run that [`Action`](#actions) |
-| `pin` | `scope` | pin the row's command to an exact query |
-| `unpin` | `scope`, `on_click` | unpin the command from an exact query |
-| `forget` | `on_click` | drop the command from usage history |
-
-The core attaches the launcher-level pin/unpin to every actionable row, and
-history removal to a row it sourced from the empty-query history that could have
-been recorded (not `ephemeral`, not `copy`); the owning built-in provider adds
-its type-specific ones (a file reveal, copy path or open in terminal, a
-`[Desktop Action …]` group, a copy-link), and a host's own entries are kept
-after them.
+The owning built-in provider adds its type-specific entries (a file reveal, copy
+path or open in terminal, a `[Desktop Action …]` group, a copy-link), and a
+host's own entries are kept after them.
 
 An item without `on_click` is non-interactive (display only).
 
-Selecting an item records it in usage history — the list behind an empty query
-(`top`). Two kinds of row are exempt: one the host marked `ephemeral: true` (a
-one-shot search hit, say), and one whose `on_click` is a `copy` action (its
-value is the copied text, not a target to re-open).
+`record` bumps the launch count of the command `on_click` names; the counts rank
+the default providers' results where they otherwise tie. A `copy` command is
+exempt: its value is the copied text, not a target to re-open.
 
 ### Icon specs
 
-Every `icon` is an absolute path. **External plugin hosts** (a `plugins.toml`
-entry with `command`) must return an absolute path to an icon file the host
-ships itself: in any result-item `icon` field (`search` results and `top`
-default views alike), in an action's `icon`, in the row's `badge`, and in the
-`list_plugins` identity `icon`. A theme icon name, a `papirus:` spec or a
-`builtin:` glyph counts as no icon.
+Every `icon` is an absolute path, or a `builtin:<name>` glyph the launcher
+draws from its compiled set. **External plugin hosts** (a `plugins.toml` entry
+with `command`) return an icon file the host ships itself — in any result-item
+`icon` field (`search` results and `top` default views alike), in an action's
+`icon`, and in the `list_plugins` identity `icon`. A `builtin:` glyph, a theme
+icon name or a `papirus:` spec counts as no icon.
 
 A row icon that is missing or symbolic falls back to the plugin's identity icon;
 when that is missing too, the bundled placeholder is drawn.

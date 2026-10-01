@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use std::env;
+use std::ffi::OsStr;
 use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 /// Release the allocator's free pages back to the kernel. Only glibc's
@@ -30,6 +32,24 @@ pub fn cache_dir() -> Option<PathBuf> {
     let dir = base.join("wayrun");
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
+}
+
+/// The first `$PATH` entry holding an executable `name`; a name containing a
+/// slash is a path itself. Symlinks resolve to the target whose exec bit decides.
+pub fn which_in(path: impl AsRef<OsStr>, name: &str) -> Option<PathBuf> {
+    let executable = |candidate: &Path| {
+        std::fs::metadata(candidate)
+            .map(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
+    };
+    if name.contains('/') {
+        let candidate = PathBuf::from(name);
+        return executable(&candidate).then_some(candidate);
+    }
+    env::split_paths(&path)
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .map(|dir| dir.join(name))
+        .find(|candidate| executable(candidate))
 }
 
 /// Create `path` only when it is absent; `O_EXCL` keeps the test atomic, so an
@@ -94,6 +114,41 @@ pub fn ensure_flatpak_data_dirs() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn which_in_scans_the_path_and_checks_the_exec_bit() {
+        let dir = tempfile::tempdir().unwrap();
+        let write = |path: &Path, mode: u32| {
+            std::fs::write(path, "#!/bin/sh\n").unwrap();
+            let mut perms = std::fs::metadata(path).unwrap().permissions();
+            perms.set_mode(mode);
+            std::fs::set_permissions(path, perms).unwrap();
+        };
+        let tool = dir.path().join("tool");
+        write(&tool, 0o755);
+        let plain = dir.path().join("plain");
+        write(&plain, 0o644);
+        let path = dir.path().to_str().unwrap();
+
+        assert_eq!(which_in(path, "tool").as_deref(), Some(tool.as_path()));
+        assert_eq!(which_in(path, "plain"), None, "the exec bit decides");
+        assert_eq!(which_in(path, "missing"), None);
+        assert_eq!(
+            which_in(path, tool.to_str().unwrap()).as_deref(),
+            Some(tool.as_path()),
+            "a name with a slash is a path"
+        );
+        assert_eq!(which_in(path, plain.to_str().unwrap()), None);
+
+        let first = tempfile::tempdir().unwrap();
+        write(&first.path().join("tool"), 0o755);
+        let joined = format!("{}:{}", first.path().display(), dir.path().display());
+        assert_eq!(
+            which_in(&joined, "tool").as_deref(),
+            Some(first.path().join("tool").as_path()),
+            "the first entry wins"
+        );
+    }
 
     #[test]
     fn writing_a_missing_file_never_truncates_an_existing_one() {

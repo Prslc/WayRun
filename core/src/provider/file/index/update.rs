@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
-use crate::provider::file::index::build::{
+use crate::provider::file::index::builder::{
     Root, Tables, read_dir_entries, walk_into, walk_pool, walk_threads,
 };
 use crate::provider::file::index::format::{
@@ -260,7 +260,7 @@ fn file_range(index: &Index, slot: u32) -> std::ops::Range<u32> {
 mod tests {
     use super::*;
     use crate::provider::file::index::MAX_ENTRIES;
-    use crate::provider::file::index::build::build;
+    use crate::provider::file::index::builder::build;
     use crate::provider::file::index::format::{header_bytes, layout_ok};
     use crate::provider::file::index::test_support::{parsed, write};
     use std::path::Path;

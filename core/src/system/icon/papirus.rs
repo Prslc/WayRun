@@ -75,7 +75,7 @@ pub(super) fn find_papirus(spec: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::system::icon::find_icon_path;
+    use crate::system::icon::find_icon_spec;
     use std::path::Path;
 
     #[test]
@@ -92,7 +92,7 @@ mod tests {
         if !Path::new("/usr/share/icons/Papirus").exists() {
             return; // theme not installed on this machine
         }
-        let path = find_icon_path("papirus:folder-open").unwrap();
+        let path = find_icon_spec("papirus:folder-open").unwrap();
         assert!(path.contains("/Papirus/"));
         assert!(path.ends_with(".svg"));
     }
@@ -104,7 +104,7 @@ mod tests {
         }
         // `system-shutdown` also lives under `apps`; the hint scopes to `panel`
         // first, then falls back to the other categories.
-        let path = find_icon_path("papirus:apps/system-shutdown").unwrap();
+        let path = find_icon_spec("papirus:apps/system-shutdown").unwrap();
         assert!(path.contains("/apps/system-shutdown.svg"));
     }
 
@@ -114,14 +114,14 @@ mod tests {
             return;
         }
         // the monochrome line-art variant, which the panel tints to the fg
-        let path = find_icon_path("papirus:symbolic/apps/utilities-terminal-symbolic").unwrap();
+        let path = find_icon_spec("papirus:symbolic/apps/utilities-terminal-symbolic").unwrap();
         assert!(path.contains("/symbolic/"), "{path}");
         assert!(path.ends_with("utilities-terminal-symbolic.svg"), "{path}");
     }
 
     #[test]
     fn papirus_unknown_name_falls_back_to_default() {
-        let path = find_icon_path("papirus:definitely-not-an-icon-xyz");
+        let path = find_icon_spec("papirus:definitely-not-an-icon-xyz");
         assert!(path.is_some()); // default icon, same semantics as any miss
     }
 }

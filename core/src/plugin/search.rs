@@ -1,24 +1,21 @@
 use std::cmp::Reverse;
 use std::time::Duration;
 
-use super::actions::{decorate, pin_scope};
-use super::model::Meta;
+use super::Meta;
+use super::actions::decorate;
 use super::rank::Rank;
 use super::registry::{REGISTRY, ensure_loaded, resolve_pending};
 use crate::provider::SHOW_CAP;
-use crate::system::icon::find_icon_path;
+use crate::system::icon::find_icon_spec;
 use crate::wire::Action;
 use crate::wire::ResultItem;
 use rust_i18n::t;
 
-/// Run a search and surface its action panel: the query's pins are prepended
-/// and every row is decorated with its secondary commands.
+/// Run a search and surface its action panel: every row is decorated with its
+/// secondary commands.
 pub async fn dispatch(input: &str) -> Vec<ResultItem> {
     let items = search(input).await;
-    let Some(scope) = pin_scope(input) else {
-        return items;
-    };
-    decorate(items, scope, false).await
+    decorate(items).await
 }
 
 async fn search(input: &str) -> Vec<ResultItem> {
@@ -103,7 +100,7 @@ async fn search(input: &str) -> Vec<ResultItem> {
             Some(entry.plugin.search_ranked(query, input).await)
         };
         if let Some(Ok(answered)) = answer {
-            let fallback = find_icon_path(&entry.plugin.meta().icon);
+            let fallback = find_icon_spec(&entry.plugin.meta().icon);
             rows.extend(answered.into_iter().map(|(rank, mut item)| {
                 fill_icon(&fallback, &mut item);
                 (rank, at as u32, item)
@@ -169,9 +166,9 @@ fn fill_icon(fallback: &Option<String>, item: &mut ResultItem) {
 }
 
 /// Rows a provider left iconless take its identity icon, so no placeholder ever
-/// reaches the shell; running before `decorate`, pins and history store the fill.
+/// reaches the shell; running before `decorate`, the history stores the fill.
 fn fill_icons(meta_icon: &str, mut items: Vec<ResultItem>) -> Vec<ResultItem> {
-    let fallback = find_icon_path(meta_icon);
+    let fallback = find_icon_spec(meta_icon);
     for item in &mut items {
         fill_icon(&fallback, item);
     }
@@ -198,10 +195,8 @@ fn identity_card(meta: &Meta, summary: String) -> ResultItem {
         title: meta.name.clone(),
         summary: Some(summary),
         on_click: None,
-        icon: find_icon_path(&meta.icon).or_else(|| Some(String::new())),
-        ephemeral: false,
+        icon: find_icon_spec(&meta.icon).or_else(|| Some(String::new())),
         actions: Vec::new(),
-        badge: None,
     }
 }
 
@@ -239,7 +234,7 @@ mod tests {
         let filled = fill_icons("utilities-terminal", items);
         assert_eq!(
             filled[0].icon,
-            find_icon_path("utilities-terminal"),
+            find_icon_spec("utilities-terminal"),
             "an empty spec is a miss, not an icon"
         );
         assert_eq!(filled[1].icon.as_deref(), Some("/tmp/kept.svg"));
@@ -253,9 +248,7 @@ mod tests {
                 cmd: command.to_string(),
             }),
             icon: None,
-            ephemeral: false,
             actions: Vec::new(),
-            badge: None,
         }
     }
 

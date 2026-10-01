@@ -15,8 +15,8 @@ English | [Chinese](docs/zh_cn/README_CN.md)
 </div>
 
 A Wayland-native application launcher and quick-search tool for Linux. Type to
-search installed apps, files, usage history and inline math, all from a single
-floating overlay.
+search installed apps, files and inline math, all from a single floating
+overlay.
 
 ## Overview
 
@@ -36,10 +36,8 @@ needs no GPU stack and no GUI toolkit.
   desktop itself would, with Flatpak apps and themed icons per row.
 - **Quick search** — files and paths, clipboard history, `$PATH` commands,
   open windows, system commands, and inline math.
-- **Usage history** — most-used items on an empty query.
-- **Action panel & pins** — `Shift+Enter` opens a per-type action menu (reveal a
-  file, run a desktop action, copy a link); `Pin to top` keeps a result first
-  under its keyword.
+- **Action panel** — `Shift+Enter` opens a per-type action menu (reveal a
+  file, run a desktop action, copy a link).
 - **Themeable** — follows DankMaterialShell's Material You palette, with
   `theme.toml` overrides for colors, blur, layout, typography and motion.
 - **Extensible** — eight built-ins in the binary; everything else is an
@@ -75,7 +73,7 @@ workspace:
 | a blurred card | `ext-background-effect-v1` (niri) or the compositor's own blur by namespace |
 | per-row icons | a desktop **icon theme** (optional); without one, rows fall back to a bundled placeholder |
 
-The action panel, badge and built-in plugin glyphs are compiled into the binary,
+The action panel and built-in plugin glyphs are compiled into the binary,
 so the launcher is fully usable with no icon theme at all. App and file rows
 follow the desktop's icon theme; see [config.md](docs/en/config.md) for the
 `[icon]` override.
@@ -89,8 +87,7 @@ host: an executable that speaks the documented JSON-RPC subset, registered from
 Python framework, Lua and Python examples (`firefox.lua`, `web.lua`, …) and
 templates to copy from. A Lua plugin is one script file — the launcher binary
 runs it itself, so there is no interpreter to install; see
-[Plugins](docs/en/plugins.md) and the workspace's
-[Lua plugins](https://github.com/Prslc/WayRun-Plugins/blob/main/docs/en/LUA.md).
+[Plugins](docs/en/plugins.md) and [Lua plugins](docs/en/lua.md).
 
 ## Quick Start
 
@@ -135,6 +132,8 @@ cargo build --release -p wayrun-shell --no-default-features      # no window sea
 - [Config](docs/en/config.md) — `config.toml` (search engine, font family).
 - [Plugins](docs/en/plugins.md) — `plugins.toml`, the built-ins, and external
   JSON-RPC hosts.
+- [Lua plugins](docs/en/lua.md) — one script the launcher hosts itself: the
+  `wayrun` table, the sandbox, and registering it.
 - [JSON-RPC 2.0](docs/en/jsonrpc.md) — the wire protocol and the result schema.
 
 ## Credit
@@ -152,5 +151,5 @@ Dual licensed under either of the following, at your option:
 - **Apache-2.0** — [LICENSE-APACHE](LICENSE-APACHE)
 
 The built-in UI glyphs are Google Material Symbols under the Apache License 2.0;
-see [core/assets/icons/NOTICE](core/assets/icons/NOTICE) for the attribution and
+see [shell/assets/icons/NOTICE](shell/assets/icons/NOTICE) for the attribution and
 the full license text.

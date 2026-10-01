@@ -3,6 +3,7 @@ use std::time::Instant;
 use tiny_skia::Pixmap;
 
 use crate::app::State;
+use crate::ui::geom;
 use crate::ui::icons::IconCache;
 use crate::ui::text::TextEngine;
 
@@ -93,24 +94,14 @@ pub fn draw(
             h: card.h - 1.0,
         },
         layout.hairline_radius(),
-        layout.hairline_width,
+        geom::HAIRLINE_W,
         state.fade_rgba(state.surfaces.hairline, now),
     );
 
     mark("card");
     let field = Rect::field_at(card.x, card.y, card.w);
-    canvas.fill_round(
-        pixmap,
-        field,
-        layout.field_radius(),
-        state.fade_rgba(state.surfaces.field, now),
-    );
-
-    mark("shapes");
-
     field::draw_magnifier(&canvas, pixmap, field, state, now);
     field::draw_query(&canvas, pixmap, field, state, text, now);
-    field::draw_toolbar(&canvas, pixmap, state, text, now);
     mark("query");
 
     if state.menu.is_some() {
@@ -231,7 +222,7 @@ mod tests {
         let mut state = State::new();
         state.surface = (1600, 1080);
         state.reduce_motion = true;
-        let card_h = state.appearance.layout.content_h(0);
+        let card_h = state.content_height();
         // The previous card was 200px taller than the current one.
         state.last_card_bottom = state.appearance.layout.card_top(state.surface) + card_h + 200.0;
 

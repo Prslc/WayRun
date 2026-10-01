@@ -60,12 +60,9 @@ instead; they then keep no cache.
 A result row can carry secondary commands, shown in the `Shift+Enter` panel. They
 differ by result type: `file-search`/`path-search` offer "Open in terminal",
 "Reveal in file manager" and "Copy path", `app-search` lists the entry's
-`[Desktop Action …]` groups, an external host's rows carry whatever `actions` it
-attaches (the workspace's `web.lua` offers "Copy URL"), and every actionable row
-gets the launcher-level pin/unpin — plus "Remove from history" on a row the
-empty-query history sourced. The row's own command leads the panel, an external
-host's own `actions` follow the plugin's, and the launcher-level entries come
-last.
+`[Desktop Action …]` groups, and an external host's rows carry whatever `actions`
+it attaches (the workspace's `web.lua` offers "Copy URL"). The row's own command
+leads the panel, and an external host's own `actions` follow the plugin's.
 
 Give an action an `id` to let the user make it the default `Enter` action with
 `Alt+Enter`; the panel's **Open** entry — the row's own command — takes the
@@ -85,14 +82,27 @@ when the launcher dismisses, when it sits idle for two minutes, or when a call
 crashes or stalls; the next call starts a new one. The host must be stateless
 per call either way, but it may cache within its process lifetime.
 
-Both the identity `icon` and each result `icon` must be an absolute path to an
-icon file the host ships itself; the same holds for an action's `icon` and a
-row's `badge`. A theme icon name, a `papirus:` spec or a `builtin:` glyph counts
-as no icon. A result whose own icon is missing falls back to the plugin's
-identity icon, and the built-in placeholder answers when that is missing too.
+Both the identity `icon` and each result `icon` must be an absolute path — a
+file the host ships itself (`wayrun.script_dir()` locates the script's own
+directory) or a theme icon the Lua SDK's `wayrun.icon()` resolved; the same
+holds for an action's `icon`. A `builtin:` glyph, or a theme name or `papirus:`
+spec left unresolved, counts as no icon. A result whose own icon is missing
+falls back to the plugin's identity icon, and the built-in placeholder answers
+when that is missing too.
+
+Every plugin names the API version it targets — a host in its `list_plugins`
+identity, a Lua script in its plugin table — and the launcher logs a mismatch
+against its own version without refusing the plugin, which may still work. The
+number moves when a plugin can observe the change (a binding, a signature, a
+field, a sandbox rule), never for an addition or for a change inside the
+launcher, so gaining `wayrun.crypto` does not move it while `wayrun.env` gaining
+a scope does. A plugin written before versioning is `0`, so it is warned about
+until it states the version it means. Lua can read the current one at runtime
+through `wayrun.api`.
 
 Hosts can be written by hand. The
 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace ships a
-Python framework, Lua and Python examples and templates (`template/`,
-`template.lua`), and the host protocol is the JSON-RPC subset documented in
-[jsonrpc.md](jsonrpc.md): `search`, `top`, `select`, `forget`, `list_plugins`.
+Python framework, examples and templates (`template/`, `template.lua`). A Lua
+plugin is first-party — the binary hosts the script itself, see [lua.md](lua.md)
+— and the host protocol is the JSON-RPC subset documented in
+[jsonrpc.md](jsonrpc.md): `search`, `top`, `list_plugins`.

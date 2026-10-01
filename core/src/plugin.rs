@@ -1,16 +1,14 @@
+use std::borrow::Cow;
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::wire::{Action, ResultItem};
+use crate::wire::ResultItem;
 
 mod actions;
-mod model;
 mod rank;
 mod registry;
 mod search;
 
-pub use actions::{decorate, drop_remembered, forget_row, pin_row};
-pub use model::Meta;
 /// The ranking vocabulary providers and the dispatcher share.
 pub use rank::{
     Match, Rank, Ranked, classify, classify_bytes_confident, classify_ci, classify_ci_confident,
@@ -18,6 +16,15 @@ pub use rank::{
 };
 pub use registry::{list_plugins, print_list, reload, reload_if_changed};
 pub use search::dispatch;
+
+pub struct Meta {
+    /// Borrowed for a built-in, owned for a discovered host, so a host's
+    /// identity needs no lifetime extension.
+    pub id: Cow<'static, str>,
+    pub name: String,
+    pub icon: Cow<'static, str>,
+    pub ready: String,
+}
 
 pub trait Plugin: Send + Sync {
     fn meta(&self) -> &Meta;
@@ -53,31 +60,20 @@ pub trait Plugin: Send + Sync {
         Box::pin(async { Ok(None) })
     }
 
-    /// Drop a row's data (best effort, from `forget`); usage history is the
-    /// caller's. `true` means this provider owned the row and dropped it.
-    fn forget(
-        &self,
-        _command: &Action,
-    ) -> Pin<Box<dyn Future<Output = anyhow::Result<bool>> + Send + '_>> {
-        Box::pin(async { Ok(false) })
-    }
-
     /// Type-specific commands for one of this plugin's rows, shown in the action
-    /// panel. The core adds pin/unpin and history removal itself.
+    /// panel; the core leads the panel with the row's own command.
     fn actions(&self, _item: &ResultItem) -> Vec<crate::wire::ActionItem> {
         Vec::new()
     }
 }
 
 #[cfg(test)]
-fn item(title: &str, command: Action) -> ResultItem {
+fn item(title: &str, command: crate::wire::Action) -> ResultItem {
     ResultItem {
         title: title.to_string(),
         summary: None,
         on_click: Some(command),
         icon: None,
-        ephemeral: false,
         actions: Vec::new(),
-        badge: None,
     }
 }

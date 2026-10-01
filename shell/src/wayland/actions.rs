@@ -4,12 +4,12 @@ use calloop::timer::{TimeoutAction, Timer};
 
 use crate::app;
 use crate::session::backend;
-use wayrun_core::wire::{Action, ActionItem, PanelAction};
+use wayrun_core::wire::{Action, ActionItem};
 
 use super::Shell;
 
 impl Shell {
-    /// Every editing path — typing, paste, IME, ✕ — funnels here into one search
+    /// Every editing path — typing, paste, IME — funnels here into one search
     /// line, and cancels a panel resume before its reply re-opens the panel.
     pub(super) fn query_changed(&mut self) {
         self.app.cancel_panel_resume();
@@ -17,13 +17,13 @@ impl Shell {
     }
 
     /// Re-send the current query, leaving a pending panel resume in place.
-    fn resend_query(&self) {
+    fn resend_query(&mut self) {
         if self.app.query.is_empty() {
-            // an empty query means the usage-ranked history
-            backend::top();
-        } else {
-            backend::search(&self.app.query);
+            // No query is no result set: the list clears in place.
+            self.app.apply_results(Vec::new(), Instant::now());
+            self.redraw();
         }
+        backend::search(&self.app.query);
     }
 
     /// Usage recording first, then exactly one command line to the core.
@@ -36,7 +36,7 @@ impl Shell {
             return;
         };
 
-        self.record_row_for(&launch, &launch.effective);
+        self.record_row_for(&launch.target, &launch.effective);
 
         // Enter runs the remembered default action when the row has one, but
         // usage above stays keyed to the row's own command.
@@ -45,20 +45,13 @@ impl Shell {
         self.schedule_dismiss(now);
     }
 
-    /// Record a row in usage history, unless the command about to run is a
-    /// clipboard write: a copy is no re-launchable target and stays out of history.
-    fn record_row_for(&self, launch: &app::Launch, runs: &Action) {
+    /// Record a row in the usage counts, unless the command about to run is a
+    /// clipboard write: a copy is no re-launchable target.
+    fn record_row_for(&self, target: &Action, runs: &Action) {
         if matches!(runs, Action::Copy { .. }) {
             return;
         }
-        let usage = serde_json::json!({
-            "title": launch.title,
-            "summary": launch.summary,
-            "on_click": launch.target,
-            "icon": launch.icon,
-            "ephemeral": launch.ephemeral,
-        });
-        backend::select(&usage);
+        backend::record(target);
     }
 
     /// The surface outlives a launch by `EXIT_DELAY_MS`. Without it a non-resident
@@ -122,32 +115,14 @@ impl Shell {
         self.keep_panel(&action);
     }
 
-    /// One action-panel command: pin/unpin and the default re-search keep the panel on
-    /// the changed entry; the rest launch and dismiss; `forget` drops its row.
+    /// One action-panel command: record the row, run the action and dismiss.
     fn execute_action(&mut self, action: &ActionItem, now: Instant) {
-        match &action.action {
-            PanelAction::Execute { command } => {
-                if let Some(launch) = self.app.selected_row() {
-                    self.record_row_for(&launch, command);
-                }
-                backend::command(command);
-                self.schedule_dismiss(now);
-            }
-            PanelAction::Pin { scope } => {
-                if let Some(command) = self.app.menu_parent_command() {
-                    backend::pin(scope, &command);
-                }
-                self.keep_panel(action);
-            }
-            PanelAction::Unpin { scope, on_click } => {
-                backend::unpin(scope, on_click);
-                self.keep_panel(action);
-            }
-            PanelAction::Forget { on_click } => {
-                backend::forget_row(on_click);
-                self.close_panel(now);
-            }
+        let command = &action.action;
+        if let Some(launch) = self.app.selected_row() {
+            self.record_row_for(&launch.target, command);
         }
+        backend::command(command);
+        self.schedule_dismiss(now);
     }
 
     /// Re-send the query with the panel held open on `action`, so the reply

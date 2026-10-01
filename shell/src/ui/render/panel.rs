@@ -75,7 +75,6 @@ pub(super) fn draw_actions(
             title: &action.title,
             bold: false,
             summary: None,
-            badge: None,
             default_marker: marked == Some(index),
         };
         draw_row(canvas, pixmap, state, text, icons, now, &body);

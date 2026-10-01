@@ -3,6 +3,9 @@ pub const PAD: f32 = 14.0;
 pub const SEARCH_H: f32 = 52.0;
 pub const GAP: f32 = 10.0;
 pub const FOOTER_H: f32 = 28.0;
+pub const HAIRLINE_W: f32 = 1.0;
+pub const ACCENT_W: f32 = 3.0;
+pub const ACCENT_H: f32 = 28.0;
 
 /// The card's horizontal anchor on the output.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -17,41 +20,21 @@ pub enum Align {
 /// the original metrics, so an untouched config renders the same frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Layout {
-    pub width_ratio: f32,
-    pub width_min: f32,
-    pub width_max: f32,
+    /// The card's width in logical pixels; a narrower output shrinks it.
+    pub width: f32,
     pub top_ratio: f32,
     pub align: Align,
-    pub offset_x: f32,
-    pub offset_y: f32,
     pub radius: f32,
-    // Explicit inner radii; `None` keeps the base each one derives from.
-    pub field_radius: Option<f32>,
-    pub row_radius: Option<f32>,
-    pub chip_radius: Option<f32>,
-    pub hairline_width: f32,
-    pub accent_width: f32,
-    pub accent_height: f32,
     pub max_rows: usize,
 }
 
 impl Default for Layout {
     fn default() -> Self {
         Self {
-            width_ratio: 0.38,
-            width_min: 560.0,
-            width_max: 760.0,
+            width: 730.0,
             top_ratio: 0.28,
             align: Align::Center,
-            offset_x: 0.0,
-            offset_y: 0.0,
             radius: 16.0,
-            field_radius: None,
-            row_radius: None,
-            chip_radius: None,
-            hairline_width: 1.0,
-            accent_width: 3.0,
-            accent_height: 28.0,
             max_rows: 5,
         }
     }
@@ -68,7 +51,7 @@ pub struct BlurRect {
 
 impl Layout {
     pub fn card_w(&self, surface: (u32, u32)) -> f32 {
-        ((surface.0 as f32) * self.width_ratio).clamp(self.width_min, self.width_max)
+        self.width.min((surface.0 as f32 - 2.0 * PAD).max(0.0))
     }
 
     pub fn card_x(&self, surface: (u32, u32)) -> f32 {
@@ -78,13 +61,13 @@ impl Layout {
             Align::Center => ((surface.0 as f32) - width) / 2.0,
             Align::Right => (surface.0 as f32) - width,
         };
-        (base + self.offset_x).round()
+        base.round()
     }
 
     /// Fixed card top: results only extend the card downward, so the search bar
     /// never moves when the row count changes.
     pub fn card_top(&self, surface: (u32, u32)) -> f32 {
-        ((surface.1 as f32) * self.top_ratio + self.offset_y).round()
+        ((surface.1 as f32) * self.top_ratio).round()
     }
 
     /// The band a row is drawn in, as `(left, width)`: the card inset by `PAD`,
@@ -93,14 +76,6 @@ impl Layout {
     /// selects the row beside it.
     pub fn row_band(&self, surface: (u32, u32)) -> (f32, f32) {
         (self.card_x(surface) + PAD, self.card_w(surface) - 2.0 * PAD)
-    }
-
-    /// The ✕ button's circle in logical pixels: centre x, centre y, radius. The
-    /// toolbar draws it and `State::clear_hit` claims it.
-    pub fn clear_circle(&self, surface: (u32, u32)) -> (f32, f32, f32) {
-        let right = self.card_x(surface) + self.card_w(surface) - PAD - 8.0;
-        let center_y = self.card_top(surface) + PAD + SEARCH_H / 2.0;
-        (right - 13.0, center_y, 13.0)
     }
 
     /// The y of the first list row: the card's padding, the search field and the
@@ -122,6 +97,12 @@ impl Layout {
         } else {
             base + GAP + self.list_h(rows)
         }
+    }
+
+    /// The card with only the search field: what a pristine show rests at,
+    /// with no gap, footer band or list to reserve.
+    pub fn empty_h(&self) -> f32 {
+        PAD + SEARCH_H + PAD
     }
 
     /// The action panel's header band: the parent row's title, above the actions offered.
@@ -262,29 +243,18 @@ impl Layout {
     }
 
     /// Nested radii stay inside the card: at the default 16 they are the
-    /// designed 9/8/6, and a smaller card radius pulls them in with it.
-    fn inner(&self, base: f32, explicit: Option<f32>) -> f32 {
-        explicit
-            .unwrap_or(base)
-            .min((self.radius - 1.0).max(0.0))
-            .max(0.0)
-    }
-
-    pub fn field_radius(&self) -> f32 {
-        self.inner(9.0, self.field_radius)
+    /// designed 8, and a smaller card radius pulls them in with it.
+    fn inner(&self, base: f32) -> f32 {
+        base.min((self.radius - 1.0).max(0.0)).max(0.0)
     }
 
     pub fn row_radius(&self) -> f32 {
-        self.inner(8.0, self.row_radius)
-    }
-
-    pub fn chip_radius(&self) -> f32 {
-        self.inner(6.0, self.chip_radius)
+        self.inner(8.0)
     }
 
     /// The selected row's accent bar, a pill half as wide as it is thick.
     pub fn accent_radius(&self) -> f32 {
-        self.accent_width / 2.0
+        ACCENT_W / 2.0
     }
 }
 
@@ -351,10 +321,13 @@ mod tests {
         let l = Layout::default();
         assert_eq!(l.content_h(0), 118.0);
         assert_eq!(l.content_h(5), 448.0);
-        assert_eq!(l.field_radius(), 9.0);
+        // the pristine card drops the gap and the footer band
+        assert_eq!(l.empty_h(), 80.0);
         assert_eq!(l.row_radius(), 8.0);
-        assert_eq!(l.chip_radius(), 6.0);
         assert_eq!(l.hairline_radius(), 15.5);
+        // a narrower output shrinks the card to fit its padding
+        assert_eq!(l.card_w((1920, 1080)), 730.0);
+        assert_eq!(l.card_w((720, 1080)), 692.0);
     }
 
     #[test]
@@ -394,14 +367,12 @@ mod tests {
             radius: 8.0,
             ..Layout::default()
         };
-        assert_eq!(l.field_radius(), 7.0);
         assert_eq!(l.row_radius(), 7.0);
-        assert_eq!(l.chip_radius(), 6.0);
         assert_eq!(l.hairline_radius(), 7.5);
     }
 
     #[test]
-    fn align_and_offsets_place_the_card() {
+    fn align_places_the_card() {
         let surface = (1920, 1080);
         let center = Layout::default();
         let width = center.card_w(surface);
@@ -410,37 +381,14 @@ mod tests {
 
         let left = Layout {
             align: Align::Left,
-            offset_x: 20.0,
             ..Layout::default()
         };
-        assert_eq!(left.card_x(surface), 20.0);
+        assert_eq!(left.card_x(surface), 0.0);
 
         let right = Layout {
             align: Align::Right,
             ..Layout::default()
         };
-        assert_eq!(right.card_x(surface), (1920.0_f32 - width).round());
-
-        let shifted = Layout {
-            offset_y: -30.0,
-            ..Layout::default()
-        };
-        assert_eq!(
-            shifted.card_top(surface),
-            (1080.0_f32 * 0.28 - 30.0).round()
-        );
-    }
-
-    #[test]
-    fn an_explicit_inner_radius_is_pulled_inside_the_card() {
-        let l = Layout {
-            radius: 10.0,
-            field_radius: Some(20.0),
-            row_radius: Some(4.0),
-            ..Layout::default()
-        };
-        assert_eq!(l.field_radius(), 9.0);
-        assert_eq!(l.row_radius(), 4.0);
-        assert_eq!(l.accent_radius(), 1.5);
+        assert_eq!(right.card_x(surface), 1920.0 - width);
     }
 }

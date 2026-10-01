@@ -1,5 +1,7 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::io::{BufRead, Write};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use anyhow::{Context, Result};
@@ -8,6 +10,11 @@ use serde_json::json;
 
 use crate::wire::ResultItem;
 
+mod areas;
+mod crypto;
+mod fuzzy;
+mod http;
+mod kv;
 mod sdk;
 mod sqlite;
 
@@ -37,25 +44,40 @@ struct Plugin {
     id: String,
     name: String,
     icon: Option<String>,
+    api: u32,
     description: Option<String>,
+    env: Vec<String>,
+    read: Vec<PathBuf>,
     search: Option<Function>,
     top: Option<Function>,
-    forget: Option<Function>,
 }
 
 struct Host {
     lua: Lua,
     script: String,
     plugins: Vec<Plugin>,
+    active: kv::Active,
 }
 
 impl Host {
     fn new(script: &str, source: &str) -> Result<Self> {
         // mlua's error carries no Send bound, so it converts here, once.
         let scope: sdk::Scope = Rc::new(RefCell::new(Vec::new()));
+        let active: kv::Active = Rc::new(RefCell::new(None));
+        let kv_paths: kv::Paths = Rc::new(RefCell::new(HashMap::new()));
+        let env_scope: sdk::EnvScope = Rc::new(RefCell::new(HashMap::new()));
+        let read_areas: areas::Areas = Rc::new(RefCell::new(HashMap::new()));
         let load = || -> mlua::Result<(Lua, Vec<Plugin>)> {
             let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::default())?;
-            let wayrun = sdk::build(&lua, script, Rc::clone(&scope))?;
+            let wayrun = sdk::build(
+                &lua,
+                script,
+                Rc::clone(&scope),
+                Rc::clone(&active),
+                Rc::clone(&kv_paths),
+                Rc::clone(&env_scope),
+                Rc::clone(&read_areas),
+            )?;
             let env = script_env(&lua, &wayrun)?;
             let declared: Table = lua
                 .load(source)
@@ -66,15 +88,29 @@ impl Host {
             Ok((lua, plugins))
         };
         let (lua, plugins) = load().map_err(|error| anyhow::anyhow!("{error}"))?;
-        // The declared ids are known only now; the fs scope fills here.
-        *scope.borrow_mut() = plugins
-            .iter()
-            .filter_map(|plugin| sdk::plugin_dir(&plugin.id))
-            .collect();
+        // The declared ids are known only now; the read scope, the kv paths,
+        // the readable env names and the read areas fill here.
+        let mut roots = Vec::new();
+        let mut paths = HashMap::new();
+        let mut envs = HashMap::new();
+        let mut areas = HashMap::new();
+        for plugin in &plugins {
+            envs.insert(plugin.id.clone(), plugin.env.clone());
+            areas.insert(plugin.id.clone(), plugin.read.clone());
+            if let Some(dir) = sdk::plugin_dir(&plugin.id) {
+                paths.insert(plugin.id.clone(), dir.join("kv.db"));
+                roots.push(dir);
+            }
+        }
+        *scope.borrow_mut() = roots;
+        *kv_paths.borrow_mut() = paths;
+        *env_scope.borrow_mut() = envs;
+        *read_areas.borrow_mut() = areas;
         Ok(Self {
             lua,
             script: script.to_string(),
             plugins,
+            active,
         })
     }
 
@@ -121,6 +157,7 @@ impl Host {
                         "name": plugin.name,
                         "icon": plugin.icon.clone().unwrap_or_default(),
                         "description": plugin.description.clone().unwrap_or_default(),
+                        "api": plugin.api,
                     }))
                     .collect::<Vec<_>>()
             )),
@@ -136,10 +173,6 @@ impl Host {
                 let plugin = self.plugin(params)?;
                 self.call(plugin, "top", plugin.top.as_ref(), ())
             }
-            Some("forget") => match params.and_then(|params| params.get("on_click")) {
-                Some(action) => self.forget(action),
-                None => Err((-32602, "forget needs an on_click action".to_string())),
-            },
             Some(other) => Err((-32601, format!("unknown method {other:?}"))),
             None => Err((-32600, "missing method".to_string())),
         }
@@ -174,6 +207,7 @@ impl Host {
                 format!("plugin {} has no {method} method", plugin.id),
             ));
         };
+        *self.active.borrow_mut() = Some(plugin.id.clone());
         let returned: Value = function.call(arg).map_err(|error| {
             warn(
                 &self.script,
@@ -215,32 +249,6 @@ impl Host {
             }
         }
         json!(rows)
-    }
-
-    /// `forget` carries no plugin id, so every plugin answers for the row and
-    /// the first claim wins; none is an error, which the core reads as "not ours".
-    fn forget(
-        &self,
-        action: &serde_json::Value,
-    ) -> std::result::Result<serde_json::Value, (i64, String)> {
-        let action = self
-            .lua
-            .to_value(action)
-            .map_err(|error| (-32000, format!("unreadable action: {error}")))?;
-        for plugin in &self.plugins {
-            let Some(function) = &plugin.forget else {
-                continue;
-            };
-            match function.call::<Value>(action.clone()) {
-                Ok(Value::Boolean(true)) => return Ok(json!(true)),
-                Ok(_) => {}
-                Err(error) => warn(
-                    &self.script,
-                    &format!("plugin {} forget: {error}", plugin.id),
-                ),
-            }
-        }
-        Err((-32000, "no plugin owns the row".to_string()))
     }
 }
 
@@ -303,24 +311,54 @@ fn read_plugins(declared: &Table, script: &str) -> mlua::Result<Vec<Plugin>> {
             .unwrap_or_else(|| id.clone());
         let icon: Option<String> = entry.get("icon")?;
         let icon = match icon {
-            Some(spec) if spec.starts_with('/') => Some(spec),
             Some(spec) => {
-                warn(
-                    script,
-                    &format!("plugin {id}: icon {spec:?} is not an absolute path; dropped"),
-                );
-                None
+                let kept = crate::system::icon::host_icon_spec(&spec);
+                if kept.is_none() {
+                    warn(
+                        script,
+                        &format!("plugin {id}: icon {spec:?} is not an absolute path; dropped"),
+                    );
+                }
+                kept
             }
             None => None,
         };
+        let env: Vec<String> = entry.get::<Option<Vec<String>>>("env")?.unwrap_or_default();
+        for name in &env {
+            // Names are exact: a pattern would defeat the manifest's point, a
+            // plugin naming the secrets it reads.
+            if name.is_empty() || name.contains('*') {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "{script}: plugin {id}: env {name:?} is not a plain name"
+                )));
+            }
+        }
+        let mut read = Vec::new();
+        for spec in entry
+            .get::<Option<Vec<String>>>("read")?
+            .unwrap_or_default()
+        {
+            // A pattern would defeat the manifest's point, a plugin naming the
+            // areas it looks at; `expand` already refuses `..` and relatives.
+            match areas::expand(&spec) {
+                Some(path) if !spec.contains('*') => read.push(path),
+                _ => {
+                    return Err(mlua::Error::RuntimeError(format!(
+                        "{script}: plugin {id}: read {spec:?} is not a plain path"
+                    )));
+                }
+            }
+        }
         plugins.push(Plugin {
             id,
             name,
             icon,
+            api: entry.get::<Option<u32>>("api")?.unwrap_or(0),
             description: entry.get("description")?,
+            env,
+            read,
             search: entry.get("search")?,
             top: entry.get("top")?,
-            forget: entry.get("forget")?,
         });
     }
     if plugins.is_empty() {
@@ -389,12 +427,64 @@ mod tests {
     }
 
     #[test]
+    fn a_manifest_icon_is_a_shipped_file_or_nothing() {
+        let host = host(
+            r#"
+            return {
+              { id = "file", icon = "/tmp/x.svg", search = function() return {} end },
+              { id = "glyph", icon = "builtin:power", search = function() return {} end },
+              { id = "theme", icon = "firefox", search = function() return {} end },
+            }
+            "#,
+        );
+        let icons: Vec<_> = host.plugins.iter().map(|p| p.icon.as_deref()).collect();
+        assert_eq!(icons, [Some("/tmp/x.svg"), None, None]);
+    }
+
+    #[test]
+    fn a_manifest_api_reaches_the_identity_reply() {
+        let host = host(
+            r#"
+            return {
+              { id = "current", api = 1, search = function() return {} end },
+              { id = "unversioned", search = function() return {} end },
+            }
+            "#,
+        );
+        let list = call(&host, "list_plugins", json!({})).unwrap();
+        let apis: Vec<_> = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["api"].as_u64())
+            .collect();
+        assert_eq!(apis, [Some(1), Some(0)]);
+    }
+
+    #[test]
+    fn the_sdk_icon_helper_resolves_a_path_but_no_glyph() {
+        let host = host(
+            r#"
+            return {
+              { id = "path", icon = wayrun.icon("/tmp/x.svg"),
+                search = function() return {} end },
+              { id = "glyph", icon = wayrun.icon("builtin:app"),
+                search = function() return {} end },
+            }
+            "#,
+        );
+        let icons: Vec<_> = host.plugins.iter().map(|p| p.icon.as_deref()).collect();
+        assert_eq!(icons, [Some("/tmp/x.svg"), None]);
+    }
+
+    #[test]
     fn time_env_and_script_dir_are_bound() {
         let host = host(
             r#"
             return {
               {
                 id = "demo",
+                env = { "PATH" },
                 search = function()
                   local path = wayrun.env("PATH")
                   return {
@@ -409,9 +499,236 @@ mod tests {
         );
         let rows = search(&host, "demo", "x");
         assert_eq!(rows[0]["title"], "true", "time is a number");
-        assert_eq!(rows[1]["title"], "true", "PATH is readable");
+        assert_eq!(rows[1]["title"], "true", "a declared PATH is readable");
         // The test script path is fabricated, so the fallback parent wins.
         assert_eq!(rows[2]["title"], "/test");
+    }
+
+    #[test]
+    fn an_undeclared_env_name_is_refused() {
+        let host = host(
+            r#"
+            return {
+              {
+                id = "demo",
+                env = { "PATH" },
+                search = function()
+                  local ok = pcall(wayrun.env, "HOME")
+                  return { { title = tostring(ok) } }
+                end,
+              },
+            }
+            "#,
+        );
+        let rows = search(&host, "demo", "x");
+        assert_eq!(rows[0]["title"], "false", "an undeclared name raises");
+    }
+
+    #[test]
+    fn each_plugin_reads_only_its_own_env() {
+        let host = host(
+            r#"
+            return {
+              {
+                id = "one",
+                env = { "PATH" },
+                search = function()
+                  return { { title = tostring(wayrun.env("PATH") ~= nil) } }
+                end,
+              },
+              {
+                id = "two",
+                search = function()
+                  local ok = pcall(wayrun.env, "PATH")
+                  return { { title = tostring(ok) } }
+                end,
+              },
+            }
+            "#,
+        );
+        assert_eq!(search(&host, "one", "x")[0]["title"], "true");
+        assert_eq!(
+            search(&host, "two", "x")[0]["title"],
+            "false",
+            "a sibling plugin's declaration does not carry over"
+        );
+    }
+
+    #[test]
+    fn an_env_read_while_the_script_loads_is_refused() {
+        let loaded = Host::new(
+            "/test/script.lua",
+            r#"
+            wayrun.env("PATH")
+            return { { id = "demo", search = function() return {} end } }
+            "#,
+        );
+        assert!(
+            loaded.is_err(),
+            "a load-time read has no plugin to attribute it to"
+        );
+    }
+
+    #[test]
+    fn an_env_pattern_is_refused_at_load() {
+        let loaded = Host::new(
+            "/test/script.lua",
+            r#"return { { id = "demo", env = { "YOUDAO_*" }, search = function() return {} end } }"#,
+        );
+        assert!(loaded.is_err(), "env names are exact");
+    }
+
+    #[test]
+    fn an_undeclared_area_is_refused() {
+        let host = host(
+            r#"
+            return {
+              {
+                id = "demo",
+                search = function()
+                  local list = pcall(wayrun.fs.list, "/etc")
+                  local stat = pcall(wayrun.fs.stat, "/etc/hostname")
+                  local db = pcall(wayrun.sqlite.snapshot, "/etc/hostname")
+                  return { { title = tostring(list) .. tostring(stat) .. tostring(db) } }
+                end,
+              },
+            }
+            "#,
+        );
+        let rows = search(&host, "demo", "x");
+        assert_eq!(rows[0]["title"], "falsefalsefalse");
+    }
+
+    #[test]
+    fn a_declared_area_serves_list_stat_and_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("note.txt"), "hi").unwrap();
+        {
+            let connection = rusqlite::Connection::open(dir.path().join("data.sqlite")).unwrap();
+            connection
+                .execute_batch("CREATE TABLE t (name TEXT); INSERT INTO t VALUES ('row');")
+                .unwrap();
+        }
+        let source = r#"
+            return {
+              {
+                id = "demo",
+                read = { "{{DIR}}" },
+                search = function()
+                  local list = wayrun.fs.list("{{DIR}}") or {}
+                  local stat = wayrun.fs.stat("{{DIR}}/note.txt")
+                  local db = wayrun.sqlite.snapshot("{{DIR}}/data.sqlite")
+                  local rows = wayrun.sqlite.query(db, "SELECT name FROM t")
+                  return {
+                    { title = table.concat(list, ",") },
+                    { title = tostring(stat ~= nil) },
+                    { title = rows[1].name },
+                  }
+                end,
+              },
+            }
+            "#
+        .replace("{{DIR}}", &dir.path().display().to_string());
+        let host = host(&source);
+        let rows = search(&host, "demo", "x");
+        assert_eq!(rows[0]["title"], "data.sqlite,note.txt");
+        assert_eq!(rows[1]["title"], "true");
+        assert_eq!(rows[2]["title"], "row");
+    }
+
+    #[test]
+    fn a_sibling_cannot_query_another_plugins_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let connection = rusqlite::Connection::open(dir.path().join("data.sqlite")).unwrap();
+            connection
+                .execute_batch("CREATE TABLE t (name TEXT); INSERT INTO t VALUES ('row');")
+                .unwrap();
+        }
+        let source = r#"
+            return {
+              {
+                id = "owner",
+                read = { "{{DIR}}" },
+                search = function()
+                  return { { title = tostring(wayrun.sqlite.snapshot("{{DIR}}/data.sqlite")) } }
+                end,
+              },
+              {
+                id = "sibling",
+                search = function()
+                  local ok = pcall(wayrun.sqlite.query, 1, "SELECT name FROM t")
+                  return { { title = tostring(ok) } }
+                end,
+              },
+              {
+                id = "same-area",
+                read = { "{{DIR}}" },
+                search = function()
+                  local handle = wayrun.sqlite.snapshot("{{DIR}}/data.sqlite")
+                  local rows = wayrun.sqlite.query(handle, "SELECT name FROM t")
+                  return { { title = rows[1].name } }
+                end,
+              },
+            }
+            "#
+        .replace("{{DIR}}", &dir.path().display().to_string());
+        let host = host(&source);
+        assert_eq!(
+            search(&host, "owner", "x")[0]["title"],
+            "1",
+            "the owner opens handle 1"
+        );
+        assert_eq!(
+            search(&host, "sibling", "x")[0]["title"],
+            "false",
+            "a plugin without the area cannot borrow the view"
+        );
+        assert_eq!(
+            search(&host, "same-area", "x")[0]["title"],
+            "row",
+            "a plugin declaring the same area shares the handle"
+        );
+    }
+
+    #[test]
+    fn a_load_time_area_read_is_refused() {
+        let loaded = Host::new(
+            "/test/script.lua",
+            r#"local _ = wayrun.fs.list("/etc") return { { id = "demo", search = function() return {} end } }"#,
+        );
+        assert!(loaded.is_err(), "the read has no plugin to attribute");
+    }
+
+    #[test]
+    fn a_read_pattern_is_refused_at_load() {
+        let loaded = Host::new(
+            "/test/script.lua",
+            r#"return { { id = "demo", read = { "~/Documents/*" }, search = function() return {} end } }"#,
+        );
+        assert!(loaded.is_err(), "areas are exact paths");
+    }
+
+    #[test]
+    fn which_finds_a_command_on_the_path() {
+        let host = host(
+            r#"
+            return {
+              {
+                id = "demo",
+                search = function()
+                  return {
+                    { title = tostring(wayrun.which("sh") ~= nil) },
+                    { title = tostring(wayrun.which("wayrun-not-a-command") == nil) },
+                  }
+                end,
+              },
+            }
+            "#,
+        );
+        let rows = search(&host, "demo", "x");
+        assert_eq!(rows[0]["title"], "true", "sh is on the PATH");
+        assert_eq!(rows[1]["title"], "true", "an unknown name is nil");
     }
 
     #[test]
@@ -483,7 +800,6 @@ mod tests {
         let rows = search(&host, "demo", "world");
         assert_eq!(rows[0]["title"], "Hello world");
         assert_eq!(rows[0]["on_click"]["type"], "open");
-        assert_eq!(rows[0]["ephemeral"], false);
     }
 
     #[test]
@@ -509,24 +825,6 @@ mod tests {
     fn an_empty_table_is_no_rows() {
         let host = host(r#"return { { id = "demo", search = function() return {} end } }"#);
         assert_eq!(search(&host, "demo", "x"), json!([]));
-    }
-
-    #[test]
-    fn t_fills_placeholders_from_the_core_tables() {
-        let host = host(
-            r#"
-            return {
-              {
-                id = "demo",
-                search = function()
-                  return { { title = wayrun.t("plugin.external.ready", { command = "my-host" }) } }
-                end,
-              },
-            }
-            "#,
-        );
-        let rows = search(&host, "demo", "x");
-        assert_eq!(rows[0]["title"], "External plugin via my-host");
     }
 
     #[test]

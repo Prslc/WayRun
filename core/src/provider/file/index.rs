@@ -1,4 +1,4 @@
-mod build;
+mod builder;
 mod format;
 mod scan;
 #[cfg(test)]
@@ -14,7 +14,7 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 use memmap2::Mmap;
 use tokio::sync::Notify;
 
-use self::build::build;
+use self::builder::build;
 use self::format::{Index, exclude_hash, layout_ok, u32_at};
 use self::scan::search_in;
 use self::update::{changed_dirs, patch, worth_patching};
@@ -303,8 +303,7 @@ fn refresh(home: &Path) {
     let exclude = &config.files.exclude;
 
     // The sweep that decided this refresh is reused when it still describes the
-    // image on disk: sweeping every recorded directory twice would cost as much
-    // as the patch it decided on.
+    // image on disk: sweeping every directory twice costs as much as the patch.
     let swept = lock()
         .swept
         .take()

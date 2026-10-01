@@ -26,8 +26,8 @@ pub async fn serve() -> Result<()> {
 
     let mut reader = BufReader::new(io::stdin()).lines();
     let search = Search::spawn(tx.clone());
-    // `forget` and `command` wait on external hosts, so they run in tasks; the
-    // handles are awaited before returning so a one-shot client still replies.
+    // `command` waits on spawned processes, so it runs in a task; the handles
+    // are awaited before returning so a one-shot client still replies.
     let mut pending: Vec<JoinHandle<()>> = Vec::new();
 
     while let Some(line) = reader.next_line().await? {

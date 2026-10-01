@@ -2,12 +2,11 @@ use crate::ui::geom::Layout;
 
 use super::State;
 
-/// What the pointer is over: a list row's tint, an action-panel row's, or the ✕ button's.
+/// What the pointer is over: a list row's tint or an action-panel row's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hover {
     Row(usize),
     Action(usize),
-    Clear,
 }
 
 /// The window a list moves through: the highlighted index and the top row of
@@ -49,13 +48,10 @@ impl Cursor {
 }
 
 impl State {
-    /// The pointer position and the hover it implies; returns whether the hover
-    /// changed. The ✕ button sits outside the list and wins over a row.
+    /// The pointer position and the hover it implies; returns whether the hover changed.
     pub fn hover_at(&mut self, x: f32, y: f32) -> bool {
         self.pointer = Some((x, y));
-        let hover = if self.clear_hit(x, y) {
-            Some(Hover::Clear)
-        } else if let Some(menu) = &self.menu {
+        let hover = if let Some(menu) = &self.menu {
             self.appearance
                 .layout
                 .action_at(self.surface, menu.cursor.first, menu.actions.len(), x, y)
@@ -81,7 +77,7 @@ impl State {
     }
 
     /// Rows that move under a stationary pointer are different rows and fire no
-    /// enter/exit, so re-derive the hover; `Hover::Clear` is left alone.
+    /// enter/exit, so re-derive the hover.
     pub fn resync_hover(&mut self) {
         let hit = self.pointer.and_then(|(x, y)| {
             if let Some(menu) = &self.menu {
@@ -104,17 +100,6 @@ impl State {
             }
             None => {}
         }
-    }
-
-    /// Whether a surface-local point is on the ✕ button, whose circle comes from
-    /// `Layout::clear_circle` so the hit test cannot drift from what is drawn.
-    pub fn clear_hit(&self, x: f32, y: f32) -> bool {
-        if self.query.is_empty() {
-            return false;
-        }
-
-        let (cx, cy, r) = self.appearance.layout.clear_circle(self.surface);
-        (x - cx).abs() <= r && (y - cy).abs() <= r
     }
 
     /// Move the selection by whole rows (the wheel): the highlighted row is what
@@ -229,17 +214,6 @@ mod tests {
         state.contain();
         assert_eq!(state.cursor.first, 1);
         assert_eq!(state.hovered, Some(Hover::Row(2)));
-
-        // and the ✕ button's hover is not a row, so a page turn leaves it alone
-        state.query = "q".into();
-        let clear = (
-            layout.card_x(state.surface) + layout.card_w(state.surface) - geom::PAD - 8.0 - 13.0,
-            layout.card_top(state.surface) + geom::PAD + geom::SEARCH_H / 2.0,
-        );
-        assert!(state.hover_at(clear.0, clear.1));
-        assert_eq!(state.hovered, Some(Hover::Clear));
-        state.contain();
-        assert_eq!(state.hovered, Some(Hover::Clear));
 
         state.pointer_left();
         assert_eq!(state.hovered, None);

@@ -37,9 +37,6 @@ command.shutdown: Shutdown
 command.logout: Logout
 
 action.open: Open
-action.pin: Pin to top
-action.unpin: Unpin
-action.remove_history: Remove from history
 action.copy_path: Copy path
 action.reveal: Reveal in file manager
 action.terminal: Open in terminal
@@ -50,7 +47,7 @@ help.line_default: "%{usage} - %{ready} · Enter: %{action}"
 
 window.untitled: Untitled
 
-field.placeholder: Search apps, files, web...
+field.placeholder: Type to search...
 
 footer.launch: Launch
 footer.actions: Actions
@@ -58,7 +55,6 @@ footer.run: Run
 footer.default: Default
 footer.clear_default: Clear default
 footer.back: Back
-footer.help: Type ? for help
 footer.no_results: No results
 footer.count_action_one: 1 action
 footer.count_action_many: "%{count} actions"

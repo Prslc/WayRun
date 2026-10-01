@@ -1,6 +1,6 @@
 use crate::plugin::Match;
 
-use super::model::{DesktopMeta, Field, Query};
+use super::{DesktopMeta, Field, Query};
 
 // A surface's share of the kind's weight, in tenths: the merge orders by the
 // product, so a title hit leads an action label, and both lead the metadata.

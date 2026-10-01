@@ -72,9 +72,6 @@ impl Shell {
 
         self.app.shown(now);
         ipc::VISIBLE.store(true, Ordering::Relaxed);
-        // An empty query means the usage-ranked history, so a show never
-        // displays the previous query's payload.
-        backend::top();
         self.open_at = Some(now);
         self.last_present = None;
         // Allocate the frame buffers here rather than on the first present, so
@@ -133,7 +130,7 @@ impl Shell {
         // and these grow with every distinct payload.
         self.icons.clear();
         self.text.clear_cache();
-        // The core holds the payload it remembers for pins; a dismissal ends that.
+        // The dismissal cancels the core's pending search and reaps the warm hosts.
         backend::dismiss();
         self.app.hidden();
         ipc::VISIBLE.store(false, Ordering::Relaxed);

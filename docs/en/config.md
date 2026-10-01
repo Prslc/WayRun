@@ -17,12 +17,6 @@ of the text `.desktop` files contribute: application names, their comments and
 desktop action labels. A value with no table of its own falls back to English,
 and a blank value is the same as leaving the key out.
 
-## `[web_search]`
-
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `engine` | `google` | Suggestion backend: `google` or `duckduckgo`. An unknown value falls back to `google`. |
-
 ## `[font]`
 
 | Key | Default | Meaning |
@@ -40,7 +34,7 @@ applies live.
 | --- | --- | --- |
 | `theme` | *(desktop setting)* | Icon theme for per-row icons. Omitted, the desktop's own icon theme is used. |
 
-The icon theme is optional: the panel, badge and built-in plugin glyphs are
+The icon theme is optional: the panel and built-in plugin glyphs are
 built into the binary, and a row icon no theme resolves falls back to a bundled
 placeholder. `theme` beats the desktop setting. A change takes effect on the next
 launch.

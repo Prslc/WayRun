@@ -127,9 +127,7 @@ fn do_search(expr: &str) -> Vec<ResultItem> {
                 summary: Some(expr.to_string()),
                 on_click: None,
                 icon: resolve("builtin:calculator"),
-                ephemeral: true,
                 actions: Vec::new(),
-                badge: None,
             }]
         }
         Err(_) => vec![],
@@ -158,11 +156,6 @@ mod tests {
     #[test]
     fn empty_input_is_not_math() {
         assert!(do_search("").is_empty());
-    }
-
-    #[test]
-    fn a_computed_answer_is_ephemeral() {
-        assert!(do_search("2 + 3")[0].ephemeral);
     }
 
     #[test]

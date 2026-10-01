@@ -2,7 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use crate::plugin::{Match, Meta, Plugin, Rank, Ranked};
-use crate::system::icon::find_icon_path;
+use crate::system::icon::find_icon_spec;
 use crate::wire::{Action, ResultItem};
 use anyhow::Result;
 use rust_i18n::t;
@@ -115,10 +115,8 @@ fn do_search(input: &str) -> Vec<(Rank, ResultItem)> {
                     on_click: Some(Action::Run {
                         cmd: (*cmd).to_string(),
                     }),
-                    icon: find_icon_path(icon),
-                    ephemeral: true,
+                    icon: find_icon_spec(icon),
                     actions: Vec::new(),
-                    badge: None,
                 },
             )
         })

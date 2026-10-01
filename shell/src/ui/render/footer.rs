@@ -46,7 +46,6 @@ struct Hints {
     panel_clear_default: Vec<Hint>,
     row: Vec<Hint>,
     launch: Vec<Hint>,
-    help: Vec<Hint>,
     no_match: Vec<Hint>,
 }
 
@@ -61,14 +60,13 @@ fn hints() -> &'static Hints {
             panel_clear_default: vec![run(), hint("Alt⏎", t!("footer.clear_default")), back()],
             row: vec![enter(t!("footer.launch")), hint("⇧⏎", t!("footer.actions"))],
             launch: vec![enter(t!("footer.launch"))],
-            help: vec![hint("", t!("footer.help"))],
             no_match: vec![hint("", t!("footer.no_results"))],
         }
     })
 }
 
 /// The footer's left hints: the panel's keys when open, the launch keys once
-/// rows exist, a help note for an untouched field, else "No results".
+/// rows exist, a note for a failed search, nothing for an untouched field.
 pub(super) fn footer_hints(
     rows: usize,
     query_empty: bool,
@@ -93,7 +91,7 @@ pub(super) fn footer_hints(
             &hints.launch
         }
     } else if query_empty {
-        &hints.help
+        &[]
     } else {
         &hints.no_match
     }
@@ -132,7 +130,6 @@ pub(super) fn draw_footer(
 ) {
     let panel = state.menu.is_some();
     let empty = state.rows.is_empty();
-    let no_match = empty && !state.query.is_empty();
     let has_actions = state
         .rows
         .get(state.cursor.selected)
@@ -196,17 +193,12 @@ pub(super) fn draw_footer(
     let effective = effective_label(state);
     for hint in hints {
         if hint.key.is_empty() {
-            let color = if no_match {
-                state.fade(state.theme.primary, 0.7, now)
-            } else {
-                state.fade_rgba(state.surfaces.footer, now)
-            };
             let shaped = text.shape(&hint.label, label_size, Weight::NORMAL);
             let height = shaped.height / canvas.scale;
             text.draw(
                 pixmap,
                 &shaped,
-                color,
+                state.fade(state.theme.primary, 0.7, now),
                 canvas.px(x),
                 canvas.px(center_y - height / 2.0),
                 None,
@@ -298,15 +290,12 @@ pub(super) fn draw_footer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wayrun_core::wire::{Action, ActionItem, PanelAction, ResultItem};
+    use wayrun_core::wire::{Action, ActionItem, ResultItem};
 
     #[test]
     fn the_footer_separates_no_results_from_an_untouched_field() {
-        // an empty field is the history view, not a failed search
-        assert_eq!(
-            footer_hints(0, true, false, false, false, false),
-            hints().help.as_slice()
-        );
+        // an untouched field stays silent: its placeholder is the guide
+        assert!(footer_hints(0, true, false, false, false, false).is_empty());
         assert_eq!(
             footer_hints(0, false, false, false, false, false),
             hints().no_match.as_slice()
@@ -365,18 +354,14 @@ mod tests {
             summary: None,
             on_click: Some(Action::Open { uri: uri.into() }),
             icon: None,
-            ephemeral: false,
             actions: vec![ActionItem {
                 title: "Open in terminal".into(),
-                action: PanelAction::Execute {
-                    command: Action::Terminal { uri: uri.into() },
-                },
+                action: Action::Terminal { uri: uri.into() },
                 icon: None,
                 id: Some("terminal".into()),
                 plugin: Some("file-search".into()),
                 default: true,
             }],
-            badge: None,
         };
         state.apply_results(vec![row.clone()], now);
         assert_eq!(effective_label(&state), Some("Open in terminal"));
@@ -384,12 +369,10 @@ mod tests {
         // the panel's own Enter runs the highlighted action, so the row hint goes
         assert!(state.open_actions());
         assert_eq!(effective_label(&state), None);
-        state.close_actions();
+        state.menu = None;
 
         // a default that runs the row's own command is not a different outcome
-        row.actions[0].action = PanelAction::Execute {
-            command: Action::Open { uri: uri.into() },
-        };
+        row.actions[0].action = Action::Open { uri: uri.into() };
         state.apply_results(vec![row.clone()], now);
         assert_eq!(effective_label(&state), None);
 

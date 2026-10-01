@@ -50,16 +50,19 @@ systemctl --user enable --now wayrun-launcher
 ## 代理
 
 后端自身不发起对外请求；需要联网的是注册的主机（例如 WayRun-Plugins 的
-`web.lua`）。它的 `wayrun.http.get` 读取启动器进程的环境变量，因此在单元文件里用
-`Environment=` 指定：
+`web.lua`）。它的 [`wayrun.http.get`](lua.md#wayrun-表) 读取启动器进程的环境变量，
+因此在单元文件里用 `Environment=` 指定：
 
 ```ini
-# HTTP CONNECT 代理；scheme 和账号密码都可省略
+# HTTP CONNECT 代理；账号密码可省略
 Environment=https_proxy=http://127.0.0.1:7890
 Environment=http_proxy=http://127.0.0.1:7890
 ```
 
 改完执行 `systemctl --user daemon-reload && systemctl --user restart wayrun-launcher`。
-小写变量优先、大写在其后（与 curl 的读法一致）；选中的代理用于所有请求。目前只支持
-HTTP CONNECT 代理（`[http://][user[:password]@]host[:port]`，端口默认 1080），
-不支持 `socks5://`；无法使用的值会被忽略，请求退回直连。
+依次读取 `ALL_PROXY`、`HTTPS_PROXY`、`HTTP_PROXY`（每个变量大小写两种写法都认），
+第一个可用值生效，不可用的值跳过而不是中断查找，坏掉的 `https_proxy` 不会再挡
+住可用的 `http_proxy`；`NO_PROXY` 按主机名匹配（精确、后缀、通配符三种形式）。
+scheme 要写出来：`http://` 是端口 80 的 HTTP CONNECT 代理，`https://` 是 443，
+省略 scheme 会被当作 HTTP 而不是 SOCKS；`socks5://` 在发行版里不支持。
+没有任何可用值时请求直连。

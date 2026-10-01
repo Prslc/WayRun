@@ -1,16 +1,26 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::UNIX_EPOCH;
 
 use mlua::{Lua, LuaSerdeExt, Table, Value};
 
+use super::areas;
+use super::crypto;
+use super::fuzzy;
+use super::http;
+use super::kv;
 use super::sqlite;
 use super::warn;
 
 /// The plugin directories this script may read from, one per declared id;
 /// filled after the script is read, resolved by the bindings at call time.
 pub(super) type Scope = Rc<RefCell<Vec<PathBuf>>>;
+
+/// Every declared plugin's readable environment names, by plugin id; filled
+/// after the script is read, refused for a name the calling plugin omits.
+pub(super) type EnvScope = Rc<RefCell<HashMap<String, Vec<String>>>>;
 
 /// `<home>/.config/wayrun/plugins/<id>`, the directory a plugin reads its own
 /// files from; the user places them, nothing here is created for the script.
@@ -42,7 +52,15 @@ fn scoped_read(roots: &[PathBuf], name: &str) -> Result<Option<String>, String> 
     Ok(None)
 }
 
-pub(super) fn build(lua: &Lua, script: &str, scope: Scope) -> mlua::Result<Table> {
+pub(super) fn build(
+    lua: &Lua,
+    script: &str,
+    scope: Scope,
+    active: kv::Active,
+    paths: kv::Paths,
+    env_scope: EnvScope,
+    read_areas: areas::Areas,
+) -> mlua::Result<Table> {
     let sdk = lua.create_table()?;
     sdk.set(
         "home",
@@ -58,37 +76,55 @@ pub(super) fn build(lua: &Lua, script: &str, scope: Scope) -> mlua::Result<Table
             Ok(crate::system::fs::cache_dir().map(|path| path.display().to_string()))
         })?,
     )?;
+    sdk.set("api", crate::wire::PLUGIN_API)?;
     sdk.set(
         "icon",
-        lua.create_function(|_, spec: String| Ok(crate::system::icon::resolve(&spec)))?,
+        lua.create_function(|_, spec: String| Ok(crate::system::icon::resolve_for_host(&spec)))?,
     )?;
     sdk.set(
         "urlencode",
         lua.create_function(|_, text: String| Ok(urlencoding::encode(&text).into_owned()))?,
     )?;
-    sdk.set(
-        "web_search_engine",
-        lua.create_function(|_, ()| Ok(crate::config::web_search_engine()))?,
-    )?;
     sdk.set("time", lua.create_function(|_, ()| Ok(now_seconds()))?)?;
+    let env_active = Rc::clone(&active);
     sdk.set(
         "env",
-        lua.create_function(|_, name: String| Ok(std::env::var(name).ok()))?,
+        lua.create_function(move |_, name: String| {
+            let Some(id) = env_active.borrow().clone() else {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "env {name}: this read ran outside a plugin call"
+                )));
+            };
+            let allowed = env_scope
+                .borrow()
+                .get(&id)
+                .is_some_and(|names| names.contains(&name));
+            if !allowed {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "env {name}: plugin {id} does not declare it"
+                )));
+            }
+            Ok(std::env::var(name).ok())
+        })?,
+    )?;
+    sdk.set(
+        "which",
+        lua.create_function(|_, name: String| {
+            let path = std::env::var_os("PATH").unwrap_or_default();
+            Ok(crate::system::fs::which_in(path, &name).map(|path| path.display().to_string()))
+        })?,
     )?;
     let dir = script_dir(script);
+    let dir_name = dir.as_ref().map(|dir| dir.display().to_string());
     sdk.set(
         "script_dir",
-        lua.create_function(move |_, ()| Ok(dir.clone()))?,
+        lua.create_function(move |_, ()| Ok(dir_name.clone()))?,
     )?;
     sdk.set(
         "plugin_dir",
         lua.create_function(|_, id: String| {
             Ok(plugin_dir(&id).map(|dir| dir.display().to_string()))
         })?,
-    )?;
-    sdk.set(
-        "t",
-        lua.create_function(|_, (key, args): (String, Option<Table>)| Ok(translate(&key, args)))?,
     )?;
     let name = script.to_string();
     sdk.set(
@@ -98,16 +134,47 @@ pub(super) fn build(lua: &Lua, script: &str, scope: Scope) -> mlua::Result<Table
             Ok(())
         })?,
     )?;
+    let guard: areas::Guard = {
+        let read_areas = Rc::clone(&read_areas);
+        let guard_active = Rc::clone(&active);
+        let script = dir.clone();
+        Rc::new(move |path: &str| {
+            let Some(id) = guard_active.borrow().clone() else {
+                return Err("this read ran outside a plugin call".to_string());
+            };
+            let mut roots = read_areas.borrow().get(&id).cloned().unwrap_or_default();
+            if let Some(own) = plugin_dir(&id) {
+                roots.push(own);
+            }
+            if let Some(dir) = &script {
+                roots.push(dir.clone());
+            }
+            areas::check(&roots, path)
+        })
+    };
     sdk.set("json", json_lib(lua)?)?;
     sdk.set("toml", toml_lib(lua)?)?;
-    sdk.set("fs", fs_lib(lua, scope)?)?;
-    sdk.set("http", http_lib(lua)?)?;
-    sdk.set("sqlite", sqlite::lib(lua)?)?;
+    sdk.set("fs", fs_lib(lua, scope, Rc::clone(&guard))?)?;
+    let stores: kv::Handle = Rc::new(RefCell::new(kv::Stores::default()));
+    sdk.set(
+        "http",
+        http::lib(
+            lua,
+            script,
+            Rc::clone(&stores),
+            Rc::clone(&active),
+            Rc::clone(&paths),
+        )?,
+    )?;
+    sdk.set("sqlite", sqlite::lib(lua, guard)?)?;
+    sdk.set("kv", kv::lib(lua, stores, active, paths)?)?;
+    sdk.set("fuzzy", fuzzy::lib(lua)?)?;
+    sdk.set("crypto", crypto::lib(lua)?)?;
     Ok(sdk)
 }
 
 /// Unix seconds, the host clock a signature or a cache TTL needs.
-fn now_seconds() -> i64 {
+pub(super) fn now_seconds() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|since| since.as_secs() as i64)
@@ -116,9 +183,9 @@ fn now_seconds() -> i64 {
 
 /// The script's own directory, so a plugin can ship an icon beside itself; the
 /// host has just read the file, so canonicalize only fails in theory.
-fn script_dir(script: &str) -> Option<String> {
-    let path = std::fs::canonicalize(script).unwrap_or_else(|_| std::path::PathBuf::from(script));
-    path.parent().map(|dir| dir.display().to_string())
+fn script_dir(script: &str) -> Option<PathBuf> {
+    let path = std::fs::canonicalize(script).unwrap_or_else(|_| PathBuf::from(script));
+    path.parent().map(|dir| dir.to_path_buf())
 }
 
 fn json_lib(lua: &Lua) -> mlua::Result<Table> {
@@ -159,28 +226,42 @@ fn toml_lib(lua: &Lua) -> mlua::Result<Table> {
     Ok(toml)
 }
 
-fn fs_lib(lua: &Lua, scope: Scope) -> mlua::Result<Table> {
+fn fs_lib(lua: &Lua, scope: Scope, guard: areas::Guard) -> mlua::Result<Table> {
     let fs = lua.create_table()?;
+    let list_guard = Rc::clone(&guard);
     fs.set(
         "list",
-        lua.create_function(|lua, dir: String| {
+        lua.create_function(move |lua, dir: String| {
+            if let Err(problem) = list_guard(&dir) {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "fs.list {dir:?}: {problem}"
+                )));
+            }
             let Ok(entries) = std::fs::read_dir(&dir) else {
                 return Ok(Value::Nil);
             };
+            // readdir order is unspecified; sort so the listing is stable.
+            let mut names: Vec<String> = entries
+                .flatten()
+                .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
+                .collect();
+            names.sort();
             let list = lua.create_table()?;
-            let mut at = 0;
-            for entry in entries.flatten() {
-                if let Some(name) = entry.file_name().to_str() {
-                    at += 1;
-                    list.set(at, name.to_string())?;
-                }
+            for (at, name) in names.into_iter().enumerate() {
+                list.set(at + 1, name)?;
             }
             Ok(Value::Table(list))
         })?,
     )?;
+    let stat_guard = Rc::clone(&guard);
     fs.set(
         "stat",
-        lua.create_function(|lua, path: String| {
+        lua.create_function(move |lua, path: String| {
+            if let Err(problem) = stat_guard(&path) {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "fs.stat {path:?}: {problem}"
+                )));
+            }
             let Ok(meta) = std::fs::metadata(&path) else {
                 return Ok(Value::Nil);
             };
@@ -211,97 +292,11 @@ fn fs_lib(lua: &Lua, scope: Scope) -> mlua::Result<Table> {
     Ok(fs)
 }
 
-fn http_lib(lua: &Lua) -> mlua::Result<Table> {
-    let http = lua.create_table()?;
-    http.set(
-        "get",
-        lua.create_function(
-            |lua, (url, params, timeout_ms): (String, Option<Table>, Option<u64>)| {
-                let seconds = (timeout_ms.unwrap_or(5_000) / 1_000).max(1);
-                let mut request = minreq::get(&url).with_timeout(seconds);
-                if let Some(params) = params {
-                    for pair in params.pairs::<String, Value>() {
-                        let (name, value) = pair?;
-                        if name == "headers" {
-                            let Value::Table(headers) = value else {
-                                return Err(mlua::Error::RuntimeError(format!(
-                                    "http headers must be a table, got {value:?}"
-                                )));
-                            };
-                            for pair in headers.pairs::<String, String>() {
-                                let (key, value) = pair?;
-                                request = request.with_header(key, value);
-                            }
-                            continue;
-                        }
-                        let value = match value {
-                            Value::Integer(number) => number.to_string(),
-                            Value::Number(number) => number.to_string(),
-                            Value::String(text) => text.to_string_lossy(),
-                            Value::Boolean(flag) => flag.to_string(),
-                            other => {
-                                return Err(mlua::Error::RuntimeError(format!(
-                                    "http params must be scalars, got {other:?}"
-                                )));
-                            }
-                        };
-                        request = request.with_param(name, value);
-                    }
-                }
-                let request = match proxy_from_env() {
-                    Some(proxy) => request.with_proxy(proxy),
-                    None => request,
-                };
-                let response = request.send().map_err(|error| {
-                    mlua::Error::RuntimeError(format!("http.get {url}: {error}"))
-                })?;
-                let body = response.as_str().map_err(|error| {
-                    mlua::Error::RuntimeError(format!("http.get {url}: {error}"))
-                })?;
-                let reply = lua.create_table()?;
-                reply.set("status", response.status_code)?;
-                reply.set("body", body)?;
-                Ok(reply)
-            },
-        )?,
-    )?;
-    Ok(http)
-}
-
-fn proxy_from_env() -> Option<minreq::Proxy> {
-    let spec = ["https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY"]
-        .into_iter()
-        .find_map(|key| std::env::var(key).ok().filter(|value| !value.is_empty()))?;
-    match minreq::Proxy::new(&spec) {
-        Ok(proxy) => Some(proxy),
-        Err(error) => {
-            warn("sdk", &format!("ignoring proxy {spec:?}: {error}"));
-            None
-        }
-    }
-}
-
-/// A script's `wayrun.t(key, args)`: the same tables the core reads, with the
-/// `%{name}` placeholders filled from `args`.
-fn translate(key: &str, args: Option<Table>) -> String {
-    let mut message = crate::_rust_i18n_translate(&rust_i18n::locale(), key);
-    if let Some(args) = args {
-        for pair in args.pairs::<String, Value>() {
-            let Ok((name, value)) = pair else { continue };
-            let text = match value {
-                Value::Integer(number) => number.to_string(),
-                Value::Number(number) => number.to_string(),
-                Value::String(text) => text.to_string_lossy(),
-                other => format!("{other:?}"),
-            };
-            message = message.replace(&format!("%{{{name}}}"), &text);
-        }
-    }
-    message
-}
-
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+    use std::path::Path;
+
     use super::*;
 
     #[test]
@@ -327,50 +322,86 @@ mod tests {
         assert!(scoped_read(&roots, "").is_err());
     }
 
-    #[test]
-    fn http_get_sends_its_headers_and_answers_status_and_body() {
-        use std::io::{BufRead, BufReader, Write};
-
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut reader = BufReader::new(stream.try_clone().unwrap());
-            let mut head = String::new();
-            loop {
-                let mut line = String::new();
-                if reader.read_line(&mut line).unwrap() == 0 || line == "\r\n" {
-                    break;
+    /// Every name the sandbox binds, one level into a sub-table: the leaves the
+    /// reference page has to name, read off the built table, not the source.
+    fn sdk_names() -> BTreeSet<String> {
+        let lua = Lua::new_with(mlua::StdLib::ALL_SAFE, mlua::LuaOptions::default()).unwrap();
+        let table = build(
+            &lua,
+            "/test/script.lua",
+            Rc::new(RefCell::new(Vec::new())),
+            Rc::new(RefCell::new(None)),
+            Rc::new(RefCell::new(HashMap::new())),
+            Rc::new(RefCell::new(HashMap::new())),
+            Rc::new(RefCell::new(HashMap::new())),
+        )
+        .unwrap();
+        let mut names = BTreeSet::new();
+        for pair in table.pairs::<String, Value>() {
+            let (name, value) = pair.unwrap();
+            match value {
+                Value::Table(sub) => {
+                    for member in sub.pairs::<String, Value>() {
+                        names.insert(format!("{name}.{}", member.unwrap().0));
+                    }
                 }
-                head.push_str(&line);
+                _ => {
+                    names.insert(name);
+                }
             }
-            stream
-                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
-                .unwrap();
-            head
-        });
+        }
+        names
+    }
 
-        let lua = Lua::new();
-        lua.globals().set("http", http_lib(&lua).unwrap()).unwrap();
-        lua.globals()
-            .set("url", format!("http://127.0.0.1:{port}/search"))
-            .unwrap();
-        let (status, body): (u16, String) = lua
-            .load(
-                r#"
-                local res = http.get(url, {
-                    q = "rust lang",
-                    headers = { ["X-Test"] = "yes" },
-                }, 2000)
-                return res.status, res.body
-                "#,
-            )
-            .eval()
-            .unwrap();
-        assert_eq!((status, body.as_str()), (200, "ok"));
+    /// Every `wayrun.<name>` a page writes, in prose or in a table cell.
+    fn page_names(text: &str) -> BTreeSet<String> {
+        let mut names = BTreeSet::new();
+        let mut rest = text;
+        while let Some(at) = rest.find("wayrun.") {
+            rest = &rest[at + "wayrun.".len()..];
+            let name: String = rest
+                .chars()
+                .take_while(|c| {
+                    c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_' || *c == '.'
+                })
+                .collect();
+            if !name.is_empty() {
+                names.insert(name);
+            }
+        }
+        names
+    }
 
-        let head = server.join().unwrap();
-        assert!(head.contains("X-Test: yes"), "{head}");
-        assert!(head.contains("q=rust%20lang"), "{head}");
+    fn page(locale: &str) -> String {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("the core lives in the workspace")
+            .join("docs")
+            .join(locale)
+            .join("lua.md");
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
+    }
+
+    #[test]
+    fn the_lua_page_names_every_binding() {
+        let names = sdk_names();
+        // a scan that found nothing would make this vacuous
+        assert!(names.len() > 20, "found only {} bindings", names.len());
+        let documented = page_names(&page("en"));
+        let missing: Vec<&String> = names.difference(&documented).collect();
+        assert!(missing.is_empty(), "bound but undocumented: {missing:?}");
+    }
+
+    #[test]
+    fn nothing_the_lua_page_names_is_missing_from_the_sdk() {
+        let names = sdk_names();
+        let documented = page_names(&page("en"));
+        let stale: Vec<&String> = documented.difference(&names).collect();
+        assert!(stale.is_empty(), "documented but not bound: {stale:?}");
+    }
+
+    #[test]
+    fn the_two_lua_pages_name_the_same_bindings() {
+        assert_eq!(page_names(&page("en")), page_names(&page("zh_cn")));
     }
 }

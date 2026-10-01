@@ -10,21 +10,36 @@ use anyhow::{Context, Result};
 use mlua::{Lua, LuaSerdeExt, Table, Value};
 use serde_json::json;
 
+use super::areas;
+
 /// Open connections kept across a script's calls, so a keystroke is one query
 /// rather than a copy, a connect and a schema parse as well.
 #[derive(Default)]
 struct Snapshots {
     next: u64,
-    open: HashMap<u64, rusqlite::Connection>,
+    sources: HashMap<PathBuf, u64>,
+    open: HashMap<u64, Open>,
 }
 
-pub(super) fn lib(lua: &Lua) -> mlua::Result<Table> {
+struct Open {
+    source: PathBuf,
+    copy: PathBuf,
+    connection: rusqlite::Connection,
+}
+
+pub(super) fn lib(lua: &Lua, guard: areas::Guard) -> mlua::Result<Table> {
     let sqlite = lua.create_table()?;
     let snapshots = Rc::new(RefCell::new(Snapshots::default()));
     let opener = Rc::clone(&snapshots);
+    let snapshot_guard = Rc::clone(&guard);
     sqlite.set(
         "snapshot",
         lua.create_function(move |_, path: String| {
+            if let Err(problem) = snapshot_guard(&path) {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "sqlite.snapshot {path:?}: {problem}"
+                )));
+            }
             let cache = crate::system::fs::cache_dir().ok_or_else(|| {
                 mlua::Error::RuntimeError("sqlite.snapshot: no cache directory".to_string())
             })?;
@@ -38,13 +53,20 @@ pub(super) fn lib(lua: &Lua) -> mlua::Result<Table> {
         "query",
         lua.create_function(
             move |lua, (id, sql, params): (u64, String, Option<Table>)| {
+                // A handle answers only for a plugin that could have opened its
+                // source itself: a sibling cannot read through another's view.
+                let snapshots = snapshots.borrow();
+                if let Some(source) = snapshots.source(id)
+                    && let Err(problem) = guard(source.to_str().unwrap_or_default())
+                {
+                    return Err(mlua::Error::RuntimeError(format!(
+                        "sqlite.query: {problem}"
+                    )));
+                }
                 let params = sqlite_params(params)?;
-                let rows = snapshots
-                    .borrow()
-                    .query(id, &sql, params)
-                    .map_err(|error| {
-                        mlua::Error::RuntimeError(format!("sqlite.query: {error:#}"))
-                    })?;
+                let rows = snapshots.query(id, &sql, params).map_err(|error| {
+                    mlua::Error::RuntimeError(format!("sqlite.query: {error:#}"))
+                })?;
                 lua.to_value(&serde_json::Value::Array(rows))
             },
         )?,
@@ -54,16 +76,42 @@ pub(super) fn lib(lua: &Lua) -> mlua::Result<Table> {
 
 impl Snapshots {
     fn snapshot(&mut self, source: &str, cache: &Path) -> Result<u64> {
-        let copy = snapshot_copy(Path::new(source), cache)?;
-        let connection = rusqlite::Connection::open_with_flags(
-            snapshot_uri(&copy),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-                | rusqlite::OpenFlags::SQLITE_OPEN_URI
-                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )?;
+        let source = PathBuf::from(source);
+        let copy = snapshot_copy(&source, cache)?;
+        if let Some(&id) = self.sources.get(&source) {
+            // A changed source keeps its handle: the id is a live view of the
+            // source, and the connection under it follows the newest copy.
+            let unchanged = self.open.get(&id).is_some_and(|open| open.copy == copy);
+            if !unchanged {
+                let connection = open_snapshot(&copy)?;
+                self.open.insert(
+                    id,
+                    Open {
+                        source,
+                        copy,
+                        connection,
+                    },
+                );
+            }
+            return Ok(id);
+        }
         self.next += 1;
-        self.open.insert(self.next, connection);
+        let connection = open_snapshot(&copy)?;
+        self.open.insert(
+            self.next,
+            Open {
+                source: source.clone(),
+                copy,
+                connection,
+            },
+        );
+        self.sources.insert(source, self.next);
         Ok(self.next)
+    }
+
+    /// The file a handle is a view of, for the guard's re-check.
+    fn source(&self, id: u64) -> Option<&Path> {
+        self.open.get(&id).map(|open| open.source.as_path())
     }
 
     fn query(
@@ -72,7 +120,8 @@ impl Snapshots {
         sql: &str,
         params: Vec<rusqlite::types::Value>,
     ) -> Result<Vec<serde_json::Value>> {
-        let connection = self.open.get(&id).context("unknown sqlite handle")?;
+        let open = self.open.get(&id).context("unknown sqlite handle")?;
+        let connection = &open.connection;
         let mut statement = connection.prepare_cached(sql)?;
         let columns: Vec<String> = statement
             .column_names()
@@ -106,6 +155,15 @@ impl Snapshots {
         }
         Ok(out)
     }
+}
+
+fn open_snapshot(copy: &Path) -> Result<rusqlite::Connection> {
+    Ok(rusqlite::Connection::open_with_flags(
+        snapshot_uri(copy),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+            | rusqlite::OpenFlags::SQLITE_OPEN_URI
+            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?)
 }
 
 fn sqlite_params(params: Option<Table>) -> mlua::Result<Vec<rusqlite::types::Value>> {
@@ -150,13 +208,13 @@ fn snapshot_copy(source: &Path, cache: &Path) -> Result<PathBuf> {
     let tmp = cache.join(format!("{stem}.{}.tmp", std::process::id()));
     std::fs::copy(source, &tmp)?;
     std::fs::rename(&tmp, &target)?;
-    prune(cache, &target);
+    prune(cache, &stem, &target);
     Ok(target)
 }
 
-/// Leave one `snap-*` snapshot behind (a superseded one and a crashed copy's
-/// tmp), so the cache holds a single copy per source.
-fn prune(dir: &Path, keep: &Path) {
+/// Leave one copy behind for this source (a superseded one and a crashed copy's
+/// tmp); another source's copies are its own business.
+fn prune(dir: &Path, stem: &str, keep: &Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -164,8 +222,8 @@ fn prune(dir: &Path, keep: &Path) {
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        let stale = (name.starts_with("snap-") && name.ends_with(".sqlite") && path != keep)
-            || (name.starts_with("snap-") && name.ends_with(".tmp"));
+        let stale = (name.starts_with(stem) && name.ends_with(".sqlite") && path != keep)
+            || (name.starts_with(stem) && name.ends_with(".tmp"));
         if stale {
             let _ = std::fs::remove_file(path);
         }
@@ -230,5 +288,39 @@ mod tests {
 
         let rows = snapshots.query(id, "SELECT note FROM t", vec![]).unwrap();
         assert!(rows[0].as_object().unwrap().get("note").is_none());
+    }
+
+    #[test]
+    fn one_source_keeps_one_handle_across_copies() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("places.sqlite");
+        let write = |name: &str| {
+            let connection = rusqlite::Connection::open(&source).unwrap();
+            connection
+                .execute_batch(&format!(
+                    "DROP TABLE IF EXISTS t;
+                     CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT);
+                     INSERT INTO t (name) VALUES ('{name}');"
+                ))
+                .unwrap();
+        };
+
+        write("alpha");
+        let mut snapshots = Snapshots::default();
+        let source = source.to_str().unwrap();
+        let first = snapshots.snapshot(source, dir.path()).unwrap();
+        assert_eq!(
+            snapshots.snapshot(source, dir.path()).unwrap(),
+            first,
+            "an unchanged source reuses its handle"
+        );
+
+        write("beta, and longer");
+        let third = snapshots.snapshot(source, dir.path()).unwrap();
+        assert_eq!(third, first, "a changed source keeps its handle");
+        let rows = snapshots
+            .query(third, "SELECT name FROM t", vec![])
+            .unwrap();
+        assert_eq!(rows[0]["name"], "beta, and longer");
     }
 }

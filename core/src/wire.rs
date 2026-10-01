@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+/// The plugin API version this launcher speaks; what a host or Lua plugin
+/// reports is compared against it, and a mismatch is logged rather than refused.
+pub const PLUGIN_API: u32 = 1;
+
 /// One thing a row can do: what Enter or an action runs. Internally tagged, so
 /// the wire carries `{"type":"run","cmd":"…"}` rather than a scheme string.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -34,30 +38,19 @@ pub enum Action {
 }
 
 impl Action {
-    /// Canonical key for usage history and pins; internal, never emitted.
+    /// Canonical key for the usage database; internal, never emitted.
     pub fn key(&self) -> String {
         serde_json::to_string(self).unwrap_or_default()
     }
-}
-
-/// A row's panel command: the row's own `Action`, or a launcher-level
-/// pin/unpin/history operation the shell turns into its own RPC call.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum PanelAction {
-    Execute { command: Action },
-    Pin { scope: String },
-    Unpin { scope: String, on_click: Action },
-    Forget { on_click: Action },
 }
 
 /// One action-panel entry of a row, never run by Enter unless it is the default.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ActionItem {
     pub title: String,
-    pub action: PanelAction,
-    /// The icon spec; the core resolves it to an absolute path before emitting,
-    /// like a row's `icon`.
+    pub action: Action,
+    /// The icon spec; the core resolves system lookups and passes a `builtin:`
+    /// glyph through, like a row's `icon`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     /// The stable action kind (`reveal`, `terminal`, …) a remembered default
@@ -82,18 +75,10 @@ pub struct ResultItem {
     pub summary: Option<String>,
     pub on_click: Option<Action>,
     pub icon: Option<String>,
-    /// The host asked for this row not to enter usage history — a one-shot
-    /// search hit, for instance. Absent on the wire means "record it".
-    #[serde(default)]
-    pub ephemeral: bool,
     /// Secondary commands for the row's action panel. Built-ins are attached by
     /// the core before emitting; a host may supply its own.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<ActionItem>,
-    /// A small status glyph shown at the row's right edge (a pin for a pinned
-    /// row), resolved to an absolute path like `icon`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub badge: Option<String>,
 }
 
 /// The `theme` notification's params. Every role is optional, so a partial
@@ -115,3 +100,26 @@ pub struct ThemeConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub container: Option<String>,
 }
+
+/// The glyphs a `builtin:<name>` icon spec can name, bare; the shell renders
+/// each from its own compiled copy of the SVGs.
+pub const BUILTIN_GLYPHS: &[&str] = &[
+    "app",
+    "calculator",
+    "clipboard",
+    "copy",
+    "file",
+    "folder",
+    "lock",
+    "logout",
+    "open",
+    "power",
+    "reboot",
+    "reveal",
+    "suspend",
+    "terminal",
+    "window",
+];
+
+/// The spec a missing icon falls back to; its name is in [`BUILTIN_GLYPHS`].
+pub const BUILTIN_FALLBACK: &str = "builtin:app";

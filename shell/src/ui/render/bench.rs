@@ -57,28 +57,4 @@ pub fn bench() {
         square.h,
         at.elapsed() / repeats
     );
-
-    let tiny = Rect {
-        x: 610.0,
-        y: 316.0,
-        w: 700.0,
-        h: 52.0,
-    };
-    let tiny_path = round_rect(tiny, 9.0).unwrap();
-    let at = Instant::now();
-    for _ in 0..repeats {
-        pixmap.fill_path(
-            &tiny_path,
-            &paint,
-            FillRule::Winding,
-            Transform::identity(),
-            None,
-        );
-    }
-    println!(
-        "fill_path field   {}x{}: {:?}/frame",
-        tiny.w,
-        tiny.h,
-        at.elapsed() / repeats
-    );
 }

@@ -151,7 +151,7 @@ fn do_search(input: &str) -> Vec<ResultItem> {
     let query = cmd.to_lowercase();
 
     // The shared kind ranks first, then the shorter name, so `r cat` leads with
-    // `cat` rather than with every name the letters appear in.
+    // `cat`; equal lengths fall to the name, since readdir order is not stable.
     let mut hits: Vec<(Match, &Binary)> = binaries()
         .iter()
         .filter_map(|binary| classify_ci(&binary.name_lower, &query).map(|kind| (kind, binary)))
@@ -159,6 +159,7 @@ fn do_search(input: &str) -> Vec<ResultItem> {
     hits.sort_by(|a, b| {
         b.0.cmp(&a.0)
             .then_with(|| a.1.name.len().cmp(&b.1.name.len()))
+            .then_with(|| a.1.name.cmp(&b.1.name))
     });
 
     hits.into_iter()
@@ -181,9 +182,7 @@ fn row_for(binary: &Binary, args: &str) -> ResultItem {
         summary: Some(run_cmd.clone()),
         on_click: Some(action_for(desktop_id, terminal, !args.is_empty(), run_cmd)),
         icon: None,
-        ephemeral: false,
         actions: Vec::new(),
-        badge: None,
     }
 }
 

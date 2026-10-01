@@ -1,3 +1,6 @@
+mod builtin;
+
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
 
@@ -233,8 +236,8 @@ pub fn spawn_worker(
 
 /// Contain-fit `path` into a `size`×`size` box, transparent around it.
 fn render(path: &str, size: u32) -> Option<Pixmap> {
-    let data = std::fs::read(path).ok()?;
-    if path.to_ascii_lowercase().ends_with(".svg") {
+    let data = load(path)?;
+    if is_svg(path) {
         render_svg(&data, size)
     } else {
         // Anything that is not an SVG is decoded as a PNG: that is what the
@@ -244,6 +247,19 @@ fn render(path: &str, size: u32) -> Option<Pixmap> {
         resample(source.as_ref(), &mut target);
         Some(target)
     }
+}
+
+/// The bytes behind an icon spec: a compiled `builtin:` glyph, or the file's.
+fn load(path: &str) -> Option<Cow<'static, [u8]>> {
+    if let Some(name) = path.strip_prefix("builtin:") {
+        return Some(Cow::Borrowed(builtin::glyph(name)));
+    }
+    Some(Cow::Owned(std::fs::read(path).ok()?))
+}
+
+/// Whether a spec is an SVG; every compiled glyph is one.
+fn is_svg(path: &str) -> bool {
+    path.starts_with("builtin:") || path.to_ascii_lowercase().ends_with(".svg")
 }
 
 /// Recolour a monochrome silhouette to `color`, preserving alpha; a coloured icon
@@ -279,7 +295,7 @@ fn tint(pixmap: &mut Pixmap, color: [u8; 3]) {
 /// Render one panel action glyph: families pad their artwork differently, so crop
 /// to the ink, scale it to a common box, then tint; any source size lands alike.
 fn render_glyph(path: &str, size: u32, color: [u8; 3]) -> Option<Pixmap> {
-    if path.to_ascii_lowercase().ends_with(".svg") {
+    if is_svg(path) {
         return render_svg_glyph(path, size, color);
     }
 
@@ -321,7 +337,7 @@ fn render_glyph(path: &str, size: u32, color: [u8; 3]) -> Option<Pixmap> {
 /// The SVG path of [`render_glyph`]: probe the ink once, then rasterise the vector
 /// a second time with the ink fitted to the box, so it is crisp at the final size.
 fn render_svg_glyph(path: &str, size: u32, color: [u8; 3]) -> Option<Pixmap> {
-    let data = std::fs::read(path).ok()?;
+    let data = load(path)?;
     let tree = resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default()).ok()?;
     let source = tree.size();
     if source.width() <= 0.0 || source.height() <= 0.0 {
@@ -665,27 +681,23 @@ mod tests {
 
     #[test]
     fn every_bundled_glyph_renders() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/assets/icons");
         let (mut cache, _queued) = test_cache();
         let mut checked = 0;
-        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("svg") {
-                continue;
-            }
+        for (name, _) in builtin::GLYPHS {
+            let path = format!("builtin:{name}");
             let mut target = Pixmap::new(64, 64).unwrap();
-            deliver(&mut cache, path.to_str().unwrap(), 64);
-            cache.draw(&mut target, path.to_str().unwrap(), 0.0, 0.0, 64, 1.0);
+            deliver(&mut cache, &path, 64);
+            cache.draw(&mut target, &path, 0.0, 0.0, 64, 1.0);
             assert!(
                 target.pixels().iter().any(|p| p.alpha() > 0),
-                "{} rendered empty",
-                path.display()
+                "{path} rendered empty"
             );
             checked += 1;
         }
-        assert!(
-            checked >= 20,
-            "expected the bundled glyphs, found {checked}"
+        assert_eq!(
+            checked,
+            wayrun_core::wire::BUILTIN_GLYPHS.len(),
+            "the compiled table and the wire vocabulary agree"
         );
     }
 }
