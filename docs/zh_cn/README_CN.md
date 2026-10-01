@@ -75,9 +75,9 @@
 上表所列的内置插件都编在二进制里。之外的一切都是"主机"：一个讲 JSON-RPC 子集的
 可执行文件，在 `plugins.toml` 注册，逐次 fork 或以 `resident = true` 保温。
 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区提供 Python 框架、
-Lua 与 Python 示例（`firefox.lua`、`web.lua` 等）以及可复制的模板。Lua 插件就是
-一个脚本文件——由启动器二进制本体运行，无需安装解释器；见[插件](plugins.md)与工作区的
-[Lua 插件](https://github.com/Prslc/WayRun-Plugins/blob/main/docs/zh_cn/LUA_CN.md)。
+示例（`firefox.lua`、`web.lua` 等）以及可复制的模板。Lua 插件就是
+一个脚本文件——由启动器二进制本体运行，无需安装解释器；见[插件](plugins.md)与
+[Lua 插件](lua.md)。
 
 ## 快速开始
 
@@ -117,6 +117,7 @@ cargo build --release -p wayrun-shell --no-default-features      # 不做窗口�
 - [主题](theme.md) —— 系统调色板与 `theme.toml`（配色、模糊、布局、字体、动效）。
 - [配置](config.md) —— `config.toml`（搜索引擎、字体族）。
 - [插件](plugins.md) —— `plugins.toml`、内置插件与外部 JSON-RPC 主机。
+- [Lua 插件](lua.md) —— 由启动器自身承载的一个脚本：`wayrun` 表、沙箱与注册。
 - [JSON-RPC 2.0](jsonrpc.md) —— 通信协议与结果项 schema。
 
 ## 致谢

@@ -55,8 +55,9 @@ manager, launches fall back to plain detached processes.
 ## Proxy
 
 The core makes no outbound requests itself; a registered host that fetches does
-— the WayRun-Plugins `web.lua`, for instance. Its `wayrun.http.get` reads the
-launcher's environment, so configure a proxy with `Environment=` in the unit:
+— the WayRun-Plugins `web.lua`, for instance. Its
+[`wayrun.http.get`](lua.md#the-wayrun-table) reads the launcher's environment, so
+configure a proxy with `Environment=` in the unit:
 
 ```ini
 # HTTP CONNECT proxy; user:password@ optional

@@ -88,8 +88,9 @@ Called on the core's stdin, it answers with the current registry:
 When a `plugins.toml` entry declares `command`, the core spawns the host and
 calls `list_plugins` once to discover identity. A Python framework and example
 hosts that speak this contract live in the
-[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace; the
-response `result` is an array of objects:
+[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace; a Lua plugin
+is hosted by the launcher itself and answers the same call — see
+[lua.md](lua.md). The response `result` is an array of objects:
 
 | Key | Type | Meaning |
 |-----|------|---------|

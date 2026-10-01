@@ -102,6 +102,7 @@ through `wayrun.api`.
 
 Hosts can be written by hand. The
 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace ships a
-Python framework, Lua and Python examples and templates (`template/`,
-`template.lua`), and the host protocol is the JSON-RPC subset documented in
+Python framework, examples and templates (`template/`, `template.lua`). A Lua
+plugin is first-party — the binary hosts the script itself, see [lua.md](lua.md)
+— and the host protocol is the JSON-RPC subset documented in
 [jsonrpc.md](jsonrpc.md): `search`, `top`, `list_plugins`.

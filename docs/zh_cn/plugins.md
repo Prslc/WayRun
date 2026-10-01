@@ -84,6 +84,6 @@ enabled = true
 之前会一直收到提示。Lua 可在运行时通过 `wayrun.api` 读取当前版本。
 
 主机可以手写。[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区提供了一套
-Python 框架、Lua 与 Python 示例及模板（`template/`、`template.lua`），可复制起步。
-主机协议是 [jsonrpc.md](jsonrpc.md)
+Python 框架、示例与模板（`template/`、`template.lua`），可复制起步。Lua 插件是一等
+公民——二进制自身承载脚本，见 [lua.md](lua.md)。主机协议是 [jsonrpc.md](jsonrpc.md)
 中记录的 JSON-RPC 子集：`search`、`top`、`list_plugins`。

@@ -87,8 +87,7 @@ host: an executable that speaks the documented JSON-RPC subset, registered from
 Python framework, Lua and Python examples (`firefox.lua`, `web.lua`, …) and
 templates to copy from. A Lua plugin is one script file — the launcher binary
 runs it itself, so there is no interpreter to install; see
-[Plugins](docs/en/plugins.md) and the workspace's
-[Lua plugins](https://github.com/Prslc/WayRun-Plugins/blob/main/docs/en/LUA.md).
+[Plugins](docs/en/plugins.md) and [Lua plugins](docs/en/lua.md).
 
 ## Quick Start
 
@@ -133,6 +132,8 @@ cargo build --release -p wayrun-shell --no-default-features      # no window sea
 - [Config](docs/en/config.md) — `config.toml` (search engine, font family).
 - [Plugins](docs/en/plugins.md) — `plugins.toml`, the built-ins, and external
   JSON-RPC hosts.
+- [Lua plugins](docs/en/lua.md) — one script the launcher hosts itself: the
+  `wayrun` table, the sandbox, and registering it.
 - [JSON-RPC 2.0](docs/en/jsonrpc.md) — the wire protocol and the result schema.
 
 ## Credit

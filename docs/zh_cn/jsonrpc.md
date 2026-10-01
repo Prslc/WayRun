@@ -80,8 +80,8 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 
 当 `plugins.toml` 条目声明 `command` 时，后端启动主机并调用一次 `list_plugins`
 以发现身份。遵循此契约的 Python 框架与示例主机见
-[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区；响应 `result`
-为对象数组：
+[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区；Lua 插件由启动器
+自身承载、应答同一个调用，见 [lua.md](lua.md)。响应 `result` 为对象数组：
 
 | 键 | 类型 | 含义 |
 |-----|------|------|
