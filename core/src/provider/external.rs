@@ -18,6 +18,7 @@ pub struct HostMeta {
     pub name: String,
     pub icon: String,
     pub ready: String,
+    pub api: u32,
 }
 
 /// `(mtime, size)` of the resolved `command`, to validate a cached identity.
@@ -47,7 +48,16 @@ impl External {
     /// missing identity degrades to the id as display name.
     pub fn new(id: &str, command: String, discovered: Option<HostMeta>, resident: bool) -> Self {
         let (name, icon, ready) = match discovered {
-            Some(m) => (m.name, m.icon, m.ready),
+            Some(m) => {
+                if m.api != crate::wire::PLUGIN_API {
+                    eprintln!(
+                        "wayrun-core: plugin {id}: api {}, this launcher speaks {}",
+                        m.api,
+                        crate::wire::PLUGIN_API
+                    );
+                }
+                (m.name, m.icon, m.ready)
+            }
             None => (
                 id.to_string(),
                 String::new(),
@@ -207,6 +217,7 @@ pub async fn discover(command: &str, resident: bool) -> Vec<HostMeta> {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string(),
+                api: entry.get("api").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
             })
         })
         .collect()

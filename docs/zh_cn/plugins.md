@@ -76,6 +76,13 @@ enabled = true
 `papirus:` 规范一律视为无图标。结果行自身没有图标时，改用
 所属插件的身份图标；身份图标也没有时，回退到编入二进制的占位图。
 
+每个插件都要声明自己所针对的 API 版本——主机在 `list_plugins` 身份中声明，Lua
+脚本在插件表中声明——与启动器自身版本不匹配时只记录日志，不拒绝该插件（它仍可能
+正常工作）。只有当插件**能观察到**的接口发生变化（绑定、签名、字段、沙箱规则）时
+该数字才变动，纯新增或启动器内部改动不会：新增 `wayrun.crypto` 不动它，而
+`wayrun.env` 收紧读取范围会动。没有版本号的旧插件算作 `0`，因此在你为它写明版本
+之前会一直收到提示。Lua 可在运行时通过 `wayrun.api` 读取当前版本。
+
 主机可以手写。[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区提供了一套
 Python 框架、Lua 与 Python 示例及模板（`template/`、`template.lua`），可复制起步。
 主机协议是 [jsonrpc.md](jsonrpc.md)

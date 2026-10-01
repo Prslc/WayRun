@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+/// The plugin API version this launcher speaks; what a host or Lua plugin
+/// reports is compared against it, and a mismatch is logged rather than refused.
+pub const PLUGIN_API: u32 = 1;
+
 /// One thing a row can do: what Enter or an action runs. Internally tagged, so
 /// the wire carries `{"type":"run","cmd":"…"}` rather than a scheme string.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

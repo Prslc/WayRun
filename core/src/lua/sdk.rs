@@ -76,6 +76,7 @@ pub(super) fn build(
             Ok(crate::system::fs::cache_dir().map(|path| path.display().to_string()))
         })?,
     )?;
+    sdk.set("api", crate::wire::PLUGIN_API)?;
     sdk.set(
         "icon",
         lua.create_function(|_, spec: String| Ok(crate::system::icon::resolve_for_host(&spec)))?,

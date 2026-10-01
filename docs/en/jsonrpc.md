@@ -97,6 +97,11 @@ response `result` is an array of objects:
 | `name` | string | display name (empty → falls back to the configured id) |
 | `icon` | string | an absolute path to an icon the host ships (see [Icon specs](#icon-specs)) |
 | `description` | string | ready hint shown in the `?` list and the keyword+space hint |
+| `api` | number | the plugin API the host targets; absent means `0`, before versioning |
+
+`api` is compared against the launcher's own plugin API version. A mismatch is
+logged on stderr and never refuses the plugin, which may still work; the rule for
+when the number moves is in [plugins.md](plugins.md).
 
 A host with no `list_plugins`, or with no id matching its entry, still works —
 searches are forwarded and results parsed — but its identity falls back to the

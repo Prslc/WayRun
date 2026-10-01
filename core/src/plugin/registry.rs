@@ -50,8 +50,8 @@ pub(super) struct Entry {
 
 pub(super) type PluginMap = std::collections::HashMap<&'static str, Box<dyn super::Plugin>>;
 
-/// A discovered host identity, keyed by command and stamped with the file's
-/// `(mtime, size)`, so an unchanged host is never forked again.
+/// A discovered host identity, keyed by `command` and stamped with the file's
+/// `(mtime, size)`: a changed host is asked again, a stale `api` never read.
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct HostCache {
     hosts: std::collections::HashMap<String, CachedHost>,
@@ -547,6 +547,7 @@ mod tests {
             name: "Ext".into(),
             icon: String::new(),
             ready: String::new(),
+            api: crate::wire::PLUGIN_API,
         }];
         cache.record(&command, &metas);
         assert!(cache.fresh(&command).is_some());
@@ -558,5 +559,12 @@ mod tests {
         // a command that no longer exists is never fresh
         std::fs::remove_file(&cmd).unwrap();
         assert!(cache.fresh(&command).is_none());
+    }
+
+    #[test]
+    fn a_cache_written_before_versioning_is_dropped_rather_than_read() {
+        let old = r#"{"hosts":{"/bin/x":{"mtime":1,"size":1,
+            "metas":[{"id":"ext","name":"Ext","icon":"","ready":""}]}}}"#;
+        assert!(serde_json::from_str::<HostCache>(old).is_err());
     }
 }

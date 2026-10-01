@@ -89,6 +89,10 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 | `name` | string | 显示名（空 → 回落为配置的 id） |
 | `icon` | string | 主机自带的图标的绝对路径（见 [图标规范](#图标规范)） |
 | `description` | string | ready 提示，显示在 `?` 列表与关键词+空格提示中 |
+| `api` | number | 主机所针对的插件 API 版本；缺省为 `0`，即尚无版本号的时期 |
+
+`api` 会与启动器自身的插件 API 版本比较。不匹配只记入 stderr，绝不拒绝该插件
+（它仍可能正常工作）；该数字何时变动见 [plugins.md](plugins.md)。
 
 未实现 `list_plugins`（或返回中没有匹配的 `id`）的主机仍可用——搜索照常转发、
 结果照常解析——但身份退化为配置的 id 且无图标，因此 `?` 列表与关键词+空格提示

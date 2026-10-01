@@ -44,6 +44,7 @@ struct Plugin {
     id: String,
     name: String,
     icon: Option<String>,
+    api: u32,
     description: Option<String>,
     env: Vec<String>,
     read: Vec<PathBuf>,
@@ -156,6 +157,7 @@ impl Host {
                         "name": plugin.name,
                         "icon": plugin.icon.clone().unwrap_or_default(),
                         "description": plugin.description.clone().unwrap_or_default(),
+                        "api": plugin.api,
                     }))
                     .collect::<Vec<_>>()
             )),
@@ -351,6 +353,7 @@ fn read_plugins(declared: &Table, script: &str) -> mlua::Result<Vec<Plugin>> {
             id,
             name,
             icon,
+            api: entry.get::<Option<u32>>("api")?.unwrap_or(0),
             description: entry.get("description")?,
             env,
             read,
@@ -436,6 +439,26 @@ mod tests {
         );
         let icons: Vec<_> = host.plugins.iter().map(|p| p.icon.as_deref()).collect();
         assert_eq!(icons, [Some("/tmp/x.svg"), None, None]);
+    }
+
+    #[test]
+    fn a_manifest_api_reaches_the_identity_reply() {
+        let host = host(
+            r#"
+            return {
+              { id = "current", api = 1, search = function() return {} end },
+              { id = "unversioned", search = function() return {} end },
+            }
+            "#,
+        );
+        let list = call(&host, "list_plugins", json!({})).unwrap();
+        let apis: Vec<_> = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["api"].as_u64())
+            .collect();
+        assert_eq!(apis, [Some(1), Some(0)]);
     }
 
     #[test]

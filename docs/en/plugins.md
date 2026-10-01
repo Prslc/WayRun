@@ -90,6 +90,16 @@ spec left unresolved, counts as no icon. A result whose own icon is missing
 falls back to the plugin's identity icon, and the built-in placeholder answers
 when that is missing too.
 
+Every plugin names the API version it targets — a host in its `list_plugins`
+identity, a Lua script in its plugin table — and the launcher logs a mismatch
+against its own version without refusing the plugin, which may still work. The
+number moves when a plugin can observe the change (a binding, a signature, a
+field, a sandbox rule), never for an addition or for a change inside the
+launcher, so gaining `wayrun.crypto` does not move it while `wayrun.env` gaining
+a scope does. A plugin written before versioning is `0`, so it is warned about
+until it states the version it means. Lua can read the current one at runtime
+through `wayrun.api`.
+
 Hosts can be written by hand. The
 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace ships a
 Python framework, Lua and Python examples and templates (`template/`,
