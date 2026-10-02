@@ -79,6 +79,18 @@ impl<T: Send + Sync + 'static> FreshCache<T> {
         }
     }
 
+    /// Like [`get`], but a stale entry is revalidated before it answers: for a
+    /// caller whose whole content is this list, a stale answer is wrong.
+    pub async fn get_fresh(
+        &self,
+        fetch: impl FnOnce() -> Option<Vec<T>> + Send + 'static,
+    ) -> Option<Arc<Vec<T>>> {
+        if let Some(rows) = self.lock().fresh() {
+            return Some(rows);
+        }
+        self.fetch_now(fetch).await
+    }
+
     /// The first read waits for the fetch; a cold search has no rows to answer
     /// with, and every later one rides the cache.
     async fn fetch_now(
@@ -258,6 +270,33 @@ mod tests {
             .await
             .unwrap();
         assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[tokio::test]
+    async fn get_fresh_answers_a_fresh_entry_without_fetching() {
+        let cache: FreshCache<u32> = FreshCache::new();
+        cache.get(|| Some(vec![1])).await;
+        let rows = cache
+            .get_fresh(|| panic!("a fresh entry must not refetch"))
+            .await;
+        assert_eq!(*rows.unwrap(), vec![1]);
+    }
+
+    #[tokio::test]
+    async fn get_fresh_revalidates_a_stale_entry_before_answering() {
+        let cache: FreshCache<u32> = stale_cache(vec![1]);
+        let rows = cache.get_fresh(|| Some(vec![2])).await;
+        assert_eq!(*rows.unwrap(), vec![2], "the fetch replaces the stale rows");
+        let rows = cache
+            .get(|| panic!("the revalidation is already in the cache"))
+            .await;
+        assert_eq!(*rows.unwrap(), vec![2]);
+    }
+
+    #[tokio::test]
+    async fn a_failed_revalidation_answers_get_fresh_with_nothing() {
+        let cache: FreshCache<u32> = stale_cache(vec![1]);
+        assert!(cache.get_fresh(|| None).await.is_none());
     }
 
     #[tokio::test]

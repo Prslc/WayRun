@@ -7,7 +7,7 @@ use anyhow::Result;
 
 use crate::plugin::{Match, classify};
 use crate::plugin::{Meta, Plugin};
-use crate::provider::{FreshCache, rank_results};
+use crate::provider::{FreshCache, SHOW_CAP, rank_results};
 use crate::system::compositor::{self, Compositor, Window};
 use crate::system::desktop_action;
 use crate::system::executor::shell_join;
@@ -46,14 +46,21 @@ impl Plugin for WindowPlugin {
             if input.is_empty() {
                 return Ok(Vec::new());
             }
-            let Some(windows) = cached_windows().await else {
+            let Some(windows) = WINDOWS.get(fetch_windows).await else {
                 return Ok(Vec::new());
             };
-            Ok(
-                tokio::task::spawn_blocking(move || do_search(&input, &windows))
-                    .await
-                    .unwrap_or_default(),
-            )
+            Ok(rows(&input, windows).await)
+        })
+    }
+
+    fn default_view(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<ResultItem>>>> + Send + '_>> {
+        Box::pin(async move {
+            let Some(windows) = WINDOWS.get_fresh(fetch_windows).await else {
+                return Ok(None);
+            };
+            Ok(Some(rows("", windows).await))
         })
     }
 }
@@ -81,22 +88,38 @@ impl CachedWindow {
 /// msg` round trip serves the whole burst.
 static WINDOWS: LazyLock<FreshCache<CachedWindow>> = LazyLock::new(FreshCache::new);
 
-async fn cached_windows() -> Option<Arc<Vec<CachedWindow>>> {
-    WINDOWS
-        .get(|| {
-            let compositor = compositor::detect()?;
-            let windows = compositor.windows().ok()?;
-            Some(windows.into_iter().map(CachedWindow::new).collect())
-        })
-        .await
+fn fetch_windows() -> Option<Vec<CachedWindow>> {
+    let compositor = compositor::detect()?;
+    let windows = compositor.windows().ok()?;
+    Some(windows.into_iter().map(CachedWindow::new).collect())
 }
 
-/// Fuzzy-match the query against every open window's title/app_id and emit a
-/// `run:` row that focuses the winner; empty without a compositor backend.
-fn do_search(query: &str, windows: &[CachedWindow]) -> Vec<ResultItem> {
-    let Some(compositor) = compositor::detect() else {
-        return Vec::new();
-    };
+async fn rows(query: &str, windows: Arc<Vec<CachedWindow>>) -> Vec<ResultItem> {
+    let query = query.to_string();
+    tokio::task::spawn_blocking(move || {
+        let Some(compositor) = compositor::detect() else {
+            return Vec::new();
+        };
+        do_search(compositor, &query, &windows)
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// The scored matches for `query`, or every window in the compositor's own
+/// order for an empty query.
+fn do_search(
+    compositor: &dyn Compositor,
+    query: &str,
+    windows: &[CachedWindow],
+) -> Vec<ResultItem> {
+    if query.is_empty() {
+        return windows
+            .iter()
+            .take(SHOW_CAP)
+            .map(|cached| row(compositor, &cached.window))
+            .collect();
+    }
 
     let query = query.to_lowercase();
     let mut results: Vec<(u32, ResultItem)> = Vec::new();
@@ -108,7 +131,7 @@ fn do_search(query: &str, windows: &[CachedWindow]) -> Vec<ResultItem> {
         }
     }
 
-    rank_results(results, false, 50)
+    rank_results(results, false, SHOW_CAP)
 }
 
 /// The strongest kind either surface reaches, so a window whose app id is exact
@@ -170,12 +193,20 @@ mod tests {
         }
         fn windows(&self) -> Result<Vec<Window>> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(vec![Window {
-                id: "1".into(),
-                title: "kitty".into(),
-                app_id: Some("kitty".into()),
-                workspace: None,
-            }])
+            Ok(vec![
+                Window {
+                    id: "1".into(),
+                    title: "kitty".into(),
+                    app_id: Some("kitty".into()),
+                    workspace: None,
+                },
+                Window {
+                    id: "2".into(),
+                    title: "firefox".into(),
+                    app_id: None,
+                    workspace: None,
+                },
+            ])
         }
         fn focus_argv(&self, _id: &str) -> Vec<String> {
             Vec::new()
@@ -205,6 +236,25 @@ mod tests {
     async fn empty_query_matches_nothing() {
         let plugin = WindowPlugin::new();
         assert!(plugin.search("", "").await.unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_empty_query_lists_every_window_in_compositor_order() {
+        let compositor = Counting {
+            calls: AtomicUsize::new(0),
+        };
+        let windows: Vec<CachedWindow> = compositor
+            .windows()
+            .unwrap()
+            .into_iter()
+            .map(CachedWindow::new)
+            .collect();
+        let titles: Vec<String> = do_search(&compositor, "", &windows)
+            .into_iter()
+            .map(|item| item.title)
+            .collect();
+        assert_eq!(titles, ["kitty", "firefox"]);
+        assert!(do_search(&compositor, "zzz", &windows).is_empty());
     }
 
     #[test]

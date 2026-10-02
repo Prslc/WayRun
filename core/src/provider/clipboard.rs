@@ -42,15 +42,21 @@ impl Plugin for Clipboard {
             if query.is_empty() {
                 return Ok(vec![]);
             }
-            let Some(entries) = cached_entries().await else {
+            let Some(entries) = LIST.get(fetch_entries).await else {
                 return Ok(vec![]);
             };
-            Ok(tokio::task::spawn_blocking(move || {
-                let icon = resolve("builtin:clipboard");
-                matching_rows(&entries, &query, &icon)
-            })
-            .await
-            .unwrap_or_default())
+            Ok(rows(&query, entries).await)
+        })
+    }
+
+    fn default_view(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<ResultItem>>>> + Send + '_>> {
+        Box::pin(async move {
+            let Some(entries) = LIST.get_fresh(fetch_entries).await else {
+                return Ok(None);
+            };
+            Ok(Some(rows("", entries).await))
         })
     }
 }
@@ -84,16 +90,24 @@ impl Entry {
 /// serves the whole burst.
 static LIST: LazyLock<FreshCache<Entry>> = LazyLock::new(FreshCache::new);
 
-async fn cached_entries() -> Option<Arc<Vec<Entry>>> {
-    LIST.get(|| {
-        let output = Command::new("cliphist").arg("list").output().ok()?;
-        let text = String::from_utf8_lossy(&output.stdout);
-        Some(parse_entries(&text))
-    })
-    .await
+fn fetch_entries() -> Option<Vec<Entry>> {
+    let output = Command::new("cliphist").arg("list").output().ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    Some(parse_entries(&text))
 }
 
-/// The rows whose preview contains `query_lower`, capped to [`MAX_RESULTS`].
+async fn rows(query: &str, entries: Arc<Vec<Entry>>) -> Vec<ResultItem> {
+    let query = query.to_string();
+    tokio::task::spawn_blocking(move || {
+        let icon = resolve("builtin:clipboard");
+        matching_rows(&entries, &query, &icon)
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// The rows whose preview contains `query_lower`, or every one for an empty
+/// query, capped to [`MAX_RESULTS`].
 fn matching_rows(entries: &[Entry], query_lower: &str, icon: &Option<String>) -> Vec<ResultItem> {
     entries
         .iter()
@@ -164,6 +178,17 @@ mod tests {
         let entries = parse_entries(raw);
         assert_eq!(matching_rows(&entries, "fire", &None).len(), 1);
         assert_eq!(matching_rows(&entries, "xyz", &None).len(), 0);
+    }
+
+    #[test]
+    fn an_empty_query_lists_the_whole_history() {
+        let raw = "1\ttext/plain\tfirefox\n2\ttext/plain\tterminal";
+        let entries = parse_entries(raw);
+        let titles: Vec<String> = matching_rows(&entries, "", &None)
+            .into_iter()
+            .map(|item| item.title)
+            .collect();
+        assert_eq!(titles, ["firefox", "terminal"]);
     }
 
     #[tokio::test]
