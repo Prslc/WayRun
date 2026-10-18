@@ -189,6 +189,9 @@ mod tests {
     // process spawns of its own, so a call gets a load-tolerant deadline.
     const LIMIT: Duration = Duration::from_secs(5);
 
+    /// The tests share the process-global slots and reaper; serialize them.
+    static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     fn script(dir: &tempfile::TempDir, name: &str, body: &str) -> String {
         use std::io::Write;
         use std::os::unix::fs::PermissionsExt;
@@ -224,6 +227,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_resident_host_serves_many_calls_from_one_process() {
+        let _serial = SERIAL.lock().await;
         let dir = tempfile::tempdir().unwrap();
         let counter = dir.path().join("starts");
         let command = echo_host(&dir, &counter);
@@ -236,6 +240,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_stalled_host_is_killed_and_the_next_call_restarts_it() {
+        let _serial = SERIAL.lock().await;
         let dir = tempfile::tempdir().unwrap();
         let counter = dir.path().join("starts");
         let command = script(
@@ -248,7 +253,7 @@ mod tests {
         );
         // Wide enough that a loaded machine still lets the script write its
         // start line before the deadline kills it.
-        let limit = Duration::from_secs(1);
+        let limit = Duration::from_secs(2);
         assert!(call(&command, &request(), limit).await.is_none());
         assert!(call(&command, &request(), limit).await.is_none());
         assert_eq!(starts(&counter), 2, "the stalled host was replaced");
@@ -256,6 +261,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_dead_host_is_restarted_on_the_next_call() {
+        let _serial = SERIAL.lock().await;
         let dir = tempfile::tempdir().unwrap();
         let counter = dir.path().join("starts");
         let command = script(
@@ -280,6 +286,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_queued_call_a_later_one_overtook_is_skipped() {
+        let _serial = SERIAL.lock().await;
         let dir = tempfile::tempdir().unwrap();
         let served = dir.path().join("served");
         let command = script(
@@ -290,7 +297,7 @@ mod tests {
                 served.display()
             ),
         );
-        let limit = Duration::from_secs(2);
+        let limit = LIMIT;
         let slot = slot_for(&command);
         let first = tokio::spawn({
             let command = command.clone();
@@ -328,6 +335,7 @@ mod tests {
 
     #[tokio::test]
     async fn dismiss_reaps_every_host() {
+        let _serial = SERIAL.lock().await;
         let dir = tempfile::tempdir().unwrap();
         let counter = dir.path().join("starts");
         let command = echo_host(&dir, &counter);
@@ -353,6 +361,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_idle_host_is_reaped_and_its_slot_forgotten() {
+        let _serial = SERIAL.lock().await;
         let dir = tempfile::tempdir().unwrap();
         let counter = dir.path().join("starts");
         let command = echo_host(&dir, &counter);
