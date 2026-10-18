@@ -46,6 +46,18 @@ fn streamed_source(path: &str, size: u32) -> Option<Pixmap> {
     }
 }
 
+/// The intrinsic size a preview pane should fit to. SVG is parsed because
+/// `image` cannot read it; a file neither parser answers declines.
+pub(super) fn intrinsic_size(path: &str) -> Option<(u32, u32)> {
+    if is_svg(path) {
+        let data = load(path)?;
+        let tree = resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default()).ok()?;
+        let size = tree.size();
+        return Some((size.width().round() as u32, size.height().round() as u32));
+    }
+    image::image_dimensions(path).ok()
+}
+
 /// Decode a PNG row by row, box-averaging straight into the preview box, so a
 /// 4K source never materializes its full RGBA buffer. An interlaced PNG declines.
 fn decode_png<R: Read>(reader: R, size: u32) -> Option<Pixmap> {
@@ -517,6 +529,26 @@ mod tests {
             scaled.width(),
             scaled.height()
         );
+    }
+
+    #[test]
+    fn an_svg_intrinsic_size_comes_from_its_attributes() {
+        let path = std::env::temp_dir().join("wayrun-aspect.svg");
+        std::fs::write(
+            &path,
+            br#"<svg xmlns="http://www.w3.org/2000/svg" width="160" height="90"><rect width="160" height="90"/></svg>"#,
+        )
+        .unwrap();
+        assert_eq!(intrinsic_size(path.to_str().unwrap()), Some((160, 90)));
+
+        std::fs::write(
+            &path,
+            br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 32"><rect width="64" height="32"/></svg>"#,
+        )
+        .unwrap();
+        assert_eq!(intrinsic_size(path.to_str().unwrap()), Some((64, 32)));
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

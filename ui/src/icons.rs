@@ -6,7 +6,7 @@ use std::sync::mpsc::Sender;
 
 use tiny_skia::{Pixmap, PixmapPaint, Transform};
 
-use self::render::{render, render_glyph};
+use self::render::{intrinsic_size, render, render_glyph};
 
 /// One decode a frame asked for: what the worker renders and the key it lands
 /// under, so a repeat ask is told apart from a first one.
@@ -66,13 +66,13 @@ impl IconCache {
         self.generation = self.generation.wrapping_add(1);
     }
 
-    /// The image's intrinsic size, read from the header once; a parser that
-    /// cannot answer (SVG) leaves the preview to its square fallback.
+    /// The image's intrinsic size, read once so a preview can keep its aspect;
+    /// SVG is parsed, and a file neither parser answers stays square.
     pub fn aspect(&mut self, path: &str) -> Option<(u32, u32)> {
         if let Some(cached) = self.aspects.get(path) {
             return *cached;
         }
-        let size = image::image_dimensions(path).ok();
+        let size = intrinsic_size(path).filter(|(width, height)| *width > 0 && *height > 0);
         self.aspects.insert(path.to_string(), size);
         size
     }
