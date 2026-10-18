@@ -1,4 +1,4 @@
-use gio::prelude::{AppInfoExt, FileExt};
+use gio::prelude::{AppInfoExt, AppLaunchContextExt, FileExt};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::OnceLock;
@@ -139,12 +139,23 @@ pub fn launch_app(desktop_id: &str) {
     {
         return;
     }
+    let context = launch_context();
     for app in gio::AppInfo::all() {
         if app.id().as_deref() == Some(desktop_id) {
-            let _ = app.launch(&[], None::<&gio::AppLaunchContext>);
+            let _ = app.launch(&[], Some(&context));
             return;
         }
     }
+}
+
+/// A launch context that hands the app the session's LANGUAGE, not the UI pin.
+fn launch_context() -> gio::AppLaunchContext {
+    let context = gio::AppLaunchContext::new();
+    match crate::locale::ambient_language() {
+        Some(language) => context.setenv("LANGUAGE", language),
+        None => context.unsetenv("LANGUAGE"),
+    }
+    context
 }
 
 /// Open a URI with the default handler via `GLib`. `xdg-open` would drop
@@ -153,7 +164,7 @@ pub fn open_uri(uri: &str) {
     if spawn_gio_scoped("open", uri) {
         return;
     }
-    let _ = gio::AppInfo::launch_default_for_uri(uri, None::<&gio::AppLaunchContext>);
+    let _ = gio::AppInfo::launch_default_for_uri(uri, Some(&launch_context()));
 }
 
 /// Show a file in the file manager: `org.freedesktop.FileManager1.ShowItems`

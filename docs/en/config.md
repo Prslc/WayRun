@@ -10,7 +10,7 @@ default shown here.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `locale` | *(session locale)* | Interface language: `en` or `zh_cn`. Omitted, the launcher follows `$LC_ALL`/`$LC_MESSAGES`/`$LANG`/`$LANGUAGE`. |
+| `locale` | *(session locale)* | Interface language: `en` or `zh_cn`. Omitted, the launcher follows glib's `$LANGUAGE`/`$LC_ALL`/`$LC_MESSAGES`/`$LANG`. |
 
 Read at startup, so a change takes effect on the next launch
 (`systemctl --user restart wayrun-launcher`), and it also decides the language

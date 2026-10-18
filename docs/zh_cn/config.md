@@ -9,7 +9,7 @@ WayRun 的设置。首次运行时自动生成一份带注释的模板，
 
 | 键 | 默认 | 含义 |
 | --- | --- | --- |
-| `locale` | *（会话语言）* | 界面语言：`en` 或 `zh_cn`。省略时跟随 `$LC_ALL`/`$LC_MESSAGES`/`$LANG`/`$LANGUAGE`。 |
+| `locale` | *（会话语言）* | 界面语言：`en` 或 `zh_cn`。省略时跟随 glib 的 `$LANGUAGE`/`$LC_ALL`/`$LC_MESSAGES`/`$LANG`。 |
 
 启动时读取，因此修改后需下次启动生效（`systemctl --user restart wayrun-launcher`）。
 `.desktop` 文件带来的文字——应用名称、说明与桌面动作名——同样跟随此设置。

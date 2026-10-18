@@ -66,12 +66,19 @@ pub fn start(tx: Sender<BackendEvent>) {
     // Re-exec this same binary in core mode; stderr is inherited so the core's
     // warnings land in the unit's journal.
     let spawned = std::env::current_exe().and_then(|exe| {
-        Command::new(exe)
+        let mut command = Command::new(exe);
+        command
             .arg("--core")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
+            .stderr(Stdio::inherit());
+        // The shell pinned LANGUAGE for its own chrome; the core and the apps
+        // it launches need the session's original value.
+        match wayrun_core::locale::ambient_language() {
+            Some(language) => command.env("LANGUAGE", language),
+            None => command.env_remove("LANGUAGE"),
+        };
+        command.spawn()
     });
 
     let mut child = match spawned {

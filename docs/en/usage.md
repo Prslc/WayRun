@@ -80,9 +80,10 @@ as `· Enter: <action id>`.
 
 ## Language
 
-The interface follows the session's locale, read once at startup: `$LC_ALL`,
-then `$LC_MESSAGES`, `$LANG`, then `$LANGUAGE`'s first entry. English and
-Simplified Chinese ship; any other locale falls back to English.
+The interface follows the session's locale, read once at startup in glib's
+order: `$LANGUAGE`'s first entry with a shipped table, then `$LC_ALL`,
+`$LC_MESSAGES`, `$LANG`; a `C`/`POSIX` base locale ignores `$LANGUAGE`. English
+and Simplified Chinese ship; any other locale falls back to English.
 
 `config.toml`'s `[ui] locale` pins the language regardless of the session, which
 is what a resident service wants: its unit inherits the session's locale, or none
