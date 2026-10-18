@@ -1,8 +1,8 @@
 use std::time::{Duration, Instant};
 
-use crate::ui::config::{AppearanceConfig, Mode};
-use crate::ui::geom::Layout;
-use crate::ui::theme::{Surfaces, Theme};
+use crate::config::{AppearanceConfig, Mode};
+use crate::geom::Layout;
+use crate::theme::{Surfaces, Theme};
 
 /// The entrance fade's duration: a flat pixmap cannot scale, so a show fades in.
 pub const ENTRANCE_MS: u64 = 240;
@@ -44,7 +44,7 @@ impl RowMotion {
 }
 
 /// The appearance and motion state a frame is drawn from, so the renderer
-/// reads only [`crate::ui::view::Frame`].
+/// reads only [`crate::view::Frame`].
 pub struct Presentation {
     /// The core's system theme (the DMS palette, or the fallback).
     pub system_theme: Theme,
@@ -335,7 +335,7 @@ mod tests {
         assert_eq!(present.theme.primary, [1, 2, 3]);
         assert_eq!(present.theme.fg, [0x10, 0x20, 0x30]);
         assert_eq!(present.theme.container, [7, 8, 9]);
-        assert_eq!(present.surfaces.dim, crate::ui::theme::DEFAULT_DIM);
+        assert_eq!(present.surfaces.dim, crate::theme::DEFAULT_DIM);
         assert_eq!(present.card_target, present.appearance.layout.empty_h());
     }
 

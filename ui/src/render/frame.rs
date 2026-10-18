@@ -2,10 +2,10 @@ use std::time::Instant;
 
 use tiny_skia::Pixmap;
 
-use crate::ui::geom;
-use crate::ui::icons::IconCache;
-use crate::ui::text::TextEngine;
-use crate::ui::view::{Body, Frame};
+use crate::geom;
+use crate::icons::IconCache;
+use crate::text::TextEngine;
+use crate::view::{Body, Frame};
 
 use super::canvas::{Canvas, Rect};
 use super::{field, footer, list, panel};
@@ -145,7 +145,7 @@ pub fn draw(
 mod tests {
     use super::super::canvas::dim_u8;
     use super::*;
-    use crate::ui::view::test_frame;
+    use crate::view::test_frame;
     use tiny_skia::Color;
 
     /// A cache whose queue nobody drains: these frames draw no icons.

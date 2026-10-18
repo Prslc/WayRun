@@ -15,7 +15,7 @@ use wayland_client::{Connection, QueueHandle};
 use wayrun_core::trim_allocator;
 
 use crate::session::{backend, ipc};
-use crate::ui::render;
+use wayrun_ui::render;
 
 use super::{Damage, Shell, scale};
 

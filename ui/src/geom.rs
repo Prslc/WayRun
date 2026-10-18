@@ -84,10 +84,8 @@ impl Layout {
         }
     }
 
-    /// The band a row is drawn in, as `(left, width)`: the card inset by `PAD`,
-    /// shared by the result list, the action panel and the footer. The row hit
-    /// test uses the whole card width instead, so a press in that padding still
-    /// selects the row beside it.
+    /// The band a row is drawn in, as `(left, width)`, shared by the list,
+    /// panel and footer; the hit test uses the whole card width instead.
     pub fn row_band(&self, surface: (u32, u32)) -> (f32, f32) {
         (self.card_x(surface) + PAD, self.card_w(surface) - 2.0 * PAD)
     }

@@ -49,9 +49,8 @@ struct Line {
     used: u64,
 }
 
-/// Distinct lines kept before the least recently used one is evicted; a show's
-/// live set is tiny, and cosmic-text costs ~500 bytes per text character, so
-/// the cap stays small.
+/// Distinct lines kept before the least recently used is evicted; a show's
+/// live set is tiny, so the cap stays small.
 const LINE_CACHE_MAX: usize = 32;
 
 pub struct TextEngine {
@@ -61,6 +60,12 @@ pub struct TextEngine {
     /// Bumped on every cache lookup, so `Line::used` orders the entries.
     clock: u64,
     family: String,
+}
+
+impl Default for TextEngine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TextEngine {

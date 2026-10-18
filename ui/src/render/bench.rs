@@ -11,7 +11,7 @@ pub fn bench() {
 
     let at = Instant::now();
     for _ in 0..repeats {
-        pixmap.fill(Color::from_rgba8(0, 0, 0, crate::ui::theme::DEFAULT_DIM[3]));
+        pixmap.fill(Color::from_rgba8(0, 0, 0, crate::theme::DEFAULT_DIM[3]));
     }
     println!("pixmap.fill (2.07M px): {:?}/frame", at.elapsed() / repeats);
 

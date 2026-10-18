@@ -2,7 +2,7 @@ use tiny_skia::{
     BlendMode, Color, FillRule, Paint, Path, PathBuilder, Pixmap, Shader, Stroke, Transform,
 };
 
-use crate::ui::geom;
+use crate::geom;
 
 // The magnifier's box, the gap after it and the input inset.
 const MAGNIFIER_BOX: f32 = 22.0;
@@ -271,7 +271,7 @@ pub(super) fn pixmap() -> Pixmap {
 /// The 8-bit alpha the dim writes, derived from the shipped surface colour.
 #[cfg(test)]
 pub(super) fn dim_u8() -> u8 {
-    crate::ui::theme::DEFAULT_DIM[3]
+    crate::theme::DEFAULT_DIM[3]
 }
 
 #[cfg(test)]

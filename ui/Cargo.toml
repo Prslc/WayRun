@@ -1,0 +1,22 @@
+[package]
+name = "wayrun-ui"
+version = "0.8.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "wayrun_ui"
+path = "src/lib.rs"
+
+[dependencies]
+wayrun-core = { path = "../core", default-features = false }
+cosmic-text = "0.15"
+libc = "0.2"
+# Icons are paths, never text: the default `text`/`system-fonts` features would
+# build and load a system font database for every `Options::default()`, which
+# maps tens of MB of font files the UI never draws with.
+resvg = { version = "0.45", default-features = false }
+rust-i18n = { version = "1.2.2", default-features = false }
+serde = { version = "1", features = ["derive"] }
+tiny-skia = "0.11.4"
+toml = "1.1.2"

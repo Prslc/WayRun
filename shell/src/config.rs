@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use crate::ui::config::AppearanceConfig;
 use wayrun_core::{watch as watch_file, write_if_absent};
+use wayrun_ui::config::AppearanceConfig;
 
 const DEFAULT_TEMPLATE: &str = include_str!("../default-theme.toml");
 

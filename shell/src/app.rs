@@ -10,10 +10,10 @@ mod test_support;
 
 use std::time::Instant;
 
-use crate::ui::geom::Layout;
-use crate::ui::present::{Presentation, RowMotion};
-use crate::ui::view::{Body, FieldView, FooterView, Frame, ListView, PanelView};
 use wayrun_core::wire::{Action, ResultItem};
+use wayrun_ui::geom::Layout;
+use wayrun_ui::present::{Presentation, RowMotion};
+use wayrun_ui::view::{Body, FieldView, FooterView, Frame, ListView, PanelView};
 
 use self::menu::PanelKey;
 

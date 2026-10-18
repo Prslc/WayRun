@@ -4,8 +4,8 @@ use cosmic_text::Weight;
 use rust_i18n::t;
 use tiny_skia::Pixmap;
 
-use crate::ui::text::TextEngine;
-use crate::ui::view::Frame;
+use crate::text::TextEngine;
+use crate::view::Frame;
 
 use super::canvas::{Canvas, Rect, TEXT_INSET};
 
@@ -157,7 +157,7 @@ fn caret_box(frame: &Frame<'_>, text: &mut TextEngine) -> (Rect, f32) {
     let shift = scroll_for(area.0 + before.width / scale, area);
 
     // The caret is 1px wide at the *line box* height, not at the font size.
-    let line_height = (query_size * crate::ui::text::LINE_HEIGHT).round();
+    let line_height = (query_size * crate::text::LINE_HEIGHT).round();
     (
         Rect {
             x: area.0 + before.width / scale - shift,

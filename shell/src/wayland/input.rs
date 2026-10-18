@@ -8,7 +8,7 @@ use wayland_client::{Connection, QueueHandle};
 
 use crate::app;
 use crate::session::clipboard;
-use crate::ui::geom;
+use wayrun_ui::geom;
 
 use super::{Shell, ime};
 

@@ -218,9 +218,10 @@ impl IconCache {
 
 /// Decode requests on one thread so the UI thread never rasterises; every result
 /// comes back through `done` under the generation it was asked for.
-pub fn spawn_worker(
-    done: calloop::channel::Sender<(u64, IconKey, Option<Pixmap>)>,
-) -> Sender<(u64, IconKey)> {
+pub fn spawn_worker<F>(done: F) -> Sender<(u64, IconKey)>
+where
+    F: Fn((u64, IconKey, Option<Pixmap>)) -> bool + Send + 'static,
+{
     let (jobs, queue) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         while let Ok((generation, key)) = queue.recv() {
@@ -228,7 +229,7 @@ pub fn spawn_worker(
                 IconKey::Plain { path, size } => render(path, *size),
                 IconKey::Tinted { path, size, color } => render_glyph(path, *size, *color),
             };
-            if done.send((generation, key, icon)).is_err() {
+            if !done((generation, key, icon)) {
                 break;
             }
         }

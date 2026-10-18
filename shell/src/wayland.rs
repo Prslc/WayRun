@@ -33,11 +33,11 @@ use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use crate::app::{self, State as Launcher};
 use crate::session::backend::BackendEvent;
 use crate::session::ipc;
-use crate::ui::config::{AppearanceConfig, Mode};
-use crate::ui::icons::{IconCache, IconKey};
-use crate::ui::text::TextEngine;
-use crate::ui::theme;
 use crate::wayland::ime::Pending;
+use wayrun_ui::config::{AppearanceConfig, Mode};
+use wayrun_ui::icons::{IconCache, IconKey};
+use wayrun_ui::text::TextEngine;
+use wayrun_ui::theme;
 
 /// A changed rectangle in physical buffer pixels. `full` means the whole buffer, a
 /// zero-size rect means nothing changed; it keeps the two shm buffers in step.

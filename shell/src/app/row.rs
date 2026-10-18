@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use wayrun_core::wire::{Action, ResultItem};
 
-use crate::ui::present::{ROW_RISE, RowMotion};
+use wayrun_ui::present::{ROW_RISE, RowMotion};
 
 use super::State;
 
@@ -89,7 +89,7 @@ impl State {
                     {
                         let from_slot = previous as isize - old_first;
                         (from_slot != index as isize).then_some(RowMotion {
-                            offset: (from_slot as f32 - index as f32) * crate::ui::geom::ROW_H,
+                            offset: (from_slot as f32 - index as f32) * wayrun_ui::geom::ROW_H,
                             enter: false,
                             started: now,
                         })
@@ -258,7 +258,7 @@ mod tests {
                 .flatten()
                 .all(|motion| !motion.enter)
         );
-        assert_eq!(state.row_motion[0].unwrap().offset, crate::ui::geom::ROW_H);
+        assert_eq!(state.row_motion[0].unwrap().offset, wayrun_ui::geom::ROW_H);
     }
 
     #[test]

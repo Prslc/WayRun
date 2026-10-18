@@ -1,7 +1,7 @@
 use std::time::Instant;
 
-use crate::ui::config::{AppearanceConfig, Mode};
-use crate::ui::theme::Theme;
+use wayrun_ui::config::{AppearanceConfig, Mode};
+use wayrun_ui::theme::Theme;
 
 use super::State;
 

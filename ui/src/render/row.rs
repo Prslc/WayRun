@@ -1,10 +1,10 @@
 use cosmic_text::Weight;
 use tiny_skia::Pixmap;
 
-use crate::ui::geom;
-use crate::ui::icons::IconCache;
-use crate::ui::text::TextEngine;
-use crate::ui::view::Frame;
+use crate::geom;
+use crate::icons::IconCache;
+use crate::text::TextEngine;
+use crate::view::Frame;
 
 use super::canvas::{Canvas, ENTER_GLYPH, Rect};
 

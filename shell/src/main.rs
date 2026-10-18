@@ -1,10 +1,6 @@
-// The same tables the core reads, so one locale covers both sides of the wire.
-rust_i18n::i18n!("../locales", fallback = "en");
-
 mod app;
 mod config;
 mod session;
-mod ui;
 mod wayland;
 
 use std::time::Instant;
@@ -16,8 +12,8 @@ use wayland_client::Connection;
 use wayland_client::globals::registry_queue_init;
 
 use crate::session::{backend, ipc};
-use crate::ui::render;
 use crate::wayland::Shell;
+use wayrun_ui::render;
 
 fn main() -> std::process::ExitCode {
     wayrun_core::locale::init();
@@ -127,7 +123,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     })?;
     WaylandSource::new(conn.clone(), event_queue).insert(loop_handle.clone())?;
 
-    let icon_jobs = ui::icons::spawn_worker(icon_tx);
+    let icon_jobs = wayrun_ui::icons::spawn_worker(move |result| icon_tx.send(result).is_ok());
     let paste_jobs = session::clipboard::spawn(paste_tx);
     let mut shell = Shell::new(&conn, &qh, &loop_handle, &globals, paste_jobs, icon_jobs)?;
     shell.on_appearance(config::load(), Instant::now());

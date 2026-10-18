@@ -186,11 +186,15 @@ mod tests {
             .collect()
     }
 
-    /// Every literal key a `t!(…)` call names, in either crate.
+    /// Every literal key a `t!(…)` call names, in every workspace crate.
     fn t_keys() -> BTreeSet<String> {
         let root = workspace();
         let mut keys = BTreeSet::new();
-        for dir in [root.join("core/src"), root.join("shell/src")] {
+        for dir in [
+            root.join("core/src"),
+            root.join("shell/src"),
+            root.join("ui/src"),
+        ] {
             for file in sources(&dir) {
                 let text = read(&file);
                 let mut rest = text.as_str();
@@ -218,7 +222,11 @@ mod tests {
     fn named_keys(defined: &BTreeSet<String>) -> BTreeSet<String> {
         let root = workspace();
         let mut named = BTreeSet::new();
-        for dir in [root.join("core/src"), root.join("shell/src")] {
+        for dir in [
+            root.join("core/src"),
+            root.join("shell/src"),
+            root.join("ui/src"),
+        ] {
             for file in sources(&dir) {
                 let text = read(&file);
                 for key in defined {

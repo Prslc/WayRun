@@ -3,33 +3,30 @@ use wayrun_core::wire::BUILTIN_FALLBACK;
 /// The glyphs compiled in from `assets/icons/`, keyed by the bare name a
 /// `builtin:` spec carries; the NOTICE sits beside them.
 pub(super) const GLYPHS: &[(&str, &[u8])] = &[
-    ("app", include_bytes!("../../../assets/icons/app.svg")),
+    ("app", include_bytes!("../../assets/icons/app.svg")),
     (
         "calculator",
-        include_bytes!("../../../assets/icons/calculator.svg"),
+        include_bytes!("../../assets/icons/calculator.svg"),
     ),
     (
         "clipboard",
-        include_bytes!("../../../assets/icons/clipboard.svg"),
+        include_bytes!("../../assets/icons/clipboard.svg"),
     ),
-    ("copy", include_bytes!("../../../assets/icons/copy.svg")),
-    ("file", include_bytes!("../../../assets/icons/file.svg")),
-    ("folder", include_bytes!("../../../assets/icons/folder.svg")),
-    ("lock", include_bytes!("../../../assets/icons/lock.svg")),
-    ("logout", include_bytes!("../../../assets/icons/logout.svg")),
-    ("open", include_bytes!("../../../assets/icons/open.svg")),
-    ("power", include_bytes!("../../../assets/icons/power.svg")),
-    ("reboot", include_bytes!("../../../assets/icons/reboot.svg")),
-    ("reveal", include_bytes!("../../../assets/icons/reveal.svg")),
-    (
-        "suspend",
-        include_bytes!("../../../assets/icons/suspend.svg"),
-    ),
+    ("copy", include_bytes!("../../assets/icons/copy.svg")),
+    ("file", include_bytes!("../../assets/icons/file.svg")),
+    ("folder", include_bytes!("../../assets/icons/folder.svg")),
+    ("lock", include_bytes!("../../assets/icons/lock.svg")),
+    ("logout", include_bytes!("../../assets/icons/logout.svg")),
+    ("open", include_bytes!("../../assets/icons/open.svg")),
+    ("power", include_bytes!("../../assets/icons/power.svg")),
+    ("reboot", include_bytes!("../../assets/icons/reboot.svg")),
+    ("reveal", include_bytes!("../../assets/icons/reveal.svg")),
+    ("suspend", include_bytes!("../../assets/icons/suspend.svg")),
     (
         "terminal",
-        include_bytes!("../../../assets/icons/terminal.svg"),
+        include_bytes!("../../assets/icons/terminal.svg"),
     ),
-    ("window", include_bytes!("../../../assets/icons/window.svg")),
+    ("window", include_bytes!("../../assets/icons/window.svg")),
 ];
 
 /// The bytes for `name`, falling back to the app glyph so every row draws one.
@@ -75,7 +72,7 @@ mod tests {
 
     #[test]
     fn the_notice_names_every_glyph() {
-        let notice = include_str!("../../../assets/icons/NOTICE");
+        let notice = include_str!("../../assets/icons/NOTICE");
         for (name, _) in GLYPHS {
             assert!(
                 notice

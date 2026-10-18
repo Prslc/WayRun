@@ -1,4 +1,4 @@
-use crate::ui::config::{ColorOverrides, Mode};
+use crate::config::{ColorOverrides, Mode};
 use wayrun_core::wire::ThemeConfig;
 
 /// The three base roles every surface derives from.

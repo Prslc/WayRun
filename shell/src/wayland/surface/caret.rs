@@ -1,7 +1,7 @@
 use tiny_skia::Pixmap;
 
-use crate::ui::render;
 use crate::wayland::Shell;
+use wayrun_ui::render;
 
 impl Shell {
     /// The frame without the caret, saved in a rect just around it. A blink

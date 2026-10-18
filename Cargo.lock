@@ -2522,19 +2522,30 @@ version = "0.8.0"
 dependencies = [
  "calloop",
  "calloop-wayland-source",
- "cosmic-text",
  "env_logger",
  "libc",
  "notify",
- "resvg",
- "rust-i18n",
  "serde",
  "serde_json",
  "smithay-client-toolkit",
  "tiny-skia",
- "toml 1.1.6+spec-1.1.0",
  "wayland-client",
  "wayland-protocols",
+ "wayrun-core",
+ "wayrun-ui",
+]
+
+[[package]]
+name = "wayrun-ui"
+version = "0.8.0"
+dependencies = [
+ "cosmic-text",
+ "libc",
+ "resvg",
+ "rust-i18n",
+ "serde",
+ "tiny-skia",
+ "toml 1.1.6+spec-1.1.0",
  "wayrun-core",
 ]
 

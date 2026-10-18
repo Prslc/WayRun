@@ -1,5 +1,5 @@
-use crate::ui::geom::{Align, Layout};
-use crate::ui::theme;
+use crate::geom::{Align, Layout};
+use crate::theme;
 
 /// Assign the parsed key when present; an absent key keeps the current value.
 macro_rules! assign {

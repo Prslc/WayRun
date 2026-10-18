@@ -11,7 +11,7 @@ use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::{
     self, ContentHint, ContentPurpose, ZwpTextInputV3,
 };
 
-use crate::ui::render;
+use wayrun_ui::render;
 
 use super::Shell;
 

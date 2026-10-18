@@ -1,4 +1,4 @@
-use crate::ui::geom::Layout;
+use wayrun_ui::geom::Layout;
 
 use super::State;
 
@@ -151,8 +151,8 @@ pub fn whole_rows(accum: &mut f32, delta: f32) -> i32 {
 mod tests {
     use super::*;
     use crate::app::test_support::{item, run, state};
-    use crate::ui::geom;
     use wayrun_core::wire::ResultItem;
+    use wayrun_ui::geom;
 
     #[test]
     fn contain_moves_only_as_far_as_the_selection_needs() {
