@@ -161,9 +161,7 @@ impl State {
             Some(menu) => layout.panel_h(menu.actions.len()),
             None if self.rows.is_empty() && self.query.is_empty() => layout.empty_h(),
             None => match self.preview_kind() {
-                Some(kind) => {
-                    layout.content_h_for(layout.split_h(self.surface, self.rows.len(), kind))
-                }
+                Some(kind) => layout.content_h_for(layout.split_h(self.rows.len(), kind)),
                 None => layout.content_h(self.rows.len()),
             },
         }
@@ -339,11 +337,9 @@ mod tests {
 
         assert!(state.split());
         let kind = state.preview_kind().unwrap();
-        let split_height = state.layout().content_h_for(state.layout().split_h(
-            state.surface,
-            state.rows.len(),
-            kind,
-        ));
+        let split_height = state
+            .layout()
+            .content_h_for(state.layout().split_h(state.rows.len(), kind));
         assert_eq!(state.content_height(), split_height);
         {
             let frame = state.frame(now);
@@ -387,11 +383,9 @@ mod tests {
         }
         assert_eq!(
             state.content_height(),
-            state.layout().content_h_for(state.layout().split_h(
-                state.surface,
-                1,
-                PreviewKind::Text
-            ))
+            state
+                .layout()
+                .content_h_for(state.layout().split_h(1, PreviewKind::Text))
         );
     }
 

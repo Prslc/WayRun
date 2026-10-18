@@ -34,6 +34,9 @@ pub struct IconCache {
     /// Keys asked for but not yet delivered, so a frame never queues a decode
     /// the worker is already on.
     pending: HashSet<IconKey>,
+    /// Intrinsic image sizes for the preview pane, read from the file header
+    /// once so a preview can keep its aspect; SVG falls back to a square.
+    aspects: HashMap<String, Option<(u32, u32)>>,
     /// Bumped by [`IconCache::clear`], so a result a dismissed show asked for
     /// cannot land in the next one.
     generation: u64,
@@ -47,6 +50,7 @@ impl IconCache {
             entries: HashMap::new(),
             tinted: HashMap::new(),
             pending: HashSet::new(),
+            aspects: HashMap::new(),
             generation: 0,
             jobs,
         }
@@ -58,7 +62,19 @@ impl IconCache {
         self.entries.clear();
         self.tinted.clear();
         self.pending.clear();
+        self.aspects.clear();
         self.generation = self.generation.wrapping_add(1);
+    }
+
+    /// The image's intrinsic size, read from the header once; a parser that
+    /// cannot answer (SVG) leaves the preview to its square fallback.
+    pub fn aspect(&mut self, path: &str) -> Option<(u32, u32)> {
+        if let Some(cached) = self.aspects.get(path) {
+            return *cached;
+        }
+        let size = image::image_dimensions(path).ok();
+        self.aspects.insert(path.to_string(), size);
+        size
     }
 
     /// Drop the recoloured bitmaps: a tint is keyed by the colour it was mixed

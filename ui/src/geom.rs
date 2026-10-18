@@ -12,7 +12,9 @@ pub const PREVIEW_FRAC: f32 = 0.46;
 pub const PREVIEW_MIN_W: f32 = 240.0;
 pub const PREVIEW_MAX_W: f32 = 560.0;
 pub const PREVIEW_GAP: f32 = 16.0;
-/// A text preview gets a readable minimum height; an image gets a square.
+/// A text preview gets a readable minimum height; an image pane is fitted to
+/// the image and centered, so its body only needs room for a thumbnail.
+const IMAGE_MIN_H: f32 = 200.0;
 const TEXT_MIN_H: f32 = 220.0;
 
 /// The preview body's shape differs by content, never its column width.
@@ -161,11 +163,11 @@ impl Layout {
         PAD + SEARCH_H + GAP + FOOTER_H + PAD + GAP + body_h
     }
 
-    /// The split body's height: an image gets a square at the column's width,
-    /// text a readable minimum; a short list grows the card down either way.
-    pub fn split_h(&self, surface: (u32, u32), rows: usize, kind: PreviewKind) -> f32 {
+    /// The split body's height: an image needs room for a thumbnail, text a
+    /// readable minimum; a short list grows the card down either way.
+    pub fn split_h(&self, rows: usize, kind: PreviewKind) -> f32 {
         match kind {
-            PreviewKind::Image => self.list_h(rows).max(self.preview_w(surface)),
+            PreviewKind::Image => self.list_h(rows).max(IMAGE_MIN_H),
             PreviewKind::Text => self.list_h(rows).max(TEXT_MIN_H),
         }
     }
@@ -387,11 +389,11 @@ mod tests {
         assert_eq!(content, width + preview_w + PREVIEW_GAP);
         assert_eq!(left + width + PREVIEW_GAP, preview_left);
         assert_eq!(
-            l.split_h(surface, 1, PreviewKind::Image),
-            preview_w,
-            "an image gets a square"
+            l.split_h(1, PreviewKind::Image),
+            IMAGE_MIN_H,
+            "a short list reserves a thumbnail"
         );
-        assert!(l.content_h_for(l.split_h(surface, 1, PreviewKind::Image)) > l.content_h(1));
+        assert!(l.content_h_for(l.split_h(1, PreviewKind::Image)) > l.content_h(1));
 
         let top = l.rows_top(surface);
         assert_eq!(l.row_at(surface, true, 0, 20, preview_left, top), None);
@@ -414,7 +416,7 @@ mod tests {
         let (preview_left, _) = l.preview_band(surface);
         assert_eq!(left + list_w + PREVIEW_GAP, preview_left);
         assert_eq!(
-            l.split_h(surface, 1, PreviewKind::Text),
+            l.split_h(1, PreviewKind::Text),
             TEXT_MIN_H,
             "a short list gives the text a readable body"
         );

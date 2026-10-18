@@ -207,13 +207,19 @@ fn render_svg(data: &[u8], size: u32) -> Option<Pixmap> {
     Some(pixmap)
 }
 
-/// Bilinear resize into the target box. Premultiplied channels interpolate
-/// correctly, so a transparent edge cannot bleed its colour.
+/// Area-average a large source down, bilinear for upscales and near 1:1; a
+/// premultiplied channel interpolates without a transparent edge bleeding.
 fn resample(source: PixmapRef, target: &mut Pixmap) {
     let (sw, sh) = (source.width() as f32, source.height() as f32);
     let (tw, th) = (target.width() as f32, target.height() as f32);
     let scale = (tw / sw).min(th / sh);
     let (offset_x, offset_y) = ((tw - sw * scale) / 2.0, (th - sh * scale) / 2.0);
+
+    if scale < 1.0 {
+        resample_area(source, target, scale, offset_x, offset_y);
+        return;
+    }
+
     let source_pixels = source.pixels();
     let width = source.width() as i32;
     let height = source.height() as i32;
@@ -260,11 +266,84 @@ fn resample(source: PixmapRef, target: &mut Pixmap) {
     }
 }
 
+/// Average every source pixel whose centre falls in the target pixel's
+/// footprint; a four-tap sample of a large downscale reads as mush.
+fn resample_area(source: PixmapRef, target: &mut Pixmap, scale: f32, offset_x: f32, offset_y: f32) {
+    let source_pixels = source.pixels();
+    let width = source.width() as i32;
+    let height = source.height() as i32;
+    let target_width = target.width();
+    let half = 0.5 / scale;
+
+    for y in 0..target.height() {
+        let cy = (y as f32 + 0.5 - offset_y) / scale;
+        let y0 = ((cy - half - 0.5).ceil() as i32).max(0);
+        let y1 = ((cy + half - 0.5).floor() as i32 + 1).min(height);
+        if y1 <= y0 {
+            continue;
+        }
+        for x in 0..target_width {
+            let cx = (x as f32 + 0.5 - offset_x) / scale;
+            let x0 = ((cx - half - 0.5).ceil() as i32).max(0);
+            let x1 = ((cx + half - 0.5).floor() as i32 + 1).min(width);
+            if x1 <= x0 {
+                continue;
+            }
+
+            let count = u64::from((x1 - x0) as u32) * u64::from((y1 - y0) as u32);
+            let mut channels = [0u64; 4];
+            for py in y0..y1 {
+                for px in x0..x1 {
+                    let pixel = source_pixels[(py * width + px) as usize];
+                    channels[0] += u64::from(pixel.red());
+                    channels[1] += u64::from(pixel.green());
+                    channels[2] += u64::from(pixel.blue());
+                    channels[3] += u64::from(pixel.alpha());
+                }
+            }
+
+            let round = |sum: u64| ((sum + count / 2) / count).min(255) as u8;
+            let alpha = round(channels[3]);
+            let channel = |sum: u64| round(sum).min(alpha);
+            if let Some(pixel) = PremultipliedColorU8::from_rgba(
+                channel(channels[0]),
+                channel(channels[1]),
+                channel(channels[2]),
+                alpha,
+            ) {
+                target.pixels_mut()[(y * target_width + x) as usize] = pixel;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use image::ImageEncoder;
 
     use super::*;
+
+    #[test]
+    fn a_downscale_averages_the_covered_source_area() {
+        let mut source = Pixmap::new(4, 2).unwrap();
+        for y in 0..2 {
+            for x in 0..4 {
+                let (red, blue) = if x < 2 { (255, 0) } else { (0, 255) };
+                source.pixels_mut()[y * 4 + x] =
+                    PremultipliedColorU8::from_rgba(red, 0, blue, 255).unwrap();
+            }
+        }
+        let mut target = Pixmap::new(1, 1).unwrap();
+        resample(source.as_ref(), &mut target);
+
+        let pixel = target.pixel(0, 0).unwrap();
+        assert_eq!(pixel.alpha(), 255);
+        assert!(
+            pixel.red() > 100 && pixel.blue() > 100,
+            "both halves are represented: {:?}",
+            (pixel.red(), pixel.blue())
+        );
+    }
 
     #[test]
     fn a_jpeg_decodes_through_the_image_crate() {
