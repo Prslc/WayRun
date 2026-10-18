@@ -1,8 +1,6 @@
 use crate::ui::geom::{Align, Layout};
 use crate::ui::theme;
 
-use super::{ensure_template, theme_path};
-
 /// Assign the parsed key when present; an absent key keeps the current value.
 macro_rules! assign {
     ($slot:expr, $value:expr) => {
@@ -188,17 +186,10 @@ struct MotionFile {
 }
 
 impl AppearanceConfig {
-    pub fn load() -> Self {
-        Self::load_checked().unwrap_or_default()
-    }
-
-    /// The file's config, or `None` when it is absent or unparseable; a reload
+    /// The file's contents as a config, or `None` when unparseable: a reload
     /// keeps the applied config instead of resetting to defaults.
-    pub fn load_checked() -> Option<Self> {
-        ensure_template();
-        let path = theme_path()?;
-        let text = std::fs::read_to_string(path).ok()?;
-        let file = toml::from_str::<ThemeFile>(&text).ok()?;
+    pub fn parse(text: &str) -> Option<Self> {
+        let file = toml::from_str::<ThemeFile>(text).ok()?;
         let mut config = Self::default();
         config.apply(file);
         Some(config)
@@ -264,7 +255,6 @@ fn clamp01(v: f32) -> Option<f32> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::DEFAULT_TEMPLATE;
     use super::*;
 
     fn parse(src: &str) -> AppearanceConfig {
@@ -374,7 +364,7 @@ mod tests {
     fn a_colour_of_the_wrong_type_rejects_the_file() {
         // only an unparseable string is dropped key-by-key; a value of the
         // wrong type still fails the whole file, as with every other key
-        assert!(toml::from_str::<ThemeFile>("[colors]\nprimary = 5").is_err());
+        assert!(AppearanceConfig::parse("[colors]\nprimary = 5").is_none());
     }
 
     #[test]
@@ -436,21 +426,5 @@ mod tests {
 
         let unknown = parse("[layout]\nalign = \"diagonal\"");
         assert_eq!(unknown.layout.align, Align::Center);
-    }
-
-    #[test]
-    fn the_shipped_template_comments_out_every_key() {
-        for line in DEFAULT_TEMPLATE.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            assert!(line.starts_with('['), "uncommented key: {line}");
-        }
-
-        // commented keys are absent, so the whole file is the built-in defaults
-        let mut config = AppearanceConfig::default();
-        config.apply(toml::from_str(DEFAULT_TEMPLATE).unwrap());
-        assert_eq!(config, AppearanceConfig::default());
     }
 }

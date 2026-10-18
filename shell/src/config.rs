@@ -1,11 +1,8 @@
-mod theme;
-
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+use crate::ui::config::AppearanceConfig;
 use wayrun_core::{watch as watch_file, write_if_absent};
-
-pub use self::theme::{AppearanceConfig, ColorOverrides, FontConfig, Mode};
 
 const DEFAULT_TEMPLATE: &str = include_str!("../default-theme.toml");
 
@@ -26,6 +23,21 @@ fn ensure_template() {
     });
 }
 
+/// The applied `theme.toml`, or the shipped defaults when the file is absent
+/// or unparseable.
+pub fn load() -> AppearanceConfig {
+    load_checked().unwrap_or_default()
+}
+
+/// The file's config, or `None` when it is absent or unparseable; a reload
+/// keeps the applied config instead of resetting to defaults.
+fn load_checked() -> Option<AppearanceConfig> {
+    ensure_template();
+    let path = theme_path()?;
+    let text = std::fs::read_to_string(path).ok()?;
+    AppearanceConfig::parse(&text)
+}
+
 /// Watch `theme.toml`; a failed read keeps the applied config and an unchanged
 /// value is dropped, so a save settles to one update with no debounce.
 pub fn watch(tx: calloop::channel::Sender<AppearanceConfig>) -> Option<notify::RecommendedWatcher> {
@@ -33,9 +45,9 @@ pub fn watch(tx: calloop::channel::Sender<AppearanceConfig>) -> Option<notify::R
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let mut last = AppearanceConfig::load();
+    let mut last = load();
     watch_file(&path, move || {
-        let Some(config) = AppearanceConfig::load_checked() else {
+        let Some(config) = load_checked() else {
             return;
         };
         if config == last {
@@ -44,4 +56,26 @@ pub fn watch(tx: calloop::channel::Sender<AppearanceConfig>) -> Option<notify::R
         last = config.clone();
         let _ = tx.send(config);
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_shipped_template_comments_out_every_key() {
+        for line in DEFAULT_TEMPLATE.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            assert!(line.starts_with('['), "uncommented key: {line}");
+        }
+
+        // commented keys are absent, so the whole file is the built-in defaults
+        assert_eq!(
+            AppearanceConfig::parse(DEFAULT_TEMPLATE).unwrap(),
+            AppearanceConfig::default()
+        );
+    }
 }

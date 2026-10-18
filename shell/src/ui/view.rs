@@ -1,6 +1,6 @@
 use wayrun_core::wire::{ActionItem, ResultItem};
 
-use crate::config::FontConfig;
+use crate::ui::config::FontConfig;
 use crate::ui::geom::Layout;
 use crate::ui::present::RowMotion;
 use crate::ui::theme::{Surfaces, Theme};
@@ -139,7 +139,7 @@ pub(crate) fn test_frame(surface: (u32, u32)) -> Frame<'static> {
         last_card_bottom: 0.0,
         opacity: 1.0,
         theme,
-        surfaces: Surfaces::resolve(theme, &Default::default(), crate::config::Mode::Dark),
+        surfaces: Surfaces::resolve(theme, &Default::default(), crate::ui::config::Mode::Dark),
         font: FontConfig::default(),
         field: FieldView {
             query: "",

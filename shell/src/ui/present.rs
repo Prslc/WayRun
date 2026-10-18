@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use crate::config::{AppearanceConfig, Mode};
+use crate::ui::config::{AppearanceConfig, Mode};
 use crate::ui::geom::Layout;
 use crate::ui::theme::{Surfaces, Theme};
 

@@ -1,3 +1,4 @@
+pub mod config;
 pub mod geom;
 pub mod icons;
 pub mod present;

@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::config::{AppearanceConfig, Mode};
+use crate::ui::config::{AppearanceConfig, Mode};
 use crate::ui::theme::Theme;
 
 use super::State;

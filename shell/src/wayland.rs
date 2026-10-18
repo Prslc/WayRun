@@ -31,9 +31,9 @@ use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 
 use crate::app::{self, State as Launcher};
-use crate::config::{AppearanceConfig, Mode};
 use crate::session::backend::BackendEvent;
 use crate::session::ipc;
+use crate::ui::config::{AppearanceConfig, Mode};
 use crate::ui::icons::{IconCache, IconKey};
 use crate::ui::text::TextEngine;
 use crate::ui::theme;
