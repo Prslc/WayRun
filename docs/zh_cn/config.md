@@ -19,7 +19,7 @@ WayRun 的设置。首次运行时自动生成一份带注释的模板，
 
 | 键 | 默认 | 含义 |
 | --- | --- | --- |
-| `family` | `Source Han Sans CN` | 主文本整形字体族，或通用名（`serif`、`sans-serif`、`monospace`）。 |
+| `family` | `sans-serif` | 主文本整形字体族，或通用名（`serif`、`sans-serif`、`monospace`）。 |
 
 启动时读取，因此修改后需下次启动生效（`systemctl --user restart wayrun-launcher`）。
 字体族缺少的字形会回退到系统字体。界面字号在 `theme.toml` 的 `[font].size`，可实时生效。

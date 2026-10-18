@@ -89,7 +89,7 @@ const SHIPPED_EXCLUDES: [&str; 3] = ["node_modules", "target", "__pycache__"];
 impl Default for Font {
     fn default() -> Self {
         Self {
-            family: "Source Han Sans CN".to_string(),
+            family: "sans-serif".to_string(),
         }
     }
 }

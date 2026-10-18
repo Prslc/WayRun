@@ -22,7 +22,7 @@ and a blank value is the same as leaving the key out.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `family` | `Source Han Sans CN` | Primary shaping family, or a generic name (`serif`, `sans-serif`, `monospace`). |
+| `family` | `sans-serif` | Primary shaping family, or a generic name (`serif`, `sans-serif`, `monospace`). |
 
 Read at startup, so a change takes effect on the next launch
 (`systemctl --user restart wayrun-launcher`). Glyphs the family lacks fall back
