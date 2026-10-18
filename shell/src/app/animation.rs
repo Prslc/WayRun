@@ -34,25 +34,29 @@ impl State {
         self.card_updated = now;
     }
 
-    /// The card's fill alpha for the entrance's opacity fade.
-    pub fn entrance(&self, now: Instant) -> f32 {
+    /// The entrance's raw progress: 0 before the first drawn frame, 1 once
+    /// reduced motion or the fade is over.
+    fn entrance_progress(&self, now: Instant) -> f32 {
         if self.reduce_motion {
-            // Reduced motion starts at the end state: returning 0 here leaves
-            // the dim and every faded colour invisible, not "no animation".
             return 1.0;
         }
         if !self.entrance_started {
             return 0.0;
         }
-
         let elapsed = now.saturating_duration_since(self.shown_at).as_secs_f32() * 1000.0;
-        ease_in_out_cubic((elapsed / ENTRANCE_MS as f32).clamp(0.0, 1.0))
+        (elapsed / ENTRANCE_MS as f32).clamp(0.0, 1.0)
+    }
+
+    /// The entrance's opacity factor: ease-out makes the card visible on the
+    /// first drawn frame and decelerates into place.
+    pub fn entrance(&self, now: Instant) -> f32 {
+        ease_out_cubic(self.entrance_progress(now))
     }
 
     /// How far the card still has to rise: the entrance starts it `SLIDE` px
-    /// low and settles at the configured position.
+    /// low and settles at the configured position; the slide eases in and out.
     pub fn entrance_offset(&self, now: Instant) -> f32 {
-        (1.0 - self.entrance(now)) * ENTRANCE_SLIDE
+        (1.0 - ease_in_out_cubic(self.entrance_progress(now))) * ENTRANCE_SLIDE
     }
 
     /// The geometry a frame draws with: the card slides while the entrance runs,
@@ -200,6 +204,10 @@ fn cubic_bezier(x: f32, x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
     curve(y1, y2, u)
 }
 
+fn ease_out_cubic(t: f32) -> f32 {
+    1.0 - (1.0 - t).powi(3)
+}
+
 fn ease_in_out_cubic(t: f32) -> f32 {
     if t < 0.5 {
         4.0 * t * t * t
@@ -230,6 +238,11 @@ mod tests {
 
         assert!((state.entrance_offset(start) - 8.0).abs() < 0.001);
         assert!(state.frame_layout(start).offset_y > 0.0);
+        let visible = start + Duration::from_millis(17);
+        assert!(
+            state.entrance(visible) > 0.15,
+            "the first visible frame is not blank"
+        );
 
         let settled = start + Duration::from_millis(ENTRANCE_MS);
         assert_eq!(state.entrance_offset(settled), 0.0);
