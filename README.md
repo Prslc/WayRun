@@ -127,6 +127,65 @@ cargo build --release -p wayrun-shell --no-default-features --features composito
 cargo build --release -p wayrun-shell --no-default-features      # no window search
 ```
 
+## Performance
+
+A resident core answers a warm query over its JSON-RPC pipe in 0.2–2 ms,
+payloads included:
+
+| Query | Rows | P50 | P95 |
+|---|---|---|---|
+| app search — `firefox` | 1 | 0.21 ms | 0.32 ms |
+| file search — `f report` | 50 | 1.92 ms | 2.17 ms |
+| directory search — `d download` | 50 | 1.15 ms | 1.43 ms |
+| path lookup — `~/` | 15 | 0.52 ms | 0.61 ms |
+
+Cold start: the first `ping` reply comes back in 10.5 ms, and a cold app
+search takes 23 ms.
+
+<details>
+<summary>Full table, cold start and method</summary>
+
+Warm steady state (3 discarded + 30 measured rounds, shuffled):
+
+| Provider | Query | Rows | P50 (ms) | P95 (ms) | Max (ms) |
+|---|---|---|---|---|---|
+| `ping` | — | — | 0.045 | 0.062 | 0.088 |
+| `calculator` | `2 + 3 * 4` | 1 | 0.192 | 0.258 | 0.284 |
+| `system-commands` | `reboot` | 1 | 0.200 | 0.277 | 0.347 |
+| `app-search` | `firefox` | 1 | 0.207 | 0.316 | 0.333 |
+| `runner` | `r htop` | 10 | 0.393 | 0.503 | 0.686 |
+| `file-search` | `f report` | 50 | 1.923 | 2.169 | 2.648 |
+| `path-search` | `d download` | 50 | 1.149 | 1.433 | 1.520 |
+| `path-lookup` | `~/` | 15 | 0.518 | 0.611 | 0.620 |
+| `home-fallback` | `Proj` | 1 | 0.290 | 0.379 | 0.436 |
+| `clipboard` | `c a` | 50 | 0.207 | 0.260 | 0.352 |
+| `window` | `w kitty` | 2 | 0.091 | 0.141 | 0.157 |
+
+Cold first call (a fresh `wayrun --core` per run, 3 runs, run 1 shown):
+
+| Provider | Query | Rows | Index | Wall (ms) | MaxRSS (MB) |
+|---|---|---|---|---|---|
+| `ping` | — | — | — | 10.5 | 11.0 |
+| `calculator` | `2 + 3 * 4` | 1 | — | 24.1 | 15.8 |
+| `system-commands` | `reboot` | 1 | — | 23.6 | 15.9 |
+| `app-search` | `firefox` | 1 | — | 23.4 | 15.8 |
+| `runner` | `r htop` | 10 | — | 38.2 | 16.4 |
+| `file-search` | `f report` | 50 | loaded | 57.4 | 54.3 |
+| `path-search` | `d download` | 50 | loaded | 55.4 | 41.6 |
+| `path-lookup` | `~/` | 15 | — | 24.7 | 15.7 |
+| `home-fallback` | `Proj` | 1 | — | 24.9 | 15.5 |
+| `clipboard` | `c a` | 50 | — | 35.6 | 13.3 |
+| `window` | `w kitty` | 2 | — | 29.9 | 17.0 |
+
+Measured 2026-10-18 on an AMD Ryzen 5 5500U (6c/12t, `performance` governor),
+Arch Linux, niri 26.04, release build. Warm rows are synchronous `search`
+calls against one resident `--core` over stdin/stdout; cold rows start a fresh
+process each run, timed with GNU time. The real `$HOME` is read, with a 42 MB
+file index. `ping` is the harness's own round-trip floor, and the clipboard and
+window rows hit a 500 ms burst cache.
+
+</details>
+
 ## Documentation
 
 - [Usage](docs/en/usage.md) — prefixes, keybindings, and the clipboard.

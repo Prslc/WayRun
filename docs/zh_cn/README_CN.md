@@ -113,6 +113,61 @@ cargo build --release -p wayrun-shell --no-default-features --features composito
 cargo build --release -p wayrun-shell --no-default-features      # 不做窗口搜索
 ```
 
+## 性能
+
+常驻 core 的 warm 查询经 JSON-RPC 管道返回，含结果载荷，耗时 0.2–2 ms：
+
+| 查询 | 行数 | P50 | P95 |
+|---|---|---|---|
+| 应用搜索 — `firefox` | 1 | 0.21 ms | 0.32 ms |
+| 文件搜索 — `f report` | 50 | 1.92 ms | 2.17 ms |
+| 目录搜索 — `d download` | 50 | 1.15 ms | 1.43 ms |
+| 路径查找 — `~/` | 15 | 0.52 ms | 0.61 ms |
+
+冷启动时首个 `ping` 回复为 10.5 ms，冷启动下的首次应用搜索为 23 ms。
+
+<details>
+<summary>完整表格、冷启动与测量方法</summary>
+
+warm 稳态（丢弃 3 轮 + 测量 30 轮，乱序）：
+
+| Provider | 查询 | 行数 | P50 (ms) | P95 (ms) | Max (ms) |
+|---|---|---|---|---|---|
+| `ping` | — | — | 0.045 | 0.062 | 0.088 |
+| `calculator` | `2 + 3 * 4` | 1 | 0.192 | 0.258 | 0.284 |
+| `system-commands` | `reboot` | 1 | 0.200 | 0.277 | 0.347 |
+| `app-search` | `firefox` | 1 | 0.207 | 0.316 | 0.333 |
+| `runner` | `r htop` | 10 | 0.393 | 0.503 | 0.686 |
+| `file-search` | `f report` | 50 | 1.923 | 2.169 | 2.648 |
+| `path-search` | `d download` | 50 | 1.149 | 1.433 | 1.520 |
+| `path-lookup` | `~/` | 15 | 0.518 | 0.611 | 0.620 |
+| `home-fallback` | `Proj` | 1 | 0.290 | 0.379 | 0.436 |
+| `clipboard` | `c a` | 50 | 0.207 | 0.260 | 0.352 |
+| `window` | `w kitty` | 2 | 0.091 | 0.141 | 0.157 |
+
+冷启动首次调用（每次全新 `wayrun --core`，共 3 次，取第 1 次）：
+
+| Provider | 查询 | 行数 | 索引 | Wall (ms) | MaxRSS (MB) |
+|---|---|---|---|---|---|
+| `ping` | — | — | — | 10.5 | 11.0 |
+| `calculator` | `2 + 3 * 4` | 1 | — | 24.1 | 15.8 |
+| `system-commands` | `reboot` | 1 | — | 23.6 | 15.9 |
+| `app-search` | `firefox` | 1 | — | 23.4 | 15.8 |
+| `runner` | `r htop` | 10 | — | 38.2 | 16.4 |
+| `file-search` | `f report` | 50 | 加载 | 57.4 | 54.3 |
+| `path-search` | `d download` | 50 | 加载 | 55.4 | 41.6 |
+| `path-lookup` | `~/` | 15 | — | 24.7 | 15.7 |
+| `home-fallback` | `Proj` | 1 | — | 24.9 | 15.5 |
+| `clipboard` | `c a` | 50 | — | 35.6 | 13.3 |
+| `window` | `w kitty` | 2 | — | 29.9 | 17.0 |
+
+测量于 2026-10-18：AMD Ryzen 5 5500U（6c/12t，`performance` 调频）、Arch Linux、
+niri 26.04、release 构建。warm 行为对同一个常驻 `--core` 的同步 `search` 调用；
+cold 行每次启动全新进程，用 GNU time 计时。读取真实 `$HOME`，文件索引 42 MB。
+`ping` 是测量程序自身的往返下限；clipboard 与 window 行命中 500 ms 的 burst 缓存。
+
+</details>
+
 ## 文档
 
 - [使用说明](usage.md) —— 前缀、按键与剪贴板。
