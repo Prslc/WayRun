@@ -205,8 +205,6 @@ pub struct Shell {
     open_at: Option<Instant>,
     last_present: Option<Instant>,
     first_frame_logged: bool,
-    /// Bumped by each show, so a trim timer from an earlier dismissal no-ops.
-    hidden_generation: u64,
     timer_registered: bool,
     /// Whether a `wl_surface.frame` callback is outstanding. Presents are paced to
     /// it, so a burst of input cannot leave buffers in flight.
@@ -287,7 +285,6 @@ impl Shell {
             open_at: None,
             last_present: None,
             first_frame_logged: false,
-            hidden_generation: 0,
             timer_registered: false,
             frame_pending: false,
             needs_present: false,

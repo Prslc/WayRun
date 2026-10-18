@@ -12,7 +12,6 @@ use smithay_client_toolkit::shell::wlr_layer::{
 };
 use wayland_client::protocol::{wl_output, wl_surface};
 use wayland_client::{Connection, QueueHandle};
-use wayrun_core::trim_allocator;
 
 use crate::session::{backend, ipc};
 use crate::ui::render;
@@ -25,10 +24,6 @@ const NAMESPACE: &str = "WayRun";
 
 /// How soon to retry a present when no buffer is free yet.
 const RETRY_DELAY: Duration = Duration::from_millis(4);
-
-/// How long a hidden resident shell keeps the pool and its buffer before
-/// returning their pages; a toggle inside the window starts without a rebuild.
-const RENDER_GRACE: Duration = Duration::from_secs(30);
 
 impl Shell {
     pub fn open(&mut self, now: Instant) {
@@ -79,7 +74,6 @@ impl Shell {
         self.needs_full = true;
         // A paste worker from the previous show must not land on this one.
         self.paste_generation = self.paste_generation.wrapping_add(1);
-        self.hidden_generation = self.hidden_generation.wrapping_add(1);
 
         self.app.shown(now);
         ipc::VISIBLE.store(true, Ordering::Relaxed);
@@ -129,8 +123,8 @@ impl Shell {
         if let Some(effect) = self.effect.take() {
             effect.destroy();
         }
-        // The retained pool and buffer stay for RENDER_GRACE; the scratch one
-        // belongs to this show, and the frame is rebuilt on the next open.
+        // The pool and its buffer stay: every show after the first starts warm.
+        // The frame pixmap and the scratch buffer belong to one show.
         self.pixmap = None;
         self.caret_patch = None;
         self.buffers[1] = None;
@@ -146,42 +140,11 @@ impl Shell {
         ipc::VISIBLE.store(false, Ordering::Relaxed);
 
         if self.resident {
-            self.schedule_render_trim();
             return;
         }
 
         let _ = now;
         self.exit = true;
-    }
-
-    /// Release the retained pool and buffers once the hidden shell has stayed
-    /// hidden; a show in between bumps the generation and makes this a no-op.
-    fn schedule_render_trim(&mut self) {
-        let generation = self.hidden_generation;
-        let _ = self.loop_handle.insert_source(
-            Timer::from_duration(RENDER_GRACE),
-            move |_, _, state: &mut Shell| {
-                if state.layer.is_none() && state.hidden_generation == generation {
-                    state.release_render_resources();
-                }
-                TimeoutAction::Drop
-            },
-        );
-    }
-
-    /// Return the pool and its buffer to the allocator.
-    fn release_render_resources(&mut self) {
-        self.pool = None;
-        self.scratch_pool = None;
-        self.pixmap = None;
-        self.caret_patch = None;
-        self.buffers = [None, None];
-        self.buffer_stale = [Damage::EMPTY, Damage::EMPTY];
-        self.buffer_next = 0;
-        self.pending_damage = Damage::EMPTY;
-        self.buffer_physical = (0, 0);
-        // glibc keeps freed large allocations in its arena; return the pages.
-        trim_allocator();
     }
 
     pub(super) fn present(&mut self, now: Instant) {
