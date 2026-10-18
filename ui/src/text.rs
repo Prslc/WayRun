@@ -62,17 +62,7 @@ pub struct TextEngine {
     family: String,
 }
 
-impl Default for TextEngine {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl TextEngine {
-    pub fn new() -> Self {
-        Self::with_family(wayrun_core::config::get().font.family.clone())
-    }
-
     pub fn with_family(family: String) -> Self {
         Self {
             font_system: FontSystem::new(),

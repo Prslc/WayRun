@@ -53,6 +53,9 @@ pub struct State {
     /// The exact ratio from `wp_fractional_scale_v1`: the buffer is
     /// `surface × this` and a viewport maps it back, so `scale` is not used.
     pub fractional: Option<f32>,
+    /// The bottom edge of the card drawn last. A settle repaint covers only the
+    /// card, so a shrink must restore the dim over the old edge too.
+    pub last_card_bottom: f32,
     /// `WAYRUN_TIMING=1`: the per-frame draw marks and the frame-pacing logs.
     pub timing: bool,
     /// What the pointer is over, if anything.
@@ -88,6 +91,7 @@ impl State {
             surface: (1920, 1080),
             scale: 1,
             fractional: None,
+            last_card_bottom: 0.0,
             timing,
             hovered: None,
             pointer: None,
@@ -194,7 +198,7 @@ impl State {
             layout: self.presentation.frame_layout(now),
             card_h: self.presentation.card_height(),
             content_h: self.content_height(),
-            last_card_bottom: self.presentation.last_card_bottom,
+            last_card_bottom: self.last_card_bottom,
             opacity: self.presentation.entrance(now),
             theme: self.presentation.theme,
             surfaces: self.presentation.surfaces,

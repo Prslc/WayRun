@@ -277,7 +277,7 @@ impl Shell {
             wheel_accum: 0.0,
             pending: Pending::default(),
             icons: IconCache::new(icon_jobs),
-            text: TextEngine::new(),
+            text: TextEngine::with_family(wayrun_core::config::get().font.family.clone()),
             app: Launcher::new(),
             resident: std::env::var_os("WAYRUN_RESIDENT").is_some(),
             ime_log: std::env::var_os("WAYRUN_IME_LOG").is_some(),

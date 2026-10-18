@@ -66,9 +66,6 @@ pub struct Presentation {
     pub card_v: f32,
     pub card_target: f32,
     card_updated: Instant,
-    /// The bottom edge of the card drawn last. A settle repaint covers only the
-    /// card, so a shrink must restore the dim over the old edge too.
-    pub last_card_bottom: f32,
 }
 
 impl Presentation {
@@ -95,7 +92,6 @@ impl Presentation {
             card_v: 0.0,
             card_target: card,
             card_updated: now,
-            last_card_bottom: 0.0,
         }
     }
 

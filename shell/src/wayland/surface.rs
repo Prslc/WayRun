@@ -196,7 +196,7 @@ impl Shell {
         let damage = if full {
             Damage::FULL
         } else {
-            let base_bottom = new_bottom.max(self.app.presentation.last_card_bottom);
+            let base_bottom = new_bottom.max(self.app.last_card_bottom);
             Damage::rect(
                 (layout.card_x(surface_size) * scale).floor() as i32 - 1,
                 (top * scale).floor() as i32 - 1,
@@ -205,7 +205,7 @@ impl Shell {
             )
         };
         self.pending_damage.add(damage);
-        self.app.presentation.last_card_bottom = new_bottom;
+        self.app.last_card_bottom = new_bottom;
 
         // Capture the caret-free pixels before drawing the caret, so a blink
         // can restore them without a second frame pixmap.
