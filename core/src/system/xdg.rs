@@ -6,19 +6,25 @@ pub fn data_home() -> Option<PathBuf> {
     dirs::data_dir()
 }
 
-/// `$XDG_DATA_DIRS` split on `:`, or the spec default. `fs::ensure_flatpak_data_dirs`
-/// has already padded it with the flatpak exports before any lookup runs.
+/// `$XDG_DATA_DIRS` split on `:`, or the spec default when unset or empty.
+/// `fs::ensure_flatpak_data_dirs` has already padded it with the flatpak exports.
 pub fn data_dirs() -> Vec<PathBuf> {
-    match env::var("XDG_DATA_DIRS") {
-        Ok(list) => list
-            .split(':')
-            .filter(|s| !s.is_empty())
-            .map(PathBuf::from)
-            .collect(),
-        Err(_) => vec![
+    data_dir_list(&env::var("XDG_DATA_DIRS").unwrap_or_default())
+}
+
+fn data_dir_list(text: &str) -> Vec<PathBuf> {
+    let dirs: Vec<PathBuf> = text
+        .split(':')
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+        .collect();
+    if dirs.is_empty() {
+        vec![
             PathBuf::from("/usr/local/share"),
             PathBuf::from("/usr/share"),
-        ],
+        ]
+    } else {
+        dirs
     }
 }
 
@@ -112,6 +118,22 @@ mod tests {
             );
         }
         assert!(!dirs.is_empty(), "the spec default joins in when unset");
+    }
+
+    #[test]
+    fn an_unset_or_empty_data_dirs_list_uses_the_spec_default() {
+        let defaults = || {
+            vec![
+                PathBuf::from("/usr/local/share"),
+                PathBuf::from("/usr/share"),
+            ]
+        };
+        assert_eq!(data_dir_list(""), defaults());
+        assert_eq!(data_dir_list("::"), defaults());
+        assert_eq!(
+            data_dir_list("/a::/b"),
+            vec![PathBuf::from("/a"), PathBuf::from("/b")]
+        );
     }
 
     #[test]
