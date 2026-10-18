@@ -142,6 +142,11 @@ payloads included:
 Cold start: the first `ping` reply comes back in 10.0 ms, and a cold app
 search takes 24 ms.
 
+A warm panel show — every show after the process's first — commits its first
+frame in 3.6 ms (P95 4.8 ms); that first show takes ~10 ms. The first frame is
+transparent (the entrance starts at alpha 0), so the first visible frame lands
+one refresh later, and the 240 ms fade is deliberate.
+
 <details>
 <summary>Full table, cold start and method</summary>
 
@@ -177,12 +182,20 @@ Cold first call (a fresh `wayrun --core` per run, 3 runs, run 1 shown):
 | `clipboard` | `c a` | 50 | — | 33.8 | 13.2 |
 | `window` | `w kitty` | 1 | — | 24.0 | 16.5 |
 
+Show latency (IPC open → first committed frame, 3 warmups + 20 shows):
+
+| | Cold | Warm P50 | Warm P95 |
+|---|---|---|---|
+| show | 10.1 ms | 3.6 ms | 4.8 ms |
+
 Measured 2026-10-18 on an AMD Ryzen 5 5500U (6c/12t, `performance` governor),
 Arch Linux, niri 26.04, release build. Warm rows are synchronous `search`
 calls against one resident `--core` over stdin/stdout; cold rows start a fresh
-process each run, timed with GNU time. The real `$HOME` is read, with a 42 MB
-file index over 111k directories and 742k files. `ping` is the harness's own
-round-trip floor, and the clipboard and window rows hit a 500 ms burst cache.
+process each run, timed with GNU time; show rows measure a resident shell's
+`toggle` to its first committed frame (`WAYRUN_TIMING`). The real `$HOME` is
+read, with a 42 MB file index over 111k directories and 742k files. `ping` is
+the harness's own round-trip floor, and the clipboard and window rows hit a
+500 ms burst cache.
 
 </details>
 

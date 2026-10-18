@@ -126,6 +126,10 @@ cargo build --release -p wayrun-shell --no-default-features      # 不做窗口�
 
 冷启动时首个 `ping` 回复为 10.0 ms，冷启动下的首次应用搜索为 24 ms。
 
+面板 warm 拉起（进程第一次之后的每次 show）首帧提交为 3.6 ms（P95 4.8 ms），
+进程第一次 show 约 10 ms。首帧是全透明的（入场从 alpha 0 开始），
+第一帧可见还要再等一个刷新周期；240 ms 淡入是刻意动画。
+
 <details>
 <summary>完整表格、冷启动与测量方法</summary>
 
@@ -161,9 +165,16 @@ warm 稳态（每次丢弃 3 轮 + 测量 30 轮，乱序）：
 | `clipboard` | `c a` | 50 | — | 33.8 | 13.2 |
 | `window` | `w kitty` | 1 | — | 24.0 | 16.5 |
 
+面板延迟（IPC open → 首帧 commit，3 次预热 + 20 次 show）：
+
+| | 冷启动 | warm P50 | warm P95 |
+|---|---|---|---|
+| show | 10.1 ms | 3.6 ms | 4.8 ms |
+
 测量于 2026-10-18：AMD Ryzen 5 5500U（6c/12t，`performance` 调频）、Arch Linux、
 niri 26.04、release 构建。warm 行为对同一个常驻 `--core` 的同步 `search` 调用；
-cold 行每次启动全新进程，用 GNU time 计时。读取真实 `$HOME`，42 MB 的文件索引
+cold 行每次启动全新进程，用 GNU time 计时；面板行测的是常驻实例 `toggle` 到
+首帧 commit（`WAYRUN_TIMING`）。读取真实 `$HOME`，42 MB 的文件索引
 覆盖 11.1 万个目录、74.2 万个文件。
 `ping` 是测量程序自身的往返下限；clipboard 与 window 行命中 500 ms 的 burst 缓存。
 
