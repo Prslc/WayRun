@@ -442,7 +442,15 @@ mod tests {
         let mut names = BTreeSet::new();
         let mut rest = text;
         while let Some(at) = rest.find("wayrun.") {
+            // a path such as lua/wayrun.lua is not a binding
+            let standalone = rest[..at]
+                .chars()
+                .next_back()
+                .is_none_or(|c| !c.is_alphanumeric() && c != '_' && c != '/');
             rest = &rest[at + "wayrun.".len()..];
+            if !standalone {
+                continue;
+            }
             let name: String = rest
                 .chars()
                 .take_while(|c| {
@@ -464,6 +472,59 @@ mod tests {
             .join(locale)
             .join("lua.md");
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
+    }
+
+    fn stub() -> String {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("the core lives in the workspace")
+            .join("lua")
+            .join("wayrun.lua");
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
+    }
+
+    /// The `wayrun.<name>` declarations a LuaLS stub file holds; a parent table
+    /// assignment (`wayrun.fs = {}`) is a name in its own right.
+    fn stub_names(text: &str) -> BTreeSet<String> {
+        let mut names = BTreeSet::new();
+        for line in text.lines() {
+            let line = line.trim();
+            let rest = line
+                .strip_prefix("function wayrun.")
+                .or_else(|| line.strip_prefix("wayrun."));
+            let Some(rest) = rest else { continue };
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '.')
+                .collect();
+            if !name.is_empty() {
+                names.insert(name);
+            }
+        }
+        names
+    }
+
+    #[test]
+    fn the_lua_stub_names_every_binding() {
+        let names = sdk_names();
+        let stub = stub_names(&stub());
+        let missing: Vec<&String> = names.difference(&stub).collect();
+        assert!(missing.is_empty(), "bound but not stubbed: {missing:?}");
+    }
+
+    #[test]
+    fn the_lua_stub_names_nothing_missing() {
+        let names = sdk_names();
+        let stub = stub_names(&stub());
+        let stale: Vec<&String> = stub
+            .difference(&names)
+            .filter(|name| {
+                !stub
+                    .iter()
+                    .any(|other| other.starts_with(&format!("{name}.")))
+            })
+            .collect();
+        assert!(stale.is_empty(), "stubbed but not bound: {stale:?}");
     }
 
     #[test]

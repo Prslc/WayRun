@@ -157,6 +157,9 @@ printf '{"jsonrpc":"2.0","method":"search","params":{"plugin":"<id>","text":"…
 单个可执行文件 token，字段见 [plugins.md](plugins.md#条目字段)，契约见
 [jsonrpc.md](jsonrpc.md)。脚本首行必须是 `#!/usr/bin/env -S wayrun --lua-host`。
 
+编辑器补全：把 [`lua/wayrun.lua`](../../lua/wayrun.lua) 加入 LuaLS 的
+`Lua.workspace.library`，它声明了同一张 `wayrun` 表。
+
 [firefox.lua](https://github.com/Prslc/WayRun-Plugins/blob/main/example/lua/firefox.lua)
 与 [web.lua](https://github.com/Prslc/WayRun-Plugins/blob/main/example/lua/web.lua)
 是两个完整示例，分别读取 `places.sqlite` 与网页。
