@@ -51,7 +51,7 @@ const EXEC_ENV: [&str; 8] = [
     "WAYLAND_DISPLAY",
     "DISPLAY",
 ];
-const EXEC_TIMEOUT: Duration = Duration::from_secs(2);
+const EXEC_TIMEOUT: Duration = Duration::from_millis(1500);
 const EXEC_STDOUT_CAP: usize = 64 * 1024;
 const EXEC_STDERR_CAP: usize = 8 * 1024;
 
@@ -233,6 +233,9 @@ fn exec_program(
     })?;
     let mut command = std::process::Command::new(path);
     command.args(&args).env_clear();
+    if let Ok(home) = crate::system::fs::get_home() {
+        command.current_dir(home);
+    }
     for name in EXEC_ENV {
         if let Some(value) = std::env::var_os(name) {
             command.env(name, value);
@@ -253,7 +256,7 @@ fn exec_program(
     .ok_or_else(|| {
         mlua::Error::RuntimeError(format!(
             "exec {program}: could not start, or still running after {}s",
-            EXEC_TIMEOUT.as_secs()
+            EXEC_TIMEOUT.as_secs_f32()
         ))
     })?;
 
