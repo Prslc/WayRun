@@ -42,10 +42,12 @@ action.reveal: Reveal in file manager
 action.terminal: Open in terminal
 
 help.usage_default: "* (default)"
+help.usage_keyword: "%{keyword} <query>"
 help.line: "%{usage} - %{ready}"
 help.line_default: "%{usage} - %{ready} · Enter: %{action}"
 
 window.untitled: Untitled
+window.workspace: "%{app} · workspace %{workspace}"
 
 field.placeholder: Type to search...
 

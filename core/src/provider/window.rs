@@ -148,7 +148,7 @@ fn score_window(cached: &CachedWindow, query_lower: &str) -> u32 {
 
 fn row(compositor: &dyn Compositor, window: &Window) -> ResultItem {
     let summary = window.app_id.as_ref().map(|app| match &window.workspace {
-        Some(ws) => format!("{app} · workspace {ws}"),
+        Some(ws) => t!("window.workspace", app = app, workspace = ws),
         None => app.clone(),
     });
     ResultItem {

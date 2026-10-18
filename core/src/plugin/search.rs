@@ -44,7 +44,7 @@ async fn search(input: &str) -> Vec<ResultItem> {
                 let usage = if entry.keyword.is_empty() {
                     t!("help.usage_default")
                 } else {
-                    format!("{} <query>", entry.keyword)
+                    t!("help.usage_keyword", keyword = entry.keyword)
                 };
                 let default = defaults.get(&*meta.id).map(String::as_str);
                 identity_card(meta, help_summary(usage, &meta.ready, default))
