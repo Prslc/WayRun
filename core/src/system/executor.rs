@@ -113,9 +113,9 @@ pub fn execute_command(cmd: &str) {
 }
 
 /// The shell line that runs `cmd` and lets the launcher return: detached from
-/// the session, with its output discarded.
+/// the session, with stdout discarded and stderr left on the journal.
 fn detached_line(cmd: &str) -> String {
-    format!("setsid {cmd} >/dev/null 2>&1 &")
+    format!("setsid {cmd} >/dev/null &")
 }
 
 /// Join an argv into a `sh` command line, quoting tokens that need it: the `run:`
