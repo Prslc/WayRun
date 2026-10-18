@@ -131,6 +131,7 @@ pub struct AppearanceConfig {
     pub blur: bool,
     pub font: FontConfig,
     pub layout: Layout,
+    pub preview: bool,
     pub reduced: bool,
 }
 
@@ -141,6 +142,7 @@ impl Default for AppearanceConfig {
             blur: true,
             font: FontConfig::default(),
             layout: Layout::default(),
+            preview: true,
             reduced: false,
         }
     }
@@ -158,6 +160,8 @@ struct ThemeFile {
     font: FontFile,
     #[serde(default)]
     motion: MotionFile,
+    #[serde(default)]
+    preview: PreviewFile,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -185,6 +189,11 @@ struct MotionFile {
     reduced: Option<bool>,
 }
 
+#[derive(serde::Deserialize, Default)]
+struct PreviewFile {
+    enabled: Option<bool>,
+}
+
 impl AppearanceConfig {
     /// The file's contents as a config, or `None` when unparseable: a reload
     /// keeps the applied config instead of resetting to defaults.
@@ -202,11 +211,13 @@ impl AppearanceConfig {
             layout,
             font,
             motion,
+            preview,
         } = file;
 
         self.colors = colors;
 
         assign!(self.blur, blur.enabled);
+        assign!(self.preview, preview.enabled);
         assign!(self.font.size, font.size.and_then(|v| positive(v, 96.0)));
 
         assign!(
@@ -279,6 +290,9 @@ mod tests {
             [blur]
             enabled = false
 
+            [preview]
+            enabled = false
+
             [layout]
             radius = 20.0
             width = 800.0
@@ -292,6 +306,7 @@ mod tests {
         assert_eq!(config.colors.shared.primary, Some([0x7a, 0xa2, 0xf7]));
         assert_eq!(config.colors.shared.fg, None);
         assert!(!config.blur);
+        assert!(!config.preview);
         assert_eq!(config.layout.radius, 20.0);
         assert_eq!(config.layout.width, 800.0);
         assert_eq!(config.layout.max_rows, 3);

@@ -1,7 +1,7 @@
 use wayrun_core::wire::{ActionItem, ResultItem};
 
 use crate::config::FontConfig;
-use crate::geom::Layout;
+use crate::geom::{Layout, PreviewKind};
 use crate::present::RowMotion;
 use crate::theme::{Surfaces, Theme};
 
@@ -29,6 +29,17 @@ pub struct ListView<'a> {
 /// What the split view shows beside the list.
 pub enum PreviewView<'a> {
     Image { path: &'a str },
+    Text { text: &'a str },
+}
+
+impl PreviewView<'_> {
+    /// The column shape this preview asks the layout for.
+    pub fn kind(&self) -> PreviewKind {
+        match self {
+            Self::Image { .. } => PreviewKind::Image,
+            Self::Text { .. } => PreviewKind::Text,
+        }
+    }
 }
 
 /// The action panel that replaces the list.

@@ -148,13 +148,14 @@ with these keys — `title`, `summary`, `on_click` and `icon` are always present
 | `summary` | string \| null | secondary line (command, path, description, …) |
 | `on_click` | [`Action`](#actions) \| null | action bound to Enter |
 | `icon` | string \| null | the icon spec, an absolute path or a `builtin:` glyph; see [Icon specs](#icon-specs) |
-| `preview` | object | optional split-view payload, `{"type":"image","path":"/abs/file.png"}` |
+| `preview` | object | optional split-view payload, `{"type":"image","path":"/abs/file.png"}` or `{"type":"text","text":"…"}` |
 | `actions` | array | optional secondary commands for the `Shift+Enter` action panel |
 
-A `preview` is tagged by `type` like an `Action`; `image` carries an absolute
-path and is shown beside the list for the selected row. PNG, SVG, JPEG, WebP,
-GIF and BMP decode in this version. A host's preview path follows its icon rule:
-a file it ships, not a theme name or a `builtin:` glyph.
+A `preview` is tagged by `type` like an `Action`: `image` carries an absolute
+path (PNG, SVG, JPEG, WebP, GIF or BMP) and is shown in the right column for the
+selected row; `text` carries plain UTF-8, wrapped by the launcher and capped at
+64 KiB. A host's preview path follows its icon rule: a file it ships, not a
+theme name or a `builtin:` glyph.
 
 An `actions` entry is
 `{"title": string, "action": Action, "icon"?: string}`, with the same icon-spec

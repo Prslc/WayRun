@@ -254,9 +254,20 @@ fn parse_result_items(
     for item in &mut parsed {
         let spec = item.icon.as_deref().unwrap_or("");
         item.icon = resolve_item_icon(spec, identity.clone());
-        // A preview is a file the host ships, the same rule as its icon.
+        // A preview is a file the host ships or plain text; the same icon rule
+        // validates the path, and the text cannot grow the wire without bound.
         if let Some(Preview::Image { path }) = &item.preview {
             item.preview = host_icon_spec(path).map(|path| Preview::Image { path });
+        }
+        if let Some(Preview::Text { text }) = &mut item.preview {
+            const MAX: usize = 64 * 1024;
+            if text.len() > MAX {
+                let mut end = MAX;
+                while !text.is_char_boundary(end) {
+                    end -= 1;
+                }
+                text.truncate(end);
+            }
         }
         for action in &mut item.actions {
             action.icon = action.icon.as_deref().and_then(host_icon_spec);
@@ -503,6 +514,19 @@ mod tests {
         );
         assert_eq!(items[1].preview, None);
         assert_eq!(items[2].preview, None);
+    }
+
+    #[test]
+    fn a_hosts_preview_text_is_capped() {
+        let long = "x".repeat(70 * 1024);
+        let response = serde_json::json!({
+            "result": [{"title": "t", "preview": {"type": "text", "text": long}}]
+        });
+        let items = parse_result_items(response, "p", "").unwrap();
+        match &items[0].preview {
+            Some(Preview::Text { text }) => assert_eq!(text.len(), 64 * 1024),
+            other => panic!("expected a capped text preview, got {other:?}"),
+        }
     }
 
     #[tokio::test]

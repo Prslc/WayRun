@@ -121,6 +121,12 @@ layerrule = blur, WayRun
 | --- | --- | --- | --- |
 | `enabled` | bool | `true` | Declare the blur region. `false` declares nothing, so the backdrop stays sharp; the card's translucent fill is unchanged. |
 
+### `[preview]`
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `enabled` | bool | `true` | Show the split preview column for the selected row. `false` keeps the list full width; built-in and plugin previews alike are ignored. |
+
 ### `[layout]`
 
 | Key | Type | Default | Range | Meaning |

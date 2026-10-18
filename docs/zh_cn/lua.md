@@ -34,6 +34,7 @@ return {
 `on_click = { type = "open", uri = "https://example.com" }`。
 `preview = { type = "image", path = "/absolute/file.png" }` 会在选中行旁边打开分栏预览；
 当前版本解码 PNG、SVG、JPEG、WebP、GIF 与 BMP。
+`preview = { type = "text", text = "…" }` 在同一列显示按宽度换行的纯文本摘要。
 
 ## 插件表
 

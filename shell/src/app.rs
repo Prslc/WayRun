@@ -11,7 +11,7 @@ mod test_support;
 use std::time::Instant;
 
 use wayrun_core::wire::{Action, Preview, ResultItem};
-use wayrun_ui::geom::Layout;
+use wayrun_ui::geom::{Layout, PreviewKind};
 use wayrun_ui::present::{Presentation, RowMotion};
 use wayrun_ui::view::{Body, FieldView, FooterView, Frame, ListView, PanelView, PreviewView};
 
@@ -56,9 +56,9 @@ pub struct State {
     /// The bottom edge of the card drawn last. A settle repaint covers only the
     /// card, so a shrink must restore the dim over the old edge too.
     pub last_card_bottom: f32,
-    /// Whether the last frame drew the split view, so a short list can retarget
-    /// the height spring when the split appears or goes.
-    split_drawn: bool,
+    /// What preview the last frame drew, so a kind change can retarget the
+    /// height spring when the list is short.
+    preview_drawn: Option<PreviewKind>,
     /// `WAYRUN_TIMING=1`: the per-frame draw marks and the frame-pacing logs.
     pub timing: bool,
     /// What the pointer is over, if anything.
@@ -95,7 +95,7 @@ impl State {
             scale: 1,
             fractional: None,
             last_card_bottom: 0.0,
-            split_drawn: false,
+            preview_drawn: None,
             timing,
             hovered: None,
             pointer: None,
@@ -112,25 +112,31 @@ impl State {
         self.presentation.appearance.layout
     }
 
-    /// The selected row's preview when the list owns the card, else nothing.
+    /// The selected row's preview kind when the list owns the card, else none.
+    pub fn preview_kind(&self) -> Option<PreviewKind> {
+        if self.menu.is_some() || !self.presentation.appearance.preview {
+            return None;
+        }
+        match self.rows.get(self.cursor.selected)?.preview.as_ref()? {
+            Preview::Image { .. } => Some(PreviewKind::Image),
+            Preview::Text { .. } => Some(PreviewKind::Text),
+        }
+    }
+
     pub fn split(&self) -> bool {
-        self.menu.is_none()
-            && self
-                .rows
-                .get(self.cursor.selected)
-                .is_some_and(|row| row.preview.is_some())
+        self.preview_kind().is_some()
     }
 
     fn selected_preview(&self) -> Option<&Preview> {
         self.rows.get(self.cursor.selected)?.preview.as_ref()
     }
 
-    /// A short list gains height when the preview appears, so entering or
-    /// leaving the split retargets the spring.
+    /// A short list gains height when the preview appears or changes kind, so
+    /// the spring is retargeted then.
     pub fn sync_split_height(&mut self, now: Instant) {
-        let split = self.split();
-        if split != self.split_drawn {
-            self.split_drawn = split;
+        let kind = self.preview_kind();
+        if kind != self.preview_drawn {
+            self.preview_drawn = kind;
             self.retarget_height(now);
         }
     }
@@ -154,8 +160,12 @@ impl State {
         match &self.menu {
             Some(menu) => layout.panel_h(menu.actions.len()),
             None if self.rows.is_empty() && self.query.is_empty() => layout.empty_h(),
-            None if self.split() => layout.content_h_for(layout.split_h(self.rows.len())),
-            None => layout.content_h(self.rows.len()),
+            None => match self.preview_kind() {
+                Some(kind) => {
+                    layout.content_h_for(layout.split_h(self.surface, self.rows.len(), kind))
+                }
+                None => layout.content_h(self.rows.len()),
+            },
         }
     }
 
@@ -181,6 +191,7 @@ impl State {
         let preview = if self.split() {
             self.selected_preview().map(|preview| match preview {
                 Preview::Image { path } => PreviewView::Image { path },
+                Preview::Text { text } => PreviewView::Text { text },
             })
         } else {
             None
@@ -257,7 +268,7 @@ impl State {
         self.dismiss_at = None;
         self.presentation.begin_show(now);
         self.presentation.snap_to(self.content_height(), now);
-        self.split_drawn = false;
+        self.preview_drawn = None;
         self.contain();
         self.caret_visible = true;
         self.caret_at = now;
@@ -274,7 +285,7 @@ impl State {
         // A show starts from an empty list: an empty query fetches nothing.
         self.rows = Vec::new();
         self.row_motion.clear();
-        self.split_drawn = false;
+        self.preview_drawn = None;
     }
 
     /// Keep the selection inside the `max_rows` window, minimally.
@@ -327,15 +338,19 @@ mod tests {
         state.apply_results(vec![picture, item("plain", None, None, None)], now);
 
         assert!(state.split());
-        let split_height = state
-            .layout()
-            .content_h_for(state.layout().split_h(state.rows.len()));
+        let kind = state.preview_kind().unwrap();
+        let split_height = state.layout().content_h_for(state.layout().split_h(
+            state.surface,
+            state.rows.len(),
+            kind,
+        ));
         assert_eq!(state.content_height(), split_height);
         {
             let frame = state.frame(now);
             match &frame.body {
                 Body::List(list) => match &list.preview {
                     Some(PreviewView::Image { path }) => assert_eq!(*path, "/tmp/p.png"),
+                    Some(PreviewView::Text { .. }) => panic!("expected an image preview"),
                     None => panic!("the selected row has a preview"),
                 },
                 Body::Panel(_) => panic!("the list owns the card"),
@@ -345,5 +360,57 @@ mod tests {
         state.cursor.selected = 1;
         assert!(!state.split());
         assert_eq!(state.content_height(), state.layout().content_h(2));
+    }
+
+    #[test]
+    fn a_text_preview_uses_the_text_column() {
+        use crate::app::test_support::{item, state};
+        use wayrun_core::wire::Preview;
+
+        let mut state = state();
+        let now = Instant::now();
+        let mut row = item("note", None, None, None);
+        row.preview = Some(Preview::Text {
+            text: "first line\nsecond line".to_string(),
+        });
+        state.apply_results(vec![row], now);
+
+        assert_eq!(state.preview_kind(), Some(PreviewKind::Text));
+        match &state.frame(now).body {
+            Body::List(list) => match &list.preview {
+                Some(PreviewView::Text { text }) => {
+                    assert_eq!(*text, "first line\nsecond line")
+                }
+                _ => panic!("the selected row has a text preview"),
+            },
+            Body::Panel(_) => panic!("the list owns the card"),
+        }
+        assert_eq!(
+            state.content_height(),
+            state.layout().content_h_for(state.layout().split_h(
+                state.surface,
+                1,
+                PreviewKind::Text
+            ))
+        );
+    }
+
+    #[test]
+    fn disabling_previews_keeps_the_list_full_width() {
+        use crate::app::test_support::{item, state};
+        use wayrun_core::wire::Preview;
+
+        let mut state = state();
+        state.presentation.appearance.preview = false;
+        let now = Instant::now();
+        let mut row = item("picture", None, None, None);
+        row.preview = Some(Preview::Image {
+            path: "/tmp/p.png".to_string(),
+        });
+        state.apply_results(vec![row], now);
+
+        assert_eq!(state.preview_kind(), None);
+        assert!(!state.split());
+        assert_eq!(state.content_height(), state.layout().content_h(1));
     }
 }

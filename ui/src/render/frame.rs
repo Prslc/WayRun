@@ -106,7 +106,15 @@ pub fn draw(
         Body::List(view) if !view.rows.is_empty() => {
             list::draw_list(&canvas, pixmap, frame, text, icons, now);
             if let Some(preview) = &view.preview {
-                preview::draw_preview(&canvas, pixmap, frame, view.rows.len(), preview, icons);
+                preview::draw_preview(
+                    &canvas,
+                    pixmap,
+                    frame,
+                    view.rows.len(),
+                    preview,
+                    text,
+                    icons,
+                );
             }
         }
         Body::List(_) => {}

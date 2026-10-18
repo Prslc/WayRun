@@ -74,6 +74,7 @@ fn is_false(value: &bool) -> bool {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Preview {
     Image { path: String },
+    Text { text: String },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]

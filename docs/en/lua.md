@@ -35,7 +35,8 @@ documents — `title`, `summary`, `on_click`, `icon`, `preview` and `actions` �
 no builder is needed: `on_click = { type = "open", uri = "https://example.com" }`.
 A `preview = { type = "image", path = "/absolute/file.png" }` opens the split
 view beside the list for the selected row; PNG, SVG, JPEG, WebP, GIF and BMP
-decode in this version.
+decode in this version. `preview = { type = "text", text = "…" }` puts a
+wrapped plain-text excerpt in the same column.
 
 ## The plugin table
 

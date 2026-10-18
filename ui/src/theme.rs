@@ -60,6 +60,8 @@ const CARD_ALPHA: f32 = 0.72;
 const CARD_ALPHA_DARK: f32 = 0.85;
 const SELECTION_ALPHA: f32 = 0.15;
 const HOVER_ALPHA: f32 = 0.08;
+/// The split view's preview pane: a tonal column, not a bordered box.
+const PREVIEW_ALPHA: f32 = 0.05;
 /// White over a dark card reads as a bright ring; black over a light one is
 /// the visible edge, while white there is nearly the card's own colour.
 const HAIRLINE_ALPHA: f32 = 0.10;
@@ -79,6 +81,7 @@ pub struct Surfaces {
     pub card: [u8; 4],
     pub selection: [u8; 4],
     pub hover: [u8; 4],
+    pub preview: [u8; 4],
     pub hairline: [u8; 4],
     pub muted: [u8; 4],
     pub summary: [u8; 4],
@@ -107,6 +110,7 @@ impl Surfaces {
             ),
             selection: tint(theme.primary, SELECTION_ALPHA),
             hover: tint(theme.primary, HOVER_ALPHA),
+            preview: tint(theme.primary, PREVIEW_ALPHA),
             hairline: if dark {
                 [255, 255, 255, alpha_u8(HAIRLINE_ALPHA_DARK)]
             } else {
@@ -246,6 +250,7 @@ mod tests {
         assert_eq!(dark.hairline[3], alpha_u8(HAIRLINE_ALPHA_DARK));
         assert_eq!(dark.muted, tint(theme.fg, MUTED_ALPHA));
         assert_eq!(dark.accent, tint(theme.primary, ACCENT_ALPHA));
+        assert_eq!(dark.preview, tint(theme.primary, PREVIEW_ALPHA));
         assert_eq!(dark.dim, DEFAULT_DIM);
 
         let colors = ColorOverrides {

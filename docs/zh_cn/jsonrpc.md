@@ -131,12 +131,13 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 | `summary` | string \| null | 副行（命令、路径、描述……） |
 | `on_click` | [`Action`](#动作) \| null | Enter 绑定的动作 |
 | `icon` | string \| null | 图标规范：绝对路径或 `builtin:` 字形；见 [图标规范](#图标规范) |
-| `preview` | object | 可选的分栏预览载荷，`{"type":"image","path":"/abs/file.png"}` |
+| `preview` | object | 可选的分栏预览载荷：`{"type":"image","path":"/abs/file.png"}` 或 `{"type":"text","text":"…"}` |
 | `actions` | array | 可选，`Shift+Enter` 二级菜单的次级命令 |
 
-`preview` 与 `Action` 一样用 `type` 标记；`image` 携带绝对路径，显示在选中行旁边的列表右侧。
-当前版本解码 PNG、SVG、JPEG、WebP、GIF 与 BMP。外部主机的预览路径遵循其图标规则：它自己准备的文件，
-而不是主题名或 `builtin:` 字形。
+`preview` 与 `Action` 一样用 `type` 标记：`image` 携带绝对路径（PNG、SVG、JPEG、WebP、
+GIF 或 BMP），显示在选中行的右侧列；`text` 携带纯 UTF-8 文本，由启动器换行并裁切，
+上限 64 KiB。外部主机的预览路径遵循其图标规则：它自己准备的文件，而不是主题名或
+`builtin:` 字形。
 
 `actions` 元素为 `{"title": string, "action": Action, "icon"?: string}`，
 `icon` 与结果行的 `icon` 采用同样的规范解析。动作还可能带 `id`（稳定 kind）、

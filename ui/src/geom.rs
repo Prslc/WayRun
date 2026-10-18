@@ -6,12 +6,21 @@ pub const FOOTER_H: f32 = 28.0;
 pub const HAIRLINE_W: f32 = 1.0;
 pub const ACCENT_W: f32 = 3.0;
 pub const ACCENT_H: f32 = 28.0;
-/// The split view's preview column and the gap before it. The card's width is
-/// unchanged; the list gives this column up.
-pub const PREVIEW_W: f32 = 300.0;
+/// The split view's preview column: one share of the card's content for every
+/// preview kind, so switching rows never changes the column's width.
+pub const PREVIEW_FRAC: f32 = 0.46;
+pub const PREVIEW_MIN_W: f32 = 240.0;
+pub const PREVIEW_MAX_W: f32 = 560.0;
 pub const PREVIEW_GAP: f32 = 16.0;
-/// A short list still gives the preview a usable square; the card grows down.
-pub const PREVIEW_MIN_H: f32 = 300.0;
+/// A text preview gets a readable minimum height; an image gets a square.
+const TEXT_MIN_H: f32 = 220.0;
+
+/// The preview body's shape differs by content, never its column width.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewKind {
+    Image,
+    Text,
+}
 
 /// The card's horizontal anchor on the output.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -96,11 +105,23 @@ impl Layout {
         (self.card_x(surface) + PAD, self.card_w(surface) - 2.0 * PAD)
     }
 
+    /// The preview column's width for this card: one share of the content for
+    /// every kind, clamped so neither side collapses.
+    pub fn preview_w(&self, surface: (u32, u32)) -> f32 {
+        let (_, content) = self.row_band(surface);
+        (content * PREVIEW_FRAC)
+            .clamp(PREVIEW_MIN_W, PREVIEW_MAX_W)
+            .min(content)
+    }
+
     /// The list's band: the row band minus the preview column when split.
     pub fn list_band(&self, surface: (u32, u32), split: bool) -> (f32, f32) {
         let (left, width) = self.row_band(surface);
         if split {
-            (left, (width - PREVIEW_W - PREVIEW_GAP).max(0.0))
+            (
+                left,
+                (width - self.preview_w(surface) - PREVIEW_GAP).max(0.0),
+            )
         } else {
             (left, width)
         }
@@ -108,8 +129,7 @@ impl Layout {
 
     /// The preview pane's band: the card's right edge, inset by `PAD`.
     pub fn preview_band(&self, surface: (u32, u32)) -> (f32, f32) {
-        let (_, width) = self.row_band(surface);
-        let width = PREVIEW_W.min(width);
+        let width = self.preview_w(surface);
         (
             self.card_x(surface) + PAD + self.card_w(surface) - 2.0 * PAD - width,
             width,
@@ -141,10 +161,13 @@ impl Layout {
         PAD + SEARCH_H + GAP + FOOTER_H + PAD + GAP + body_h
     }
 
-    /// The body's height in the split view: a short list still reserves enough
-    /// room for the preview image.
-    pub fn split_h(&self, rows: usize) -> f32 {
-        self.list_h(rows).max(PREVIEW_MIN_H)
+    /// The split body's height: an image gets a square at the column's width,
+    /// text a readable minimum; a short list grows the card down either way.
+    pub fn split_h(&self, surface: (u32, u32), rows: usize, kind: PreviewKind) -> f32 {
+        match kind {
+            PreviewKind::Image => self.list_h(rows).max(self.preview_w(surface)),
+            PreviewKind::Text => self.list_h(rows).max(TEXT_MIN_H),
+        }
     }
 
     /// The card with only the search field: what a pristine show rests at,
@@ -352,22 +375,53 @@ mod tests {
         let surface = (1920, 1080);
         let (left, width) = l.list_band(surface, true);
         let (preview_left, preview_w) = l.preview_band(surface);
-        let (_, full) = l.row_band(surface);
+        let (_, content) = l.row_band(surface);
 
-        assert_eq!(preview_w, PREVIEW_W);
+        assert_eq!(preview_w, l.preview_w(surface));
+        assert!((preview_w - content * PREVIEW_FRAC).abs() < 0.001);
         assert_eq!(
             l.card_w(surface),
             Layout::default().card_w(surface),
             "the card keeps its width"
         );
-        assert_eq!(full, width + PREVIEW_W + PREVIEW_GAP);
+        assert_eq!(content, width + preview_w + PREVIEW_GAP);
         assert_eq!(left + width + PREVIEW_GAP, preview_left);
-        assert_eq!(l.split_h(1), PREVIEW_MIN_H);
-        assert!(l.content_h_for(l.split_h(1)) > l.content_h(1));
+        assert_eq!(
+            l.split_h(surface, 1, PreviewKind::Image),
+            preview_w,
+            "an image gets a square"
+        );
+        assert!(l.content_h_for(l.split_h(surface, 1, PreviewKind::Image)) > l.content_h(1));
 
         let top = l.rows_top(surface);
         assert_eq!(l.row_at(surface, true, 0, 20, preview_left, top), None);
         assert_eq!(l.row_at(surface, false, 0, 20, preview_left, top), Some(0));
+    }
+
+    #[test]
+    fn a_text_preview_keeps_the_column_but_gets_a_minimum_height() {
+        let l = Layout::default();
+        let surface = (1920, 1080);
+        let width = l.preview_w(surface);
+        assert_eq!(
+            l.preview_band(surface).1,
+            width,
+            "text and image share the column"
+        );
+
+        let (left, list_w) = l.list_band(surface, true);
+        assert_eq!(l.row_band(surface).1, list_w + width + PREVIEW_GAP);
+        let (preview_left, _) = l.preview_band(surface);
+        assert_eq!(left + list_w + PREVIEW_GAP, preview_left);
+        assert_eq!(
+            l.split_h(surface, 1, PreviewKind::Text),
+            TEXT_MIN_H,
+            "a short list gives the text a readable body"
+        );
+        assert_eq!(
+            l.row_at(surface, true, 0, 20, preview_left, l.rows_top(surface)),
+            None
+        );
     }
 
     #[test]

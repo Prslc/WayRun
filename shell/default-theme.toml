@@ -15,6 +15,9 @@
 [blur]
 # enabled = true             # declare the card's rounded rect as a blur region
 
+[preview]
+# enabled = true             # show the split preview column for a selected row
+
 [layout]
 # width = 730.0              # card width in pixels; a narrower output shrinks it
 # radius = 16.0              # card corner radius; 0 is square corners
