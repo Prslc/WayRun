@@ -1,7 +1,9 @@
+use std::sync::{Mutex, PoisonError};
+
 use notify::RecommendedWatcher;
 use tokio::sync::mpsc;
 
-use crate::notify::watch;
+use crate::notify::{watch, watch_paths};
 
 /// Watch the DMS palette and re-emit a theme message to the UI on change, since
 /// a resident core otherwise reads the theme once at start.
@@ -59,7 +61,30 @@ pub fn watch_plugins() -> Option<RecommendedWatcher> {
         // notify's callback runs off the runtime; hop back in to await.
         let handle = handle.clone();
         handle.spawn(async move {
-            crate::plugin::reload_if_changed().await;
+            if crate::plugin::reload_if_changed().await {
+                rewatch_hosts();
+            }
         });
     })
+}
+
+static HOST_WATCHER: Mutex<Option<RecommendedWatcher>> = Mutex::new(None);
+
+/// Watch the configured host files; a changed script refreshes its identity.
+/// Run again after a `plugins.toml` reload so newly added hosts are watched.
+pub fn rewatch_hosts() {
+    let paths = crate::plugin::host_paths();
+    let next = if paths.is_empty() {
+        None
+    } else {
+        let handle = tokio::runtime::Handle::current();
+        watch_paths(&paths, move || {
+            let handle = handle.clone();
+            handle.spawn(async {
+                crate::plugin::refresh_hosts().await;
+                rewatch_hosts();
+            });
+        })
+    };
+    *HOST_WATCHER.lock().unwrap_or_else(PoisonError::into_inner) = next;
 }

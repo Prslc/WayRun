@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
 
 use anyhow::Result;
@@ -19,6 +20,12 @@ pub struct HostMeta {
     pub icon: String,
     pub ready: String,
     pub api: u32,
+}
+
+/// The executable behind `command`, when it resolves to a file.
+pub fn command_path(command: &str) -> Option<PathBuf> {
+    let path = PathBuf::from(resolve_command(command));
+    path.is_file().then_some(path)
 }
 
 /// `(mtime, size)` of the resolved `command`, to validate a cached identity.
@@ -325,6 +332,18 @@ fn resolve_item_icon(icon: &str, fallback: Option<String>) -> Option<String> {
 mod tests {
     use super::*;
     use crate::wire::Action;
+
+    #[test]
+    fn a_command_resolves_to_an_existing_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("host.sh");
+        std::fs::write(&script, "#!/bin/sh\n").unwrap();
+        assert_eq!(command_path(script.to_str().unwrap()), Some(script.clone()));
+        assert_eq!(
+            command_path(temp.path().join("missing.sh").to_str().unwrap()),
+            None
+        );
+    }
 
     #[test]
     fn empty_icon_falls_back_to_plugin_icon() {

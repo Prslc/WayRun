@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Deserialize;
@@ -87,6 +88,15 @@ impl HostCache {
         (cached.mtime == mtime && cached.size == size).then(|| cached.metas.clone())
     }
 
+    /// Whether a cached identity's file moved; an uncached host is not stale.
+    pub fn stale(&self, command: &str) -> bool {
+        let Some(cached) = self.hosts.get(command) else {
+            return false;
+        };
+        crate::provider::external::command_stamp(command)
+            .is_none_or(|(mtime, size)| cached.mtime != mtime || cached.size != size)
+    }
+
     pub fn record(&mut self, command: &str, metas: &[HostMeta]) {
         let Some((mtime, size)) = crate::provider::external::command_stamp(command) else {
             return;
@@ -145,13 +155,14 @@ pub async fn reload() {
 
 /// Rebuild only when `plugins.toml` actually changed, so one save's several
 /// events do not re-fork every external host.
-pub async fn reload_if_changed() {
+pub async fn reload_if_changed() -> bool {
     let _guard = INIT.lock().await;
     let new_config = load_or_default();
     if REGISTRY_READY.load(Ordering::Acquire) && *CONFIG.read().await == new_config {
-        return;
+        return false;
     }
     apply(new_config).await;
+    true
 }
 
 async fn rebuild() {
@@ -167,6 +178,46 @@ async fn apply(new_config: Config) {
     crate::provider::file::index::sync_enabled(index_enabled);
     crate::provider::file::index::settings_changed();
     REGISTRY_READY.store(true, Ordering::Release);
+}
+
+/// The configured host executables, deduplicated, for the watcher.
+pub fn host_paths() -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = load_or_default()
+        .plugins
+        .iter()
+        .filter(|entry| entry.enabled)
+        .filter_map(|entry| entry.command.as_deref())
+        .filter_map(crate::provider::external::command_path)
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+/// Rebuild the registry when a host file changed, then ask only those hosts
+/// for their identity again.
+pub async fn refresh_hosts() {
+    let stale: Vec<String> = {
+        let _guard = INIT.lock().await;
+        if !REGISTRY_READY.load(Ordering::Acquire) {
+            return;
+        }
+        let config = CONFIG.read().await;
+        let cache = HostCache::load();
+        let stale: Vec<String> = config
+            .plugins
+            .iter()
+            .filter(|entry| entry.enabled)
+            .filter_map(|entry| entry.command.clone())
+            .filter(|command| cache.stale(command))
+            .collect();
+        if stale.is_empty() {
+            return;
+        }
+        *REGISTRY.write().await = build_entries(&config);
+        stale
+    };
+    resolve_pending_filtered(None, Some(&stale)).await;
 }
 
 /// Whether either provider the file index serves is among `entries`.
@@ -227,12 +278,24 @@ fn build_entries(config: &Config) -> Vec<Entry> {
 /// Ask the placeholder hosts for their identity, bounded to
 /// [`DISCOVERY_CONCURRENCY`] forks and cached; `keyword` limits the walk.
 pub(super) async fn resolve_pending(keyword: Option<&str>) {
+    resolve_pending_filtered(keyword, None).await;
+}
+
+async fn resolve_pending_filtered(keyword: Option<&str>, commands: Option<&[String]>) {
     let _guard = INIT.lock().await;
     let pending: Vec<(usize, PendingHost)> = {
         let reg = REGISTRY.read().await;
         reg.iter()
             .enumerate()
             .filter(|(_, entry)| keyword.is_none_or(|kw| entry.keyword == kw))
+            .filter(|(_, entry)| {
+                commands.is_none_or(|commands| {
+                    entry
+                        .pending
+                        .as_ref()
+                        .is_some_and(|host| commands.contains(&host.command))
+                })
+            })
             .filter_map(|(index, entry)| entry.pending.clone().map(|host| (index, host)))
             .collect()
     };

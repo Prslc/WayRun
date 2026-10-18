@@ -24,6 +24,9 @@ pub async fn serve() -> Result<()> {
 
     let _plugins_watcher = watchers::watch_plugins();
 
+    // The host watcher lives in `watchers`, so a config reload can replace its set.
+    watchers::rewatch_hosts();
+
     let mut reader = BufReader::new(io::stdin()).lines();
     let search = Search::spawn(tx.clone());
     // `command` waits on spawned processes, so it runs in a task; the handles

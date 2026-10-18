@@ -26,6 +26,29 @@ fn watch_targets(watcher: &mut RecommendedWatcher, path: &Path) {
     }
 }
 
+/// Call `on_event` for every non-read event on any root's watch target; with no
+/// debounce, the handler must ignore an unchanged value.
+pub(crate) fn watch_paths<F>(paths: &[PathBuf], mut on_event: F) -> Option<RecommendedWatcher>
+where
+    F: FnMut() + Send + 'static,
+{
+    let mut watcher = notify::recommended_watcher(move |res: Result<Event>| {
+        let Ok(ev) = res else { return };
+        if matches!(ev.kind, EventKind::Access(_)) {
+            return;
+        }
+        on_event();
+    })
+    .ok()?;
+
+    for path in paths {
+        for target in root_targets(path) {
+            let _ = watcher.watch(&target, RecursiveMode::NonRecursive);
+        }
+    }
+    Some(watcher)
+}
+
 /// Call `on_event` for every write to `path`; with no debounce, the handler must
 /// keep its state on a failed read and ignore an unchanged value.
 pub fn watch<F>(path: &Path, mut on_event: F) -> Option<RecommendedWatcher>
