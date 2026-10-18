@@ -29,7 +29,11 @@ way; the full dependency list is in the
 A query containing `/` or starting with `~` is a **path query**: the path is
 opened directly when it exists, without a name search. `~` and a relative path
 resolve under `$HOME`; an absolute path (`/etc/hosts`) is opened wherever it
-points.
+points. Before the path exists, the typed directory's entries matching the last
+component are listed, and a trailing `/` lists the directory itself. Matching
+ignores case, including the parent components already typed; an exact path that
+exists is still opened literally. When no provider matches a plain query, the
+first level of `$HOME` is listed the same way.
 
 ## Keys
 
@@ -40,6 +44,7 @@ points.
 | `Alt+Enter` | in the panel, set the highlighted action as its plugin's default, or clear it |
 | `↑` / `↓` | move the selection |
 | `PageUp` / `PageDown` | move by a page |
+| `Tab` | complete the last word or path component from the results |
 | `Home` / `End` | move the caret to the start/end of the query |
 | `Ctrl+A` | select the whole query |
 | `Shift+←/→` | extend the selection |
@@ -80,9 +85,10 @@ as `· Enter: <action id>`.
 
 ## Language
 
-The interface follows the session's locale, read once at startup: `$LC_ALL`,
-then `$LC_MESSAGES`, `$LANG`, then `$LANGUAGE`'s first entry. English and
-Simplified Chinese ship; any other locale falls back to English.
+The interface follows the session's locale, read once at startup in glib's
+order: `$LANGUAGE`'s first entry with a shipped table, then `$LC_ALL`,
+`$LC_MESSAGES`, `$LANG`; a `C`/`POSIX` base locale ignores `$LANGUAGE`. English
+and Simplified Chinese ship; any other locale falls back to English.
 
 `config.toml`'s `[ui] locale` pins the language regardless of the session, which
 is what a resident service wants: its unit inherits the session's locale, or none

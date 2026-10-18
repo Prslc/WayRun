@@ -1,9 +1,26 @@
 use std::borrow::Cow;
+use std::ffi::{CString, c_char};
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use freedesktop_desktop_entry::DesktopEntry;
+use gio::glib::translate::ToGlibPtr;
 
 use crate::system::xdg;
+
+// GLib's own action launcher honors DBusActivatable, Path, Terminal and the
+// field codes; gio 0.22 binds none of it, so the two symbols are declared here.
+#[link(name = "gio-2.0")]
+unsafe extern "C" {
+    fn g_desktop_app_info_new_from_filename(
+        filename: *const c_char,
+    ) -> *mut gio::glib::gobject_ffi::GObject;
+    fn g_desktop_app_info_launch_action(
+        info: *mut gio::glib::gobject_ffi::GObject,
+        action_name: *const c_char,
+        context: *mut gio::ffi::GAppLaunchContext,
+    ) -> gio::glib::ffi::gboolean;
+}
 
 /// Every path a desktop id may live at, in XDG precedence order: the user's own
 /// data dir first, then the padded `$XDG_DATA_DIRS`.
@@ -21,7 +38,36 @@ fn candidates(id: &str) -> Vec<PathBuf> {
 
 /// The most preferred `.desktop` file for `id`, user overrides included.
 pub fn find(id: &str) -> Option<PathBuf> {
-    candidates(id).into_iter().find(|path| path.is_file())
+    if let Some(path) = candidates(id).into_iter().find(|path| path.is_file()) {
+        return Some(path);
+    }
+    let wanted = if id.ends_with(".desktop") {
+        id.to_owned()
+    } else {
+        format!("{id}.desktop")
+    };
+    xdg::desktop_dirs()
+        .into_iter()
+        .find_map(|root| find_nested(&root, &wanted))
+}
+
+/// A nested entry's id flattens its path (`foo/bar.desktop` -> `foo-bar.desktop`),
+/// so an id no direct candidate serves is matched by walking the root.
+fn find_nested(root: &Path, wanted: &str) -> Option<PathBuf> {
+    for entry in walkdir::WalkDir::new(root).min_depth(1) {
+        let Ok(entry) = entry else { continue };
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("desktop") || !path.is_file() {
+            continue;
+        }
+        let Ok(relative) = path.strip_prefix(root) else {
+            continue;
+        };
+        if relative.to_string_lossy().replace('/', "-") == wanted {
+            return Some(path.to_path_buf());
+        }
+    }
+    None
 }
 
 /// The parsed entry for `id`, so every reader of `Icon=`/`GenericName=`/actions
@@ -84,6 +130,13 @@ fn details_of(entry: &DesktopEntry, locales: &[String]) -> Details {
         .unwrap_or_default()
         .into_iter()
         .filter_map(|id| {
+            // An action with no Exec can still be D-Bus activated.
+            let executable = entry
+                .action_exec(id)
+                .is_some_and(|exec| !exec.trim().is_empty());
+            if !executable && !entry.dbus_activatable() {
+                return None;
+            }
             let name = entry.action_name(id, locales)?.trim().to_string();
             (!name.is_empty()).then(|| (id.to_string(), name))
         })
@@ -160,7 +213,8 @@ impl<'a> Codes<'a> {
             name: entry.name(locales),
             icon: entry
                 .action_entry(action_id, "Icon")
-                .or_else(|| entry.icon()),
+                .or_else(|| entry.icon())
+                .filter(|icon| !icon.trim().is_empty()),
             path: path.display().to_string(),
         }
     }
@@ -213,19 +267,57 @@ fn expand(exec: &str, entry: &DesktopEntry, action_id: &str, path: &Path) -> Vec
     argv
 }
 
-/// The argv of `[Desktop Action <action_id>]`, or `None` when the entry carries
-/// no such group or its `Exec=` expands to nothing.
-pub fn action_argv(desktop_id: &str, action_id: &str) -> Option<Vec<String>> {
-    let e = entry(desktop_id, None)?;
-    let argv = expand(e.action_exec(action_id)?, &e, action_id, &e.path);
-    (!argv.is_empty()).then_some(argv)
+/// Runs one action of one desktop entry; GLib's launcher first, with the hand
+/// expanded `Exec=` as the fallback.
+pub fn launch(desktop_id: &str, action_id: &str) -> bool {
+    if launch_with_glib(desktop_id, action_id) {
+        return true;
+    }
+    let Some(entry) = entry(desktop_id, None) else {
+        return false;
+    };
+    let Some(exec) = entry.action_exec(action_id) else {
+        return false;
+    };
+    let argv = expand(exec, &entry, action_id, &entry.path);
+    if argv.is_empty() {
+        return false;
+    }
+    let dir = entry.path().map(Path::new);
+    if entry.terminal() {
+        crate::system::executor::run_in_terminal_in(
+            &crate::system::executor::shell_join(&argv),
+            dir,
+        );
+    } else {
+        crate::system::executor::execute_argv(&argv, dir);
+    }
+    true
 }
 
-/// Runs one action of one desktop entry, returning the argv it ran.
-pub fn launch(desktop_id: &str, action_id: &str) -> Option<Vec<String>> {
-    let argv = action_argv(desktop_id, action_id)?;
-    crate::system::executor::execute_argv(&argv);
-    Some(argv)
+fn launch_with_glib(desktop_id: &str, action_id: &str) -> bool {
+    let Some(path) = find(desktop_id) else {
+        return false;
+    };
+    let Ok(path) = CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let Ok(action) = CString::new(action_id) else {
+        return false;
+    };
+    let context = crate::system::executor::launch_context();
+    // SAFETY: both C strings outlive the calls; the context outlives the launch;
+    // the returned info is unref'd exactly once.
+    unsafe {
+        let info = g_desktop_app_info_new_from_filename(path.as_ptr());
+        if info.is_null() {
+            return false;
+        }
+        let launched =
+            g_desktop_app_info_launch_action(info, action.as_ptr(), context.to_glib_none().0) != 0;
+        gio::glib::gobject_ffi::g_object_unref(info as *mut _);
+        launched
+    }
 }
 
 #[cfg(test)]
@@ -271,6 +363,60 @@ Exec=nautilus %i --profile \"100%% sure\"
             "%U names a URI the row does not carry"
         );
         assert_eq!(argv("tab"), ["nautilus", "--tab", "a b;c"]);
+    }
+
+    #[test]
+    fn a_nested_desktop_file_flattens_its_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("wine/Programs/app.desktop");
+        std::fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        std::fs::write(&nested, "[Desktop Entry]\nName=App\nExec=/bin/true\n").unwrap();
+        assert_eq!(
+            find_nested(dir.path(), "wine-Programs-app.desktop"),
+            Some(nested)
+        );
+        assert_eq!(find_nested(dir.path(), "app.desktop"), None);
+    }
+
+    #[test]
+    fn a_dbus_activatable_action_needs_no_exec() {
+        let details = details_of(
+            "[Desktop Entry]\n\
+             Name=App\n\
+             DBusActivatable=true\n\
+             Actions=Dbus;\n\
+             \n\
+             [Desktop Action Dbus]\n\
+             Name=DBus Go\n",
+            &["en"],
+        );
+        assert_eq!(
+            details.actions,
+            [("Dbus".to_string(), "DBus Go".to_string())]
+        );
+    }
+
+    #[test]
+    fn an_unknown_action_does_not_launch() {
+        assert!(!launch("definitely-not-a-real-app.desktop", "go"));
+    }
+
+    #[test]
+    fn an_empty_icon_is_not_passed_to_an_action() {
+        let content = "[Desktop Entry]\n\
+                       Name=App\n\
+                       Exec=app\n\
+                       Icon=\n\
+                       Actions=go;\n\
+                       [Desktop Action go]\n\
+                       Name=Go\n\
+                       Exec=app %i --x\n";
+        let path = Path::new("/usr/share/applications/app.desktop");
+        let entry = DesktopEntry::from_str(path, content, None::<&[String]>).unwrap();
+        assert_eq!(
+            expand(entry.action_exec("go").unwrap(), &entry, "go", path),
+            ["app", "--x"]
+        );
     }
 
     #[test]
@@ -325,7 +471,7 @@ Exec=nautilus %i --profile \"100%% sure\"
             "[Desktop Entry]\n\
              GenericName=Virtualization Software\n\
              Keywords=virtualization;\n\
-             Actions=Manager;\n\
+             Actions=Manager;NoExec;\n\
              Name[de]=Oracle VirtualBox\n\
              \n\
              [Desktop Action Manager]\n\
@@ -333,13 +479,16 @@ Exec=nautilus %i --profile \"100%% sure\"
              Name[de]=VM Manager oeffnen\n\
              Exec=VirtualBox\n\
              \n\
+             [Desktop Action NoExec]\n\
+             Name=No Exec\n\
+             \n\
              [Desktop Action Broken]\n\
              Name[de]=Nur auf Deutsch\n",
             &["en"],
         );
         assert_eq!(details.generic.as_deref(), Some("Virtualization Software"));
         assert_eq!(details.keywords, ["virtualization"]);
-        // an undeclared group is not a row, and neither is a localised-only name
+        // an undeclared group, a localised-only name and a missing Exec are not rows
         assert_eq!(
             details.actions,
             [("Manager".to_string(), "Open VM Manager".to_string())]
@@ -353,7 +502,8 @@ Exec=nautilus %i --profile \"100%% sure\"
                      Actions=Manager;\n\
                      [Desktop Action Manager]\n\
                      Name=Open VM Manager\n\
-                     Name[de]=VM Manager oeffnen\n";
+                     Name[de]=VM Manager oeffnen\n\
+                     Exec=VirtualBox\n";
 
         assert_eq!(
             details_of(entry, &["de_DE"]).actions[0].1,

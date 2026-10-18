@@ -2,15 +2,51 @@ use std::path::{Path, PathBuf};
 
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Result, Watcher};
 
-/// Watch the parent dir (atomic rename saves) AND the file (in-place writes,
-/// which a directory watch never reports); recreations arrive as create events.
+/// The paths to watch for a root: the nearest existing path, plus a file's
+/// parent (atomic rename saves, which a file watch never reports).
+pub(crate) fn root_targets(root: &Path) -> Vec<PathBuf> {
+    let Some(existing) = root
+        .ancestors()
+        .find(|path| !path.as_os_str().is_empty() && path.exists())
+    else {
+        return Vec::new();
+    };
+    let mut targets = vec![existing.to_path_buf()];
+    if existing.is_file()
+        && let Some(parent) = existing.parent()
+    {
+        targets.push(parent.to_path_buf());
+    }
+    targets
+}
+
 fn watch_targets(watcher: &mut RecommendedWatcher, path: &Path) {
-    if let Some(dir) = path.parent() {
-        let _ = watcher.watch(dir, RecursiveMode::NonRecursive);
+    for target in root_targets(path) {
+        let _ = watcher.watch(&target, RecursiveMode::NonRecursive);
     }
-    if path.exists() {
-        let _ = watcher.watch(path, RecursiveMode::NonRecursive);
+}
+
+/// Call `on_event` for every non-read event on any root's watch target; with no
+/// debounce, the handler must ignore an unchanged value.
+pub(crate) fn watch_paths<F>(paths: &[PathBuf], mut on_event: F) -> Option<RecommendedWatcher>
+where
+    F: FnMut() + Send + 'static,
+{
+    let mut watcher = notify::recommended_watcher(move |res: Result<Event>| {
+        let Ok(ev) = res else { return };
+        if matches!(ev.kind, EventKind::Access(_)) {
+            return;
+        }
+        on_event();
+    })
+    .ok()?;
+
+    for path in paths {
+        for target in root_targets(path) {
+            let _ = watcher.watch(&target, RecursiveMode::NonRecursive);
+        }
     }
+    Some(watcher)
 }
 
 /// Call `on_event` for every write to `path`; with no debounce, the handler must
@@ -36,4 +72,32 @@ where
 
     watch_targets(&mut watcher, &watch_path);
     Some(watcher)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::root_targets;
+
+    #[test]
+    fn an_existing_directory_targets_itself() {
+        let temp = tempfile::tempdir().unwrap();
+        assert_eq!(root_targets(temp.path()), vec![temp.path().to_path_buf()]);
+    }
+
+    #[test]
+    fn a_missing_root_targets_its_nearest_existing_ancestor() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing = temp.path().join("gone").join("applications");
+        assert_eq!(root_targets(&missing), vec![temp.path().to_path_buf()]);
+    }
+
+    #[test]
+    fn an_existing_file_targets_itself_and_its_parent() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("entry.desktop");
+        fs::write(&file, "").unwrap();
+        assert_eq!(root_targets(&file), vec![file, temp.path().to_path_buf()]);
+    }
 }

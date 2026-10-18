@@ -23,14 +23,19 @@ pub fn get_home() -> Result<PathBuf> {
     dirs::home_dir().context("finding the user HOME directory")
 }
 
+/// Create a directory (and parents) with the XDG spec's 0700.
+pub fn create_dir_private(dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+}
+
 /// `$XDG_CACHE_HOME/wayrun` (or `~/.cache/wayrun`), created on demand.
 pub fn cache_dir() -> Option<PathBuf> {
-    let base = env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
-        .unwrap_or_else(env::temp_dir);
-    let dir = base.join("wayrun");
-    std::fs::create_dir_all(&dir).ok()?;
+    let dir = dirs::cache_dir()?.join("wayrun");
+    create_dir_private(&dir).ok()?;
     Some(dir)
 }
 
@@ -56,7 +61,7 @@ pub fn which_in(path: impl AsRef<OsStr>, name: &str) -> Option<PathBuf> {
 /// editor's atomic save is never truncated.
 pub fn write_if_absent(path: &Path, contents: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        create_dir_private(parent)?;
     }
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -69,11 +74,12 @@ pub fn write_if_absent(path: &Path, contents: &str) -> std::io::Result<()> {
 /// after it (a `.tmp` a crash left behind) does not spell the rule its own way.
 pub fn tmp_path(path: &Path) -> PathBuf {
     let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
+    tmp.push(format!(".{}.tmp", std::process::id()));
     PathBuf::from(tmp)
 }
 
-/// Write `<path>.tmp`, then rename: a reader only ever sees a whole file.
+/// Write the pid-suffixed staging file, then rename: a reader only ever sees a
+/// whole file, and two cores never share one staging name.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     write_atomic_with(path, |file| file.write_all(bytes))
 }
@@ -94,26 +100,38 @@ pub fn write_atomic_with(
 /// Flatpak apps live in `<installation>/exports/share`, which only reaches
 /// `XDG_DATA_DIRS` from a login shell; runs before GLib caches the dirs.
 pub fn ensure_flatpak_data_dirs() {
-    let home = env::var("HOME").unwrap_or_default();
-    let dirs =
-        env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".to_string());
-    let missing: Vec<String> = [
-        format!("{home}/.local/share/flatpak/exports/share"),
-        "/var/lib/flatpak/exports/share".to_string(),
-    ]
-    .into_iter()
-    .filter(|dir| PathBuf::from(dir).is_dir() && !dirs.split(':').any(|d| d == dir))
-    .collect();
-
-    if !missing.is_empty() {
-        // SAFETY: `main` calls this before any other thread exists.
-        unsafe { env::set_var("XDG_DATA_DIRS", format!("{}:{}", missing.join(":"), dirs)) };
+    let mut dirs: Vec<String> = crate::system::xdg::data_dirs()
+        .iter()
+        .map(|dir| dir.display().to_string())
+        .collect();
+    let mut exports: Vec<String> = Vec::new();
+    if let Some(user) = crate::system::xdg::data_home() {
+        exports.push(user.join("flatpak/exports/share").display().to_string());
+    }
+    exports.push("/var/lib/flatpak/exports/share".to_string());
+    exports.retain(|dir| Path::new(dir).is_dir() && !dirs.contains(dir));
+    if exports.is_empty() {
+        return;
+    }
+    exports.append(&mut dirs);
+    // SAFETY: `main` calls this before any other thread exists.
+    unsafe {
+        env::set_var("XDG_DATA_DIRS", exports.join(":"));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_dirs_are_created_0700() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested/private");
+        create_dir_private(&path).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+    }
 
     #[test]
     fn which_in_scans_the_path_and_checks_the_exec_bit() {

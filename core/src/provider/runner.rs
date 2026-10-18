@@ -1,11 +1,12 @@
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::Result;
 use std::collections::HashSet;
 
+use crate::live::Live;
 use crate::plugin::{Match, classify_ci};
 use crate::plugin::{Meta, Plugin};
 use crate::provider::application::needs_terminal;
@@ -69,33 +70,36 @@ struct Binary {
     path: String,
 }
 
-/// Every executable on `$PATH`, first match wins, scanned once per process.
-/// Dot-containing names are skipped as library noise.
-fn binaries() -> &'static Vec<Binary> {
-    static LIST: LazyLock<Vec<Binary>> = LazyLock::new(scan_path);
-    &LIST
+/// Every executable on `$PATH`, first match wins, rescanned when a PATH
+/// directory changes. Dot-containing names are skipped as library noise.
+fn binaries() -> Arc<Vec<Binary>> {
+    static LIST: LazyLock<Live<Vec<Binary>>> = LazyLock::new(|| Live::new(path_roots));
+    LIST.get(scan_path)
+}
+
+fn path_roots() -> Vec<PathBuf> {
+    let path = std::env::var("PATH").unwrap_or_default();
+    let home = std::env::var("HOME").ok();
+    split_path(&path, home.as_deref())
+}
+
+fn split_path(path: &str, home: Option<&str>) -> Vec<PathBuf> {
+    path.split(':')
+        .filter(|raw_dir| !raw_dir.is_empty())
+        // expand a leading `~` — shells usually expand PATH at export, be lenient
+        .filter_map(|raw_dir| match raw_dir.strip_prefix("~/") {
+            Some(rest) => home.map(|h| PathBuf::from(format!("{h}/{rest}"))),
+            None => Some(PathBuf::from(raw_dir)),
+        })
+        .collect()
 }
 
 fn scan_path() -> Vec<Binary> {
-    let path = std::env::var("PATH").unwrap_or_default();
-    let home = std::env::var("HOME").ok();
-
     let mut seen: HashSet<String> = HashSet::default();
     let mut out = Vec::new();
 
-    for raw_dir in path.split(':') {
-        if raw_dir.is_empty() {
-            continue;
-        }
-        // expand a leading `~` — shells usually expand PATH at export, be lenient
-        let dir_str = match raw_dir.strip_prefix("~/") {
-            Some(rest) => home
-                .as_ref()
-                .map(|h| format!("{h}/{rest}"))
-                .unwrap_or_default(),
-            None => raw_dir.to_string(),
-        };
-        let Ok(entries) = std::fs::read_dir(Path::new(&dir_str)) else {
+    for dir in path_roots() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };
         for entry in entries.flatten() {
@@ -152,7 +156,8 @@ fn do_search(input: &str) -> Vec<ResultItem> {
 
     // The shared kind ranks first, then the shorter name, so `r cat` leads with
     // `cat`; equal lengths fall to the name, since readdir order is not stable.
-    let mut hits: Vec<(Match, &Binary)> = binaries()
+    let list = binaries();
+    let mut hits: Vec<(Match, &Binary)> = list
         .iter()
         .filter_map(|binary| classify_ci(&binary.name_lower, &query).map(|kind| (kind, binary)))
         .collect();
@@ -161,6 +166,11 @@ fn do_search(input: &str) -> Vec<ResultItem> {
             .then_with(|| a.1.name.len().cmp(&b.1.name.len()))
             .then_with(|| a.1.name.cmp(&b.1.name))
     });
+
+    if hits.is_empty() {
+        return Vec::new();
+    }
+    crate::provider::application::ensure_apps();
 
     hits.into_iter()
         .take(MAX_RESULTS)
@@ -176,11 +186,16 @@ fn row_for(binary: &Binary, args: &str) -> ResultItem {
         format!("{} {args}", binary.path)
     };
     let desktop_id = crate::provider::application::desktop_id_for_exec(&binary.name);
-    let terminal = !args.is_empty() && desktop_id.is_some_and(needs_terminal);
+    let terminal = !args.is_empty() && desktop_id.as_deref().is_some_and(needs_terminal);
     ResultItem {
         title: binary.name.clone(),
         summary: Some(run_cmd.clone()),
-        on_click: Some(action_for(desktop_id, terminal, !args.is_empty(), run_cmd)),
+        on_click: Some(action_for(
+            desktop_id.as_deref(),
+            terminal,
+            !args.is_empty(),
+            run_cmd,
+        )),
         icon: None,
         actions: Vec::new(),
     }
@@ -188,7 +203,9 @@ fn row_for(binary: &Binary, args: &str) -> ResultItem {
 
 #[cfg(test)]
 mod tests {
-    use super::{action_for, split_command};
+    use std::path::PathBuf;
+
+    use super::{action_for, split_command, split_path};
     use crate::wire::Action;
 
     #[test]
@@ -238,6 +255,30 @@ mod tests {
             Action::RunInTerminal {
                 cmd: "/usr/bin/htop".into()
             }
+        );
+    }
+
+    #[test]
+    fn splits_path_into_roots_in_order() {
+        assert_eq!(
+            split_path("/usr/bin::/bin:/home/me/bin", None),
+            vec![
+                PathBuf::from("/usr/bin"),
+                PathBuf::from("/bin"),
+                PathBuf::from("/home/me/bin")
+            ]
+        );
+    }
+
+    #[test]
+    fn expands_a_leading_home_and_drops_it_without_home() {
+        assert_eq!(
+            split_path("~/bin:/usr/bin", Some("/home/me")),
+            vec![PathBuf::from("/home/me/bin"), PathBuf::from("/usr/bin")]
+        );
+        assert_eq!(
+            split_path("~/bin:/usr/bin", None),
+            vec![PathBuf::from("/usr/bin")]
         );
     }
 

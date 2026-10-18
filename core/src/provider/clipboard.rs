@@ -6,6 +6,7 @@ use std::sync::{Arc, LazyLock};
 use crate::plugin::{Meta, Plugin};
 use crate::provider::FreshCache;
 use crate::system::icon::resolve;
+use crate::system::process::{DEADLINE, output_within};
 use crate::wire::{Action, ResultItem};
 use anyhow::Result;
 use rust_i18n::t;
@@ -42,15 +43,21 @@ impl Plugin for Clipboard {
             if query.is_empty() {
                 return Ok(vec![]);
             }
-            let Some(entries) = cached_entries().await else {
+            let Some(entries) = LIST.get(fetch_entries).await else {
                 return Ok(vec![]);
             };
-            Ok(tokio::task::spawn_blocking(move || {
-                let icon = resolve("builtin:clipboard");
-                matching_rows(&entries, &query, &icon)
-            })
-            .await
-            .unwrap_or_default())
+            Ok(rows(&query, entries).await)
+        })
+    }
+
+    fn default_view(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<ResultItem>>>> + Send + '_>> {
+        Box::pin(async move {
+            let Some(entries) = LIST.get_fresh(fetch_entries).await else {
+                return Ok(None);
+            };
+            Ok(Some(rows("", entries).await))
         })
     }
 }
@@ -72,7 +79,7 @@ impl Entry {
             title: self.title.clone(),
             summary: None,
             on_click: Some(Action::Run {
-                cmd: format!("sh -c 'cliphist decode {} | wl-copy'", self.id),
+                cmd: format!("cliphist decode {} | wl-copy", self.id),
             }),
             icon: icon.clone(),
             actions: Vec::new(),
@@ -84,16 +91,26 @@ impl Entry {
 /// serves the whole burst.
 static LIST: LazyLock<FreshCache<Entry>> = LazyLock::new(FreshCache::new);
 
-async fn cached_entries() -> Option<Arc<Vec<Entry>>> {
-    LIST.get(|| {
-        let output = Command::new("cliphist").arg("list").output().ok()?;
-        let text = String::from_utf8_lossy(&output.stdout);
-        Some(parse_entries(&text))
-    })
-    .await
+fn fetch_entries() -> Option<Vec<Entry>> {
+    let mut command = Command::new("cliphist");
+    command.arg("list");
+    let output = output_within(command, DEADLINE)?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    Some(parse_entries(&text))
 }
 
-/// The rows whose preview contains `query_lower`, capped to [`MAX_RESULTS`].
+async fn rows(query: &str, entries: Arc<Vec<Entry>>) -> Vec<ResultItem> {
+    let query = query.to_string();
+    tokio::task::spawn_blocking(move || {
+        let icon = resolve("builtin:clipboard");
+        matching_rows(&entries, &query, &icon)
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// The rows whose preview contains `query_lower`, or every one for an empty
+/// query, capped to [`MAX_RESULTS`].
 fn matching_rows(entries: &[Entry], query_lower: &str, icon: &Option<String>) -> Vec<ResultItem> {
     entries
         .iter()
@@ -113,6 +130,10 @@ fn parse_entries(raw: &str) -> Vec<Entry> {
             [id, preview] => (*id, *preview),
             _ => continue,
         };
+        // The id is interpolated into a shell line; cliphist emits digits only.
+        if id.is_empty() || !id.bytes().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
 
         entries.push(Entry {
             id: id.to_string(),
@@ -154,8 +175,16 @@ mod tests {
         let Some(Action::Run { cmd }) = row.on_click.as_ref() else {
             panic!("a clipboard row runs a command");
         };
-        assert!(cmd.contains("decode 1"));
+        assert_eq!(cmd, "cliphist decode 1 | wl-copy");
         assert_eq!(entries[1].title, "screenshot");
+    }
+
+    #[test]
+    fn a_non_numeric_id_is_skipped() {
+        let raw = "1\ttext/plain\tok\n2; touch /tmp/x\ttext/plain\tbad";
+        let entries = parse_entries(raw);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "1");
     }
 
     #[test]
@@ -164,6 +193,17 @@ mod tests {
         let entries = parse_entries(raw);
         assert_eq!(matching_rows(&entries, "fire", &None).len(), 1);
         assert_eq!(matching_rows(&entries, "xyz", &None).len(), 0);
+    }
+
+    #[test]
+    fn an_empty_query_lists_the_whole_history() {
+        let raw = "1\ttext/plain\tfirefox\n2\ttext/plain\tterminal";
+        let entries = parse_entries(raw);
+        let titles: Vec<String> = matching_rows(&entries, "", &None)
+            .into_iter()
+            .map(|item| item.title)
+            .collect();
+        assert_eq!(titles, ["firefox", "terminal"]);
     }
 
     #[tokio::test]

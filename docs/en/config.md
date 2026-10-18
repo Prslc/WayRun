@@ -1,6 +1,7 @@
 # Config
 
-`~/.config/wayrun/config.toml` holds WayRun's settings. It is generated on the
+`$XDG_CONFIG_HOME/wayrun/config.toml` (default
+`~/.config/wayrun/config.toml`) holds WayRun's settings. It is generated on the
 first run as a commented template and is watched, so an edit is picked up without
 restarting. Every key is optional: a missing file or key keeps the built-in
 default shown here.
@@ -9,7 +10,7 @@ default shown here.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `locale` | *(session locale)* | Interface language: `en` or `zh_cn`. Omitted, the launcher follows `$LC_ALL`/`$LC_MESSAGES`/`$LANG`/`$LANGUAGE`. |
+| `locale` | *(session locale)* | Interface language: `en` or `zh_cn`. Omitted, the launcher follows glib's `$LANGUAGE`/`$LC_ALL`/`$LC_MESSAGES`/`$LANG`. |
 
 Read at startup, so a change takes effect on the next launch
 (`systemctl --user restart wayrun-launcher`), and it also decides the language
@@ -21,7 +22,7 @@ and a blank value is the same as leaving the key out.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `family` | `Source Han Sans CN` | Primary shaping family, or a generic name (`serif`, `sans-serif`, `monospace`). |
+| `family` | `sans-serif` | Primary shaping family, or a generic name (`serif`, `sans-serif`, `monospace`). |
 
 Read at startup, so a change takes effect on the next launch
 (`systemctl --user restart wayrun-launcher`). Glyphs the family lacks fall back
@@ -36,8 +37,7 @@ applies live.
 
 The icon theme is optional: the panel and built-in plugin glyphs are
 built into the binary, and a row icon no theme resolves falls back to a bundled
-placeholder. `theme` beats the desktop setting. A change takes effect on the next
-launch.
+placeholder. `theme` beats the desktop setting.
 
 ## `[files]`
 

@@ -1,34 +1,13 @@
+mod config;
+mod hosts;
+
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use serde::Deserialize;
-
+use self::config::{Config, load_or_default};
+use self::hosts::HostCache;
 use crate::provider::external::HostMeta;
-
-#[derive(Deserialize, PartialEq)]
-pub struct Config {
-    pub plugins: Vec<PluginEntry>,
-}
-
-#[derive(Deserialize, PartialEq)]
-pub struct PluginEntry {
-    pub id: String,
-    pub keyword: String,
-    #[serde(default = "default_enabled")]
-    pub enabled: bool,
-    /// External JSON-RPC 2.0 host (resolved on PATH): not compiled in, a fresh
-    /// process answers its `search` per call, or a kept one when `resident`.
-    #[serde(default)]
-    pub command: Option<String>,
-    /// Keep the host process alive across calls; dropped on dismissal and
-    /// after two idle minutes.
-    #[serde(default)]
-    pub resident: bool,
-}
-
-const fn default_enabled() -> bool {
-    true
-}
 
 #[derive(Clone)]
 pub struct PendingHost {
@@ -49,69 +28,6 @@ pub(super) struct Entry {
 }
 
 pub(super) type PluginMap = std::collections::HashMap<&'static str, Box<dyn super::Plugin>>;
-
-/// A discovered host identity, keyed by `command` and stamped with the file's
-/// `(mtime, size)`: a changed host is asked again, a stale `api` never read.
-#[derive(Default, serde::Serialize, serde::Deserialize)]
-pub struct HostCache {
-    hosts: std::collections::HashMap<String, CachedHost>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct CachedHost {
-    mtime: u64,
-    size: u64,
-    metas: Vec<HostMeta>,
-}
-
-impl HostCache {
-    fn path() -> Option<std::path::PathBuf> {
-        Some(crate::system::fs::cache_dir()?.join("plugin-hosts.json"))
-    }
-
-    pub fn load() -> Self {
-        let Some(path) = Self::path() else {
-            return Self::default();
-        };
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default()
-    }
-
-    /// The cached identities for `command`, only while the file it names is
-    /// unchanged. `None` means the host must be asked.
-    pub fn fresh(&self, command: &str) -> Option<Vec<HostMeta>> {
-        let (mtime, size) = crate::provider::external::command_stamp(command)?;
-        let cached = self.hosts.get(command)?;
-        (cached.mtime == mtime && cached.size == size).then(|| cached.metas.clone())
-    }
-
-    pub fn record(&mut self, command: &str, metas: &[HostMeta]) {
-        let Some((mtime, size)) = crate::provider::external::command_stamp(command) else {
-            return;
-        };
-        self.hosts.insert(
-            command.to_string(),
-            CachedHost {
-                mtime,
-                size,
-                metas: metas.to_vec(),
-            },
-        );
-    }
-
-    pub fn save(&self) {
-        let Some(path) = Self::path() else {
-            return;
-        };
-        if let Ok(text) = serde_json::to_string(self) {
-            let _ = crate::system::fs::write_atomic(&path, text.as_bytes());
-        }
-    }
-}
-
-const DEFAULT_CONFIG: &str = include_str!("../../default-plugins.toml");
 
 /// How many external hosts may be forked at once while resolving identities.
 /// Each is a fresh interpreter, so this is the memory ceiling of the walk.
@@ -145,13 +61,14 @@ pub async fn reload() {
 
 /// Rebuild only when `plugins.toml` actually changed, so one save's several
 /// events do not re-fork every external host.
-pub async fn reload_if_changed() {
+pub async fn reload_if_changed() -> bool {
     let _guard = INIT.lock().await;
     let new_config = load_or_default();
     if REGISTRY_READY.load(Ordering::Acquire) && *CONFIG.read().await == new_config {
-        return;
+        return false;
     }
     apply(new_config).await;
+    true
 }
 
 async fn rebuild() {
@@ -167,6 +84,46 @@ async fn apply(new_config: Config) {
     crate::provider::file::index::sync_enabled(index_enabled);
     crate::provider::file::index::settings_changed();
     REGISTRY_READY.store(true, Ordering::Release);
+}
+
+/// The configured host executables, deduplicated, for the watcher.
+pub fn host_paths() -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = load_or_default()
+        .plugins
+        .iter()
+        .filter(|entry| entry.enabled)
+        .filter_map(|entry| entry.command.as_deref())
+        .filter_map(crate::provider::external::command_path)
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+/// Rebuild the registry when a host file changed, then ask only those hosts
+/// for their identity again.
+pub async fn refresh_hosts() {
+    let stale: Vec<String> = {
+        let _guard = INIT.lock().await;
+        if !REGISTRY_READY.load(Ordering::Acquire) {
+            return;
+        }
+        let config = CONFIG.read().await;
+        let cache = HostCache::load();
+        let stale: Vec<String> = config
+            .plugins
+            .iter()
+            .filter(|entry| entry.enabled)
+            .filter_map(|entry| entry.command.clone())
+            .filter(|command| cache.stale(command))
+            .collect();
+        if stale.is_empty() {
+            return;
+        }
+        *REGISTRY.write().await = build_entries(&config);
+        stale
+    };
+    resolve_pending_filtered(None, Some(&stale)).await;
 }
 
 /// Whether either provider the file index serves is among `entries`.
@@ -227,12 +184,24 @@ fn build_entries(config: &Config) -> Vec<Entry> {
 /// Ask the placeholder hosts for their identity, bounded to
 /// [`DISCOVERY_CONCURRENCY`] forks and cached; `keyword` limits the walk.
 pub(super) async fn resolve_pending(keyword: Option<&str>) {
+    resolve_pending_filtered(keyword, None).await;
+}
+
+async fn resolve_pending_filtered(keyword: Option<&str>, commands: Option<&[String]>) {
     let _guard = INIT.lock().await;
     let pending: Vec<(usize, PendingHost)> = {
         let reg = REGISTRY.read().await;
         reg.iter()
             .enumerate()
             .filter(|(_, entry)| keyword.is_none_or(|kw| entry.keyword == kw))
+            .filter(|(_, entry)| {
+                commands.is_none_or(|commands| {
+                    entry
+                        .pending
+                        .as_ref()
+                        .is_some_and(|host| commands.contains(&host.command))
+                })
+            })
             .filter_map(|(index, entry)| entry.pending.clone().map(|host| (index, host)))
             .collect()
     };
@@ -300,51 +269,6 @@ pub(super) async fn resolve_pending(keyword: Option<&str>) {
         ));
         reg[index].pending = None;
     }
-}
-
-fn load_or_default() -> Config {
-    let mut config: Config = toml::from_str(DEFAULT_CONFIG).expect("invalid default config");
-
-    if let Ok(home) = crate::system::fs::get_home() {
-        let path = home.join(".config/wayrun/plugins.toml");
-
-        ensure_default_config(&path);
-
-        if let Ok(content) = std::fs::read_to_string(&path)
-            && let Ok(user) = toml::from_str::<Config>(&content)
-        {
-            config = merge_config(config, user);
-        }
-    }
-
-    config
-}
-
-/// The shipped `plugins.toml`, written once; a watcher reload must not recreate
-/// the file an editor just replaced.
-fn ensure_default_config(path: &std::path::Path) {
-    static ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-    ONCE.get_or_init(|| {
-        let _ = crate::write_if_absent(path, DEFAULT_CONFIG);
-    });
-}
-
-/// Overlay a user config on the shipped default: known ids take the user's
-/// keyword/enabled and any host field it set; unknown ids are appended as-is.
-fn merge_config(mut base: Config, user: Config) -> Config {
-    for up in user.plugins {
-        match base.plugins.iter_mut().find(|p| p.id == up.id) {
-            Some(dp) => {
-                dp.keyword = up.keyword;
-                dp.enabled = up.enabled;
-                if up.command.is_some() {
-                    dp.command = up.command;
-                }
-            }
-            None => base.plugins.push(up),
-        }
-    }
-    base
 }
 
 /// Print the registry table (`--list-plugins`).
@@ -424,100 +348,6 @@ mod tests {
     }
 
     #[test]
-    fn user_overrides_known_ids() {
-        let base = parse(
-            r#"
-            [[plugins]]
-            id = "calculator"
-            keyword = ""
-            "#,
-        );
-        let user = parse(
-            r#"
-            [[plugins]]
-            id = "calculator"
-            keyword = "calc"
-            enabled = false
-            "#,
-        );
-        let merged = merge_config(base, user);
-        assert_eq!(merged.plugins.len(), 1);
-        assert_eq!(merged.plugins[0].keyword, "calc");
-        assert!(!merged.plugins[0].enabled);
-        assert!(merged.plugins[0].command.is_none());
-    }
-
-    #[test]
-    fn user_appends_new_external_ids() {
-        let base = parse(
-            r#"
-            [[plugins]]
-            id = "calculator"
-            keyword = ""
-            "#,
-        );
-        let user = parse(
-            r#"
-            [[plugins]]
-            id = "translate"
-            keyword = "tr"
-            command = "ext-host"
-            "#,
-        );
-        let merged = merge_config(base, user);
-        assert_eq!(merged.plugins.len(), 2);
-        let external = &merged.plugins[1];
-        assert_eq!(external.id, "translate");
-        assert_eq!(external.keyword, "tr");
-        assert_eq!(external.command.as_deref(), Some("ext-host"));
-    }
-
-    #[test]
-    fn user_command_overrides_default_command() {
-        let base = parse(
-            r#"
-            [[plugins]]
-            id = "github"
-            keyword = "g"
-            command = "old-host"
-            "#,
-        );
-        let user = parse(
-            r#"
-            [[plugins]]
-            id = "github"
-            keyword = "g"
-            command = "ext-host"
-            "#,
-        );
-        let merged = merge_config(base, user);
-        assert_eq!(merged.plugins[0].command.as_deref(), Some("ext-host"));
-        assert_eq!(merged.plugins[0].keyword, "g");
-    }
-
-    #[test]
-    fn user_omitting_command_keeps_default_command() {
-        let base = parse(
-            r#"
-            [[plugins]]
-            id = "github"
-            keyword = "g"
-            command = "ext-host"
-            "#,
-        );
-        let user = parse(
-            r#"
-            [[plugins]]
-            id = "github"
-            keyword = "gh"
-            "#,
-        );
-        let merged = merge_config(base, user);
-        assert_eq!(merged.plugins[0].command.as_deref(), Some("ext-host"));
-        assert_eq!(merged.plugins[0].keyword, "gh");
-    }
-
-    #[test]
     fn an_external_plugin_starts_on_a_placeholder_without_a_host_call() {
         let config = parse(
             r#"
@@ -532,39 +362,5 @@ mod tests {
         assert!(entries[0].pending.is_some(), "the host is not asked yet");
         // the placeholder identity is the configured id
         assert_eq!(entries[0].plugin.meta().name, "ext");
-    }
-
-    #[test]
-    fn the_host_identity_cache_goes_stale_when_the_command_changes() {
-        let dir = tempfile::tempdir().unwrap();
-        let cmd = dir.path().join("host");
-        std::fs::write(&cmd, b"x").unwrap();
-        let command = cmd.display().to_string();
-
-        let mut cache = HostCache::default();
-        let metas = vec![HostMeta {
-            id: "ext".into(),
-            name: "Ext".into(),
-            icon: String::new(),
-            ready: String::new(),
-            api: crate::wire::PLUGIN_API,
-        }];
-        cache.record(&command, &metas);
-        assert!(cache.fresh(&command).is_some());
-
-        // a changed file is a stale identity, so the host is asked again
-        std::fs::write(&cmd, b"xy").unwrap();
-        assert!(cache.fresh(&command).is_none());
-
-        // a command that no longer exists is never fresh
-        std::fs::remove_file(&cmd).unwrap();
-        assert!(cache.fresh(&command).is_none());
-    }
-
-    #[test]
-    fn a_cache_written_before_versioning_is_dropped_rather_than_read() {
-        let old = r#"{"hosts":{"/bin/x":{"mtime":1,"size":1,
-            "metas":[{"id":"ext","name":"Ext","icon":"","ready":""}]}}}"#;
-        assert!(serde_json::from_str::<HostCache>(old).is_err());
     }
 }

@@ -18,6 +18,9 @@ plugin.file.ready: 按名称或路径搜索文件
 plugin.directory.name: 目录
 plugin.directory.ready: 按路径搜索目录
 
+plugin.path.name: 路径
+plugin.path.ready: 按路径打开文件或目录
+
 plugin.runner.name: 运行命令
 plugin.runner.ready: 运行 PATH 中的可执行文件
 
@@ -41,10 +44,12 @@ action.reveal: 在文件管理器中显示
 action.terminal: 在终端中打开
 
 help.usage_default: "*（默认）"
+help.usage_keyword: "%{keyword} <关键词>"
 help.line: "%{usage} - %{ready}"
 help.line_default: "%{usage} - %{ready} · Enter: %{action}"
 
 window.untitled: 无标题
+window.workspace: "%{app} · 工作区 %{workspace}"
 
 field.placeholder: 输入以搜索…
 

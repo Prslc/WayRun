@@ -5,10 +5,10 @@ pub mod usage;
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex, PoisonError};
 
-use crate::system::fs::get_home;
+use crate::system::fs::{create_dir_private, get_home};
 
 /// Bump when the wire types change; a mismatch drops every table, since a stored
 /// `on_click` is a serialized command and cannot survive.
@@ -26,9 +26,52 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS usage (
     );";
 
 fn db_path() -> Result<PathBuf> {
-    let dir = get_home()?.join(".local/share/wayrun");
-    std::fs::create_dir_all(&dir).context("creating the wayrun data directory")?;
-    Ok(dir.join("state.db"))
+    let dir = dirs::state_dir()
+        .context("no state directory")?
+        .join("wayrun");
+    create_dir_private(&dir).context("creating the wayrun state directory")?;
+    let path = dir.join("state.db");
+    migrate_legacy_state(&path);
+    Ok(path)
+}
+
+/// Move the pre-XDG database and its WAL sidecars once, best effort.
+fn migrate_legacy_state(new: &Path) {
+    if new.exists() {
+        return;
+    }
+    let Ok(home) = get_home() else {
+        return;
+    };
+    let old = home.join(".local/share/wayrun/state.db");
+    if !old.exists() {
+        return;
+    }
+    if !move_file(&old, new) {
+        return;
+    }
+    for suffix in ["-wal", "-shm"] {
+        let from = PathBuf::from(format!("{}{suffix}", old.display()));
+        let to = PathBuf::from(format!("{}{suffix}", new.display()));
+        if from.exists() {
+            let _ = move_file(&from, &to);
+        }
+    }
+    if let Some(parent) = old.parent() {
+        let _ = std::fs::remove_dir(parent);
+    }
+}
+
+fn move_file(from: &Path, to: &Path) -> bool {
+    if std::fs::rename(from, to).is_ok() {
+        return true;
+    }
+    // `XDG_STATE_HOME` may sit on another filesystem (EXDEV).
+    if std::fs::copy(from, to).is_ok() {
+        let _ = std::fs::remove_file(from);
+        return true;
+    }
+    false
 }
 
 fn open_conn() -> Result<Connection> {

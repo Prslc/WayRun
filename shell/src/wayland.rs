@@ -332,7 +332,10 @@ impl Shell {
                     }
                 }
             }
-            BackendEvent::CoreExited => self.exit = true,
+            BackendEvent::CoreExited => {
+                eprintln!("wayrun: the core exited");
+                std::process::exit(1);
+            }
         }
         self.redraw();
     }

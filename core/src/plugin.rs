@@ -14,7 +14,9 @@ pub use rank::{
     Match, Rank, Ranked, classify, classify_bytes_confident, classify_ci, classify_ci_confident,
     classify_confident,
 };
-pub use registry::{list_plugins, print_list, reload, reload_if_changed};
+pub use registry::{
+    host_paths, list_plugins, print_list, refresh_hosts, reload, reload_if_changed,
+};
 pub use search::dispatch;
 
 pub struct Meta {

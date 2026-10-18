@@ -95,6 +95,8 @@ impl Shell {
                     self.redraw();
                     return;
                 }
+                // Completion belongs to the field, not the open panel.
+                Keysym::Tab => return,
                 // A modifier on its own is not a command. Closing here would let
                 // the Shift of a Shift+Enter undo the close it is part of.
                 _ if event.keysym.is_modifier_key() => return,
@@ -141,6 +143,14 @@ impl Shell {
             Keysym::Down => self.app.down(),
             Keysym::Page_Up => self.app.page_up(),
             Keysym::Page_Down => self.app.page_down(),
+            Keysym::Tab => {
+                if shift || control || self.app.preedit_active {
+                    redraw = false;
+                } else {
+                    edited = self.app.complete();
+                    redraw = edited;
+                }
+            }
             Keysym::space => {
                 self.app.insert(" ");
                 edited = true;

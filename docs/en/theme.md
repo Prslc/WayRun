@@ -1,6 +1,7 @@
 # Theme
 
-How WayRun is coloured, and what `~/.config/wayrun/theme.toml` controls.
+How WayRun is coloured, and what `$XDG_CONFIG_HOME/wayrun/theme.toml` (default
+`~/.config/wayrun/theme.toml`) controls.
 
 There are two layers: the system palette, which comes from DankMaterialShell, and
 the overrides in `theme.toml`. Both are watched, so an edit applies live.
@@ -25,7 +26,7 @@ light/dark or changing the wallpaper is picked up live.
 
 Without DMS the built-in dark palette is used, with `mode = "dark"`.
 
-## `~/.config/wayrun/theme.toml`
+## `$XDG_CONFIG_HOME/wayrun/theme.toml`
 
 Every section and every key is optional. An absent key keeps the default, an
 unparseable file is ignored, and out-of-range values are clamped. The file is
@@ -128,6 +129,7 @@ layerrule = blur, WayRun
 | `top_ratio` | float | `0.28` | 0–1 | Card top as a fraction of the output height. |
 | `align` | string | `center` | `left`/`center`/`right` | Horizontal anchor on the output. |
 | `max_rows` | int | `5` | 1–8 | Visible result rows. |
+| `panel_header` | float | `28.0` | ≥ 0 | Action panel header band above the actions. |
 
 An unknown `align` keeps the default.
 

@@ -357,8 +357,19 @@ fn release_font_pages(_: &FontSystem) {}
 
 #[cfg(test)]
 mod tests {
-    use super::{TextEngine, blend};
-    use cosmic_text::Weight;
+    use super::{TextEngine, blend, family_of};
+    use cosmic_text::{Family, Weight};
+
+    #[test]
+    fn generic_families_map_to_their_cosmic_variants() {
+        assert!(matches!(family_of("sans-serif"), Family::SansSerif));
+        assert!(matches!(family_of("serif"), Family::Serif));
+        assert!(matches!(family_of("monospace"), Family::Monospace));
+        assert!(matches!(
+            family_of("Noto Sans"),
+            Family::Name(name) if name == "Noto Sans"
+        ));
+    }
 
     #[test]
     fn the_same_line_is_shaped_once() {

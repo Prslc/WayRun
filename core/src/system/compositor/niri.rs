@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use super::{Compositor, Window};
+use crate::system::process::{DEADLINE, output_within};
 use rust_i18n::t;
 
 pub struct Niri;
@@ -25,10 +26,10 @@ impl Compositor for Niri {
     }
 
     fn windows(&self) -> Result<Vec<Window>> {
-        let output = std::process::Command::new("niri")
-            .args(["msg", "-j", "windows"])
-            .output()
-            .context("running `niri msg -j windows`")?;
+        let mut command = std::process::Command::new("niri");
+        command.args(["msg", "-j", "windows"]);
+        let output = output_within(command, DEADLINE)
+            .context("`niri msg -j windows` did not answer within the deadline")?;
         anyhow::ensure!(
             output.status.success(),
             "`niri msg -j windows` exited with failure"

@@ -7,6 +7,101 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-18
+
+### Added
+
+- The resident core's disk-backed caches have a lifecycle. `Source`/`Live`
+  watches the roots behind the app list, the `$PATH` scan, the icon chain and
+  the window icons, bumps an epoch when one changes, and rebuilds on the next
+  query; a synchronous consumer still reads the last snapshot without touching
+  the filesystem. An installed application, a new `$PATH` executable, a theme
+  install or a `[icon] theme` edit no longer waits for a restart. Access events
+  are ignored and a rebuild never runs inside the notify callback.
+- An external host's identity is re-resolved when its executable's
+  `(mtime, size)` stamp moves, and the configured executables are watched, so
+  editing a script updates its name, icon and ready hint live. Results were
+  already fresh: the host forks per call.
+- `c ` and `w ` list their content — the clipboard history and the open
+  windows — instead of the identity card. A default view revalidates its burst
+  cache before answering, because the shell redraws only on the next query
+  change and a stale-while-revalidate answer would leave the first show one
+  fetch behind.
+- A path query needs no keyword: `~/Project`, `/etc/hosts` or
+  `Project/WayRun` is one row for the existing path, and otherwise the typed
+  directory's entries matching the last component are listed. Only the typed
+  directory is read, the listing is capped, and an exact hit leads. `f`/`d`
+  keep their file/directory filter.
+- A plain query no provider answers lists the first `$HOME` level, one
+  `readdir`, so a partial name still finds the directory it starts with
+  without walking the home.
+- Tab completes the last `/`- or space-separated component from the visible
+  rows: it grows to the candidates' common prefix, else takes the selected
+  row, replacing only that component. It is off during IME preedit and while
+  the action panel is open.
+- A desktop entry's actions launch through GLib's
+  `g_desktop_app_info_launch_action`, so `DBusActivatable` (an action with no
+  `Exec` at all), `Path=`, `Terminal=` and the field codes are GLib's; the
+  hand-expanded `Exec` remains the fallback. Nested ids (`foo/bar.desktop`)
+  resolve.
+- Terminal actions prefer `$TERMINAL`, then `xdg-terminal-exec`, then the
+  built-in emulator table, and the action's directory becomes the helper's
+  working directory.
+- `theme.toml`'s `[layout].panel_header` sets the action panel's header band
+  height, 28 by default.
+
+### Changed
+
+- **Breaking**: `config.toml`, `plugins.toml`, `theme.toml` and the Lua plugin
+  directory now live under `$XDG_CONFIG_HOME/wayrun`, and `state.db` under
+  `$XDG_STATE_HOME/wayrun` (migrated automatically from the old location). A
+  user who sets `XDG_CONFIG_HOME` must move the three files and the plugin
+  directory there. The cache follows `dirs::cache_dir`, and the socket and its
+  lock require an absolute `$XDG_RUNTIME_DIR`; a missing value is an error, not
+  a shared `/tmp` fallback.
+- The default `[font] family` is the generic `sans-serif`, resolved by
+  cosmic-text per machine, instead of a named family.
+- The README carries measured warm and cold query latencies, with the full
+  per-provider table and the method folded into a details block.
+- Local release builds use thin LTO and the default codegen units; the
+  shipped binary keeps fat LTO and one codegen unit, set by the CI and release
+  workflows.
+- The large modules are split by concern — the surface, plugin registry, file
+  provider, icon cache, executor's terminal handling, theme config and Lua
+  host — with no behaviour change.
+
+### Fixed
+
+- The POSIX and freedesktop audit batch: a detached `sh` or `gio` no longer
+  inherits the JSON-RPC pipe, a helper is bounded by a 2 s deadline, a host
+  command resolves like `execvp`, XDG config dirs and relative data dirs are
+  honored, flatpak user exports and flat pixmaps resolve, `ShowItems` gets its
+  URI list first, an action honors `Exec`/`Path`/`Terminal`, and the cache,
+  state, config and `kv` directories are created 0700.
+- Launched children get `SIGPIPE` back to its default; an ignored disposition
+  survives exec and Rust ignores it.
+- The remaining desktop and process edge cases: nested ids resolve, an empty
+  `%i` icon is dropped, `~user` stays unresolved, sqlite temporaries are
+  per-process, a cross-device rename falls back to copy, the IPC client fails
+  on an error reply, accepts back off, the instance lock is taken before
+  Wayland, and a dead core exits 1 instead of looking like a clean dismiss.
+- Localisation follows GLib's order — `LANGUAGE` first, ignored for a C base
+  locale — and the session's original `LANGUAGE` is handed to launched apps
+  rather than the launcher's pinned UI locale.
+- The help usage placeholder and the window workspace summary are translated,
+  not inline English.
+- Program resolution checks the exec bit, as `execvp` does.
+- The fallback walk follows `user-dirs.dirs`, including localized and moved
+  Desktop/Documents/Downloads.
+- An unset, empty or separator-only `XDG_DATA_DIRS` means the spec default,
+  and the flatpak user export path is built from `$XDG_DATA_HOME`.
+- `~/.icons` precedes the system icon roots, matching the Icon Theme spec's
+  legacy location.
+- Clipboard history skips entries whose id is not numeric, and the copy
+  pipeline runs without a nested shell wrapper.
+- Path completion resolves each typed parent component case-insensitively,
+  after trying it exactly.
+
 ## [0.7.0] - 2026-10-01
 
 ### Added

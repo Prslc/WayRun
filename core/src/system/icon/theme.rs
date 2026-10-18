@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, LazyLock};
 
+use crate::live::Live;
 use crate::system::xdg;
 
 /// The row box is 22-30px, so a 48px source gives crisp downscale headroom.
@@ -204,38 +205,31 @@ fn theme_chain_from(start: &str, roots: &[PathBuf]) -> Vec<String> {
 /// walking it reads and parses nothing again.
 type Chain = Vec<(PathBuf, Option<ThemeIndex>)>;
 
-/// Chains by start theme. The parsed indexes are held for the process the way
-/// `resolve`'s cache is: the theme is fixed, and a `config.toml` or settings edit
-/// lands under a new key.
-static CHAINS: OnceLock<Mutex<HashMap<String, Arc<Chain>>>> = OnceLock::new();
+/// Chains by start theme, cleared when the icon roots or the settings change.
+static CHAINS: LazyLock<Live<HashMap<String, Arc<Chain>>>> =
+    LazyLock::new(|| Live::shared(super::theme_source()));
 
 fn chain_for(start: &str) -> Arc<Chain> {
-    let chains = CHAINS.get_or_init(|| Mutex::new(HashMap::default()));
-    let mut chains = chains.lock().unwrap_or_else(|err| err.into_inner());
-    if let Some(chain) = chains.get(start) {
-        return Arc::clone(chain);
-    }
-
-    let roots = xdg::icon_theme_dirs();
-    let built: Chain = theme_chain_from(start, &roots)
-        .into_iter()
-        .flat_map(|theme| {
-            // a theme is spread across roots; a root without it has nothing to say
-            roots.iter().filter_map(move |root| {
-                let dir = root.join(&theme);
-                dir.is_dir().then(|| {
-                    let index = std::fs::read_to_string(dir.join("index.theme"))
-                        .ok()
-                        .map(|text| parse_index(&text));
-                    (dir, index)
+    CHAINS.memoized(start, || {
+        let roots = xdg::icon_theme_dirs();
+        Arc::new(
+            theme_chain_from(start, &roots)
+                .into_iter()
+                .flat_map(|theme| {
+                    // a theme is spread across roots; a root without it has nothing to say
+                    roots.iter().filter_map(move |root| {
+                        let dir = root.join(&theme);
+                        dir.is_dir().then(|| {
+                            let index = std::fs::read_to_string(dir.join("index.theme"))
+                                .ok()
+                                .map(|text| parse_index(&text));
+                            (dir, index)
+                        })
+                    })
                 })
-            })
-        })
-        .collect();
-
-    let chain = Arc::new(built);
-    chains.insert(start.to_string(), Arc::clone(&chain));
-    chain
+                .collect(),
+        )
+    })
 }
 
 /// The theme a lookup starts from: the config's, else the desktop's, else the

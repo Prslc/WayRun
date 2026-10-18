@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::path::PathBuf;
 use std::pin::Pin;
 
 use anyhow::Result;
@@ -21,10 +22,15 @@ pub struct HostMeta {
     pub api: u32,
 }
 
+/// The executable behind `command`, when it resolves on `PATH` (or is a path).
+pub fn command_path(command: &str) -> Option<PathBuf> {
+    resolve_command(command)
+}
+
 /// `(mtime, size)` of the resolved `command`, to validate a cached identity.
 /// `None` when it cannot be resolved or stat'd, so the cache is not trusted.
 pub fn command_stamp(command: &str) -> Option<(u64, u64)> {
-    let path = resolve_command(command);
+    let path = resolve_command(command)?;
     let meta = std::fs::metadata(path).ok()?;
     let mtime = meta
         .modified()
@@ -148,17 +154,19 @@ async fn rpc_call_within(
         .spawn()
         .ok()?; // command not found -> no host
 
-    if let Some(mut stdin) = child.stdin.take() {
-        if stdin.write_all(req_str.as_bytes()).await.is_err() {
-            let _ = child.kill().await;
-            return None;
+    // The whole exchange is bounded: a host that never reads stdin cannot block
+    // the write past the deadline.
+    let exchange = async {
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(req_str.as_bytes()).await?;
+            drop(stdin); // close stdin so the host sees EOF (one-shot)
         }
-        drop(stdin); // close stdin so the host sees EOF (one-shot)
-    }
+        // `wait_with_output` drains stdout/stderr and reaps the child in one step;
+        // reading stdout then `wait()` separately can double-poll the join handle.
+        child.wait_with_output().await
+    };
 
-    // `wait_with_output` drains stdout/stderr and reaps the child in one step;
-    // reading stdout then `wait()` separately can double-poll the join handle.
-    let output = match tokio::time::timeout(limit, child.wait_with_output()).await {
+    let output = match tokio::time::timeout(limit, exchange).await {
         Ok(Ok(output)) => output,
         Ok(Err(err)) => {
             // The core has no logging crate; stderr reaches the unit's journal.
@@ -301,21 +309,10 @@ async fn query_default(
     Ok(parse_result_items(response, plugin, icon))
 }
 
-/// Resolve a plugins.toml `command` to an absolute path when it is a bare
-/// name (PATH lookup); absolute paths pass through unchanged.
-fn resolve_command(command: &str) -> String {
-    if command.contains('/') {
-        return command.to_string();
-    }
-    if let Some(path) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&path) {
-            let candidate = dir.join(command);
-            if candidate.is_file() {
-                return candidate.display().to_string();
-            }
-        }
-    }
-    command.to_string()
+/// Resolve a plugins.toml `command` the way execvp will: a name with a slash is
+/// a path; a bare name walks `$PATH`, skipping empty segments and non-executables.
+fn resolve_command(command: &str) -> Option<PathBuf> {
+    crate::system::fs::which_in(std::env::var_os("PATH").unwrap_or_default(), command)
 }
 
 fn resolve_item_icon(icon: &str, fallback: Option<String>) -> Option<String> {
@@ -325,6 +322,20 @@ fn resolve_item_icon(icon: &str, fallback: Option<String>) -> Option<String> {
 mod tests {
     use super::*;
     use crate::wire::Action;
+
+    #[test]
+    fn a_command_resolves_to_an_existing_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("host.sh");
+        std::fs::write(&script, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(command_path(script.to_str().unwrap()), Some(script.clone()));
+        assert_eq!(
+            command_path(temp.path().join("missing.sh").to_str().unwrap()),
+            None
+        );
+    }
 
     #[test]
     fn empty_icon_falls_back_to_plugin_icon() {

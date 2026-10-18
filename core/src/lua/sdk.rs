@@ -22,13 +22,10 @@ pub(super) type Scope = Rc<RefCell<Vec<PathBuf>>>;
 /// after the script is read, refused for a name the calling plugin omits.
 pub(super) type EnvScope = Rc<RefCell<HashMap<String, Vec<String>>>>;
 
-/// `<home>/.config/wayrun/plugins/<id>`, the directory a plugin reads its own
+/// `$XDG_CONFIG_HOME/wayrun/plugins/<id>`, the directory a plugin reads its own
 /// files from; the user places them, nothing here is created for the script.
 pub(super) fn plugin_dir(id: &str) -> Option<PathBuf> {
-    let dir = crate::system::fs::get_home()
-        .ok()?
-        .join(".config/wayrun/plugins");
-    Some(dir.join(id))
+    Some(crate::config::dir()?.join("plugins").join(id))
 }
 
 /// The text of `name` under the first scope root that holds it; `Ok(None)`

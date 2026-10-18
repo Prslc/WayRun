@@ -1,8 +1,5 @@
 use std::sync::OnceLock;
 
-/// The environment variables that name a locale, most specific first.
-const VARS: [&str; 4] = ["LC_ALL", "LC_MESSAGES", "LANG", "LANGUAGE"];
-
 /// The `LANGUAGE` the process started with, kept so launched apps can get it
 /// back: `init` pins the launcher's own choice there.
 static AMBIENT_LANGUAGE: OnceLock<Option<String>> = OnceLock::new();
@@ -24,7 +21,7 @@ pub fn init() {
 }
 
 /// The `LANGUAGE` the process started with; absent when the session set none.
-pub(crate) fn ambient_language() -> Option<String> {
+pub fn ambient_language() -> Option<String> {
     AMBIENT_LANGUAGE.get().cloned().flatten()
 }
 
@@ -33,13 +30,41 @@ fn resolve(configured: &str, get: impl Fn(&str) -> Option<String>) -> String {
     normalize(configured).unwrap_or_else(|| from_env(get))
 }
 
-/// The locale the session names, most specific variable first; `en` when it names none.
+/// The locale the session names, in glib's order: `LANGUAGE`, then `LC_ALL`,
+/// `LC_MESSAGES`, `LANG`; a C/POSIX base locale ignores `LANGUAGE`.
 fn from_env(get: impl Fn(&str) -> Option<String>) -> String {
-    VARS.iter()
-        .find_map(|key| get(key).filter(|value| !value.trim().is_empty()))
-        .as_deref()
+    let base = ["LC_ALL", "LC_MESSAGES", "LANG"]
+        .iter()
+        .find_map(|key| get(key).filter(|value| !value.trim().is_empty()));
+    if !base.as_deref().is_some_and(is_c_locale)
+        && let Some(language) = get("LANGUAGE").filter(|value| !value.trim().is_empty())
+    {
+        return language_stem(&language);
+    }
+    base.as_deref()
         .and_then(normalize)
         .unwrap_or_else(|| "en".to_string())
+}
+
+/// `LANGUAGE` is a colon-separated preference list; the first entry with a
+/// shipped table wins (English and Simplified Chinese), else the first entry.
+fn language_stem(raw: &str) -> String {
+    let mut first = None;
+    for entry in raw.split(':') {
+        let Some(stem) = normalize(entry) else {
+            continue;
+        };
+        if stem == "zh_cn" || stem == "en" || stem.starts_with("en_") {
+            return stem;
+        }
+        first.get_or_insert(stem);
+    }
+    first.unwrap_or_else(|| "en".to_string())
+}
+
+fn is_c_locale(raw: &str) -> bool {
+    let tag = raw.split(['.', '@']).next().unwrap_or_default().trim();
+    tag.eq_ignore_ascii_case("c") || tag.eq_ignore_ascii_case("posix")
 }
 
 /// A locale tag as a `locales/*.yml` stem: `zh_CN.UTF-8` -> `zh_cn`, `C`/`POSIX`
@@ -118,11 +143,13 @@ mod tests {
             from_env(env(&[("LC_ALL", "zh_CN.UTF-8"), ("LANG", "en_US.UTF-8")])),
             "zh_cn"
         );
+        // LANGUAGE is a gettext preference list and beats the base locale
         assert_eq!(
             from_env(env(&[("LANG", "en_US.UTF-8"), ("LANGUAGE", "zh_CN:en")])),
-            "en_us"
+            "zh_cn"
         );
-        assert_eq!(from_env(env(&[("LANGUAGE", "zh_CN:en")])), "zh_cn");
+        assert_eq!(from_env(env(&[("LANGUAGE", "fr:zh_CN")])), "zh_cn");
+        assert_eq!(from_env(env(&[("LANGUAGE", "en_US:zh_CN")])), "en_us");
         assert_eq!(
             from_env(env(&[("LC_ALL", "  "), ("LANG", "zh_CN.UTF-8")])),
             "zh_cn"
@@ -236,6 +263,15 @@ mod tests {
         assert_eq!(from_env(env(&[])), "en");
         assert_eq!(from_env(env(&[("LANG", "C")])), "en");
         assert_eq!(from_env(env(&[("LC_ALL", "POSIX")])), "en");
+        // a C base locale ignores LANGUAGE, as gettext does
+        assert_eq!(
+            from_env(env(&[("LANG", "C"), ("LANGUAGE", "zh_CN:en")])),
+            "en"
+        );
+        assert_eq!(
+            from_env(env(&[("LC_ALL", "POSIX"), ("LANGUAGE", "zh_CN")])),
+            "en"
+        );
     }
 
     #[test]

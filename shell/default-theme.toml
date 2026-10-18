@@ -21,6 +21,7 @@
 # top_ratio = 0.28           # the card's top edge, as a fraction of the output height
 # align = "center"           # horizontal anchor: left / center / right
 # max_rows = 5               # visible result rows
+# panel_header = 28.0        # action panel header band height
 
 [font]
 # size = 14.0                # interface size; roles scale by their shipped ratio

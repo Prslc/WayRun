@@ -1,4 +1,5 @@
 mod appearance;
+mod complete;
 mod cursor;
 mod edit;
 mod menu;

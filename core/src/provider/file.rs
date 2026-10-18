@@ -1,17 +1,14 @@
-use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::ffi::OsStr;
 use std::future::Future;
 use std::os::unix::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::pin::Pin;
 
 use anyhow::Result;
 use gio::prelude::FileExt;
-use walkdir::WalkDir;
 
-use crate::config::Files;
 use crate::plugin::{Meta, Plugin};
-use crate::provider::push_lowered;
 use crate::system::fs::get_home;
 use crate::system::icon::{content_type_icon, resolve};
 use crate::wire::{Action, ActionItem, ResultItem};
@@ -20,6 +17,11 @@ use rust_i18n::t;
 // The index is a detail of this provider, but the registry has to know whether
 // to keep its cache alive, so the crate may reach it.
 pub(crate) mod index;
+mod path;
+mod walk;
+
+use self::path::{exact_path, path_item};
+use self::walk::quick_search;
 
 /// The icon the system MIME database assigns to `path`.
 fn mime_icon(path: &Path) -> Option<String> {
@@ -78,7 +80,7 @@ macro_rules! search_plugin {
 
 /// A file or directory row's commands, in panel order: a terminal leads so the
 /// two ways to open sit together, then reveal in the file manager, then copy its path.
-fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
+pub(super) fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
     let Some(Action::Open { uri }) = item.on_click.as_ref() else {
         return Vec::new();
     };
@@ -138,99 +140,6 @@ search_plugin!(
     t!("plugin.directory.ready")
 );
 
-/// `file-search` cares about the name only; shallower paths break ties.
-/// `query_lower` is already lowercased.
-pub(super) fn score_name(name: &str, query_lower: &str, depth: usize) -> u32 {
-    kind_weight(name, query_lower).saturating_sub(depth as u32)
-}
-
-/// The shared kind's weight for a plain query: a scattered hit is not a row.
-fn kind_weight(name: &str, query_lower: &str) -> u32 {
-    crate::plugin::classify_ci_confident(name, query_lower).map_or(0, crate::plugin::Match::weight)
-}
-
-/// `path-search` matches when every token is somewhere on the path, but a name
-/// hit still outranks a parent-directory-only hit. All inputs are lowercased.
-pub(super) fn score_path(
-    name: &str,
-    path_lower: &str,
-    query_lower: &str,
-    tokens: &[&str],
-    depth: usize,
-) -> u32 {
-    if !tokens.iter().all(|token| path_lower.contains(*token)) {
-        return 0;
-    }
-    path_score(name, query_lower, depth)
-}
-
-/// [`score_path`] for a caller that holds the path as two lowercased halves:
-/// the directory (no trailing separator) and the leaf, never joined per entry.
-pub(super) fn score_split_path(
-    name: &str,
-    dir_lower: &str,
-    name_lower: &str,
-    query_lower: &str,
-    tokens: &[&str],
-    depth: usize,
-) -> u32 {
-    if !tokens
-        .iter()
-        .all(|token| token_on_path(dir_lower, name_lower, token))
-    {
-        return 0;
-    }
-    path_score(name, query_lower, depth)
-}
-
-/// The path-mode score once a match is known: a name hit beats a
-/// parent-directory-only hit, and shallower paths break ties.
-fn path_score(name: &str, query_lower: &str, depth: usize) -> u32 {
-    kind_weight(name, query_lower)
-        .max(PATH_ONLY)
-        .saturating_sub(depth as u32)
-}
-
-/// A hit only on a parent directory still lists the row, below any name hit.
-const PATH_ONLY: u32 = 200;
-
-/// Whether `token` occurs in `dir_lower + "/" + name_lower`: inside either
-/// half, or across the separator (`sub/deep` matching across the join).
-fn token_on_path(dir_lower: &str, name_lower: &str, token: &str) -> bool {
-    if dir_lower.contains(token) || name_lower.contains(token) {
-        return true;
-    }
-    token
-        .match_indices('/')
-        .any(|(i, _)| dir_lower.ends_with(&token[..i]) && name_lower.starts_with(&token[i + 1..]))
-}
-
-/// The path a path-like query names, before any disk check: `~` and a relative
-/// path resolve under `home`, absolute stays put; `None` without path syntax.
-fn resolve_path_query(query: &str, home: &Path) -> Option<PathBuf> {
-    if query.starts_with('~') {
-        Some(home.join(query.trim_start_matches('~').trim_start_matches('/')))
-    } else if query.starts_with('/') {
-        Some(PathBuf::from(query))
-    } else if query.contains('/') {
-        Some(home.join(query))
-    } else {
-        None
-    }
-}
-
-/// The existing path a query names, canonicalized: an absolute path is taken
-/// wherever it points; `~` and relative resolve under `$HOME`, never climbing out.
-fn exact_path(query: &str, home: &Path) -> Option<PathBuf> {
-    let absolute = query.starts_with('/');
-    let candidate = resolve_path_query(query, home)?.canonicalize().ok()?;
-    if absolute {
-        return Some(candidate);
-    }
-    let home = home.canonicalize().ok()?;
-    candidate.starts_with(home).then_some(candidate)
-}
-
 /// One walked or stat'd path as a result row. GLib builds the URI, because raw
 /// paths are invalid for spaces and non-ASCII.
 pub(super) fn entry_item(path: &Path, is_dir: bool) -> ResultItem {
@@ -260,16 +169,105 @@ pub(super) fn keep_name(name: &OsStr, exclude: &[String]) -> bool {
     !name.starts_with(b".") && !exclude.iter().any(|entry| entry.as_bytes() == name)
 }
 
-/// The quick walk's four roots: `Desktop`/`Documents`/`Downloads` are walked on
-/// their own, so skip them at depth 1 under `~` rather than twice.
-fn keep_entry(name: &str, depth: usize, exclude: &[String]) -> bool {
-    keep_name(OsStr::new(name), exclude)
-        && !(depth == 1 && matches!(name, "Desktop" | "Documents" | "Downloads"))
+/// Whether the input names a path: `~` or a separator, the same trigger `f`/`d`
+/// use for their direct-path branch and the keywordless path lookup uses.
+pub(super) fn is_path_query(query: &str) -> bool {
+    query.starts_with('~') || query.contains('/')
 }
 
-/// A walk may match thousands of entries; rank the first `MATCH_CAP` and show
-/// the best `SHOW_CAP`, so one keystroke cannot walk an unbounded tree.
-const MATCH_CAP: usize = 200;
+/// One row the keywordless path lookup offers: an existing path (`exact`), or a
+/// completion under the typed directory.
+pub(super) struct PathHit {
+    pub item: ResultItem,
+    pub exact: bool,
+}
+
+/// The rows for a path-shaped query: the existing path itself, or the typed
+/// directory's matching entries. Only that directory is read, never a walk.
+pub(super) fn path_rows(query: &str) -> Vec<PathHit> {
+    let Ok(home) = get_home() else {
+        return Vec::new();
+    };
+    path_rows_in(query, &home)
+}
+
+/// The first-level home entries a plain query names, used as the fallback when
+/// no provider answered; a path query is already the path lookup's job.
+pub(crate) fn home_matches(query: &str) -> Vec<ResultItem> {
+    let Ok(home) = get_home() else {
+        return Vec::new();
+    };
+    home_matches_in(query, &home)
+        .into_iter()
+        .map(|hit| hit.item)
+        .collect()
+}
+
+fn home_matches_in(query: &str, home: &Path) -> Vec<PathHit> {
+    let query = query.trim();
+    if query.is_empty() || is_path_query(query) {
+        return Vec::new();
+    }
+    path_rows_in(&format!("~/{query}"), home)
+}
+
+fn path_rows_in(query: &str, home: &Path) -> Vec<PathHit> {
+    let query = query.trim();
+    if !is_path_query(query) {
+        return Vec::new();
+    }
+    // An existing path with no trailing separator is the answer itself; a
+    // trailing separator, or a `.`/`..` component, asks for a listing.
+    let leaf = query.rsplit('/').next().unwrap_or(query);
+    let listing = query.ends_with('/') || leaf == "." || leaf == "..";
+    if !listing && let Some(path) = path::exact_path(query, home) {
+        let is_dir = std::fs::metadata(&path)
+            .ok()
+            .is_some_and(|meta| meta.is_dir());
+        return vec![PathHit {
+            item: entry_item(&path, is_dir),
+            exact: true,
+        }];
+    }
+    let Some(slash) = query.rfind('/') else {
+        return Vec::new();
+    };
+    let Some(dir) = path::resolve_dir(&query[..=slash], home) else {
+        return Vec::new();
+    };
+    let leaf = query[slash + 1..].to_lowercase();
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    // Keep the smallest names only, so a huge directory is one readdir pass
+    // and O(n log cap) work, not a full sort.
+    let cap = crate::provider::SHOW_CAP;
+    let mut kept: BinaryHeap<(String, std::ffi::OsString)> = BinaryHeap::with_capacity(cap + 1);
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(text) = name.to_str() else {
+            continue;
+        };
+        let lower = text.to_lowercase();
+        if (leaf.starts_with('.') || !lower.starts_with('.')) && lower.starts_with(&leaf) {
+            kept.push((lower, name));
+            if kept.len() > cap {
+                kept.pop();
+            }
+        }
+    }
+    let mut kept = kept.into_vec();
+    kept.sort_by(|a, b| a.0.cmp(&b.0));
+    kept.into_iter()
+        .map(|(_, name)| {
+            let path = dir.join(name);
+            PathHit {
+                item: entry_item(&path, path.is_dir()),
+                exact: false,
+            }
+        })
+        .collect()
+}
 
 /// `want_dir` keeps `f` to files and `d` to directories, so the two providers stay
 /// complementary; `by_name` is `f`'s name-only match; a path query matches the path.
@@ -291,7 +289,7 @@ fn do_search(query: &str, want_dir: bool, by_name: bool) -> Vec<ResultItem> {
         return vec![item];
     }
 
-    let path_mode = query.starts_with('~') || query.contains('/');
+    let path_mode = is_path_query(query);
     let name_only = by_name && !path_mode;
     let query_lower = query.to_lowercase();
 
@@ -306,96 +304,6 @@ fn do_search(query: &str, want_dir: bool, by_name: bool) -> Vec<ResultItem> {
         name_only,
         &crate::config::get().files,
     )
-}
-
-/// Fallback walk depth: levels searched from each root while nothing is indexed.
-/// Not a config key: with the index on (the default) it has no effect at all.
-const FALLBACK_DEPTH: usize = 3;
-
-/// The fallback when no index is available: the four roots, [`FALLBACK_DEPTH`] levels.
-fn quick_search(
-    home: &Path,
-    query_lower: &str,
-    want_dir: bool,
-    name_only: bool,
-    files: &Files,
-) -> Vec<ResultItem> {
-    let roots = [
-        home.join("Desktop"),
-        home.join("Documents"),
-        home.join("Downloads"),
-        home.to_path_buf(),
-    ];
-
-    let mut scored: Vec<(u32, PathBuf, bool)> = Vec::new();
-    let mut path_lower = String::new();
-    let tokens: Vec<&str> = query_lower.split_whitespace().collect();
-
-    for root in &roots {
-        if !root.exists() {
-            continue;
-        }
-
-        let walker = WalkDir::new(root)
-            .max_depth(FALLBACK_DEPTH)
-            .into_iter()
-            .filter_entry(|e| {
-                keep_entry(&e.file_name().to_string_lossy(), e.depth(), &files.exclude)
-            });
-
-        for entry in walker.filter_map(Result::ok) {
-            let ft = entry.file_type();
-            let is_dir = ft.is_dir();
-            if (!is_dir && !ft.is_file()) || is_dir != want_dir {
-                continue;
-            }
-
-            let depth = entry.depth();
-            let path = entry.into_path();
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy())
-                .unwrap_or_default();
-            // the name tier is all `f` needs; only a path query lowercases the full path
-            let score = if name_only {
-                score_name(&name, query_lower, depth)
-            } else {
-                path_lower.clear();
-                push_lowered(&mut path_lower, &path.to_string_lossy());
-                score_path(&name, &path_lower, query_lower, &tokens, depth)
-            };
-            if score == 0 {
-                continue;
-            }
-
-            scored.push((score, path, is_dir));
-
-            if scored.len() >= MATCH_CAP {
-                break;
-            }
-        }
-
-        if scored.len() >= MATCH_CAP {
-            break;
-        }
-    }
-
-    // Rows only for the survivors: `entry_item` builds a gio URI and looks up a
-    // MIME icon, work the discarded rest of `MATCH_CAP` would waste.
-    scored.sort_by_key(|a| Reverse(a.0));
-    scored.truncate(crate::provider::SHOW_CAP);
-    let rows: Vec<(u32, ResultItem)> = scored
-        .into_iter()
-        .map(|(score, path, is_dir)| (score, entry_item(&path, is_dir)))
-        .collect();
-    crate::provider::rank_results(rows, false, crate::provider::SHOW_CAP)
-}
-
-/// A stat'd path as one row, or `None` when it is not the kind this provider
-/// lists (`f` files, `d` directories).
-fn path_item(path: &Path, want_dir: bool) -> Option<ResultItem> {
-    let is_dir = std::fs::metadata(path).ok()?.is_dir();
-    (is_dir == want_dir).then(|| entry_item(path, is_dir))
 }
 
 #[cfg(test)]
@@ -416,10 +324,6 @@ mod tests {
         Some(Action::Open {
             uri: uri.to_string(),
         })
-    }
-
-    fn tokens(query: &str) -> Vec<&str> {
-        query.split_whitespace().collect()
     }
 
     /// The names a stock install skips: the shipped template's list, the one
@@ -522,125 +426,85 @@ mod tests {
     }
 
     #[test]
-    fn an_exact_name_outranks_a_longer_prefix_match() {
-        let query = "wayrun";
-        let exact = score_name("WayRun", query, 2);
-        let prefix = score_name("wayrun-x86_64-unknown-linux-gnu.zip", query, 1);
-        let contains = score_name("my-wayrun-notes.txt", query, 1);
-        assert!(exact > prefix, "{exact} > {prefix}");
-        assert!(prefix > contains, "{prefix} > {contains}");
-        assert_eq!(score_name("unrelated.txt", query, 0), 0);
+    fn only_path_syntax_reaches_the_path_lookup() {
+        assert!(is_path_query("Project/WayRun"));
+        assert!(is_path_query("~"));
+        assert!(is_path_query("~/Project"));
+        assert!(is_path_query("/etc/hosts"));
+        assert!(!is_path_query("firefox"));
+        assert!(path_rows_in("firefox", Path::new("/")).is_empty());
     }
 
     #[test]
-    fn a_path_only_hit_ranks_below_a_name_hit() {
-        let query = "wayrun";
-        let named = score_path("WayRun", "/home/u/project/wayrun", query, &tokens(query), 2);
-        let nested = score_path(
-            "core",
-            "/home/u/project/wayrun/core",
-            query,
-            &tokens(query),
-            3,
-        );
-        assert!(named > nested, "{named} > {nested}");
-        assert_eq!(
-            score_path("core", "/home/u/other/core", query, &tokens(query), 1),
-            0
-        );
+    fn a_path_query_completes_the_directory_it_names() {
+        let home = tempfile::tempdir().unwrap();
+        let project = home.path().join("Project");
+        std::fs::create_dir_all(project.join("WayRun")).unwrap();
+        std::fs::create_dir_all(project.join("Wayland")).unwrap();
+        std::fs::write(project.join("WayRun/inside.txt"), "x").unwrap();
+        std::fs::write(project.join("Other.txt"), "x").unwrap();
+        std::fs::write(project.join(".hidden"), "x").unwrap();
+
+        let titles = |query: &str| -> Vec<String> {
+            path_rows_in(query, home.path())
+                .into_iter()
+                .map(|hit| hit.item.title)
+                .collect()
+        };
+        assert_eq!(titles("Project/Way"), ["Wayland/", "WayRun/"]);
+        // the parent's case does not decide whether completion works
+        assert_eq!(titles("project/wayl"), ["Wayland/"]);
+        assert_eq!(titles("PROJECT/way"), ["Wayland/", "WayRun/"]);
+        assert_eq!(titles("project/"), ["Other.txt", "Wayland/", "WayRun/"]);
+        assert_eq!(titles("project/wayrun/"), ["inside.txt"]);
+        // a trailing separator lists everything, hidden names only on demand
+        assert_eq!(titles("Project/"), ["Other.txt", "Wayland/", "WayRun/"]);
+        assert_eq!(titles("Project/."), [".hidden"]);
+
+        // an existing path is the answer itself, not a listing
+        let exact = path_rows_in("Project/WayRun", home.path());
+        assert_eq!(exact.len(), 1);
+        assert!(exact[0].exact);
+        assert_eq!(exact[0].item.title, "WayRun/");
+
+        assert!(path_rows_in("Project/Nope", home.path()).is_empty());
     }
 
     #[test]
-    fn the_split_path_scores_the_same_as_the_joined_one() {
-        for (dir, name) in [
-            ("/home/u/project", "wayrun"),
-            ("/home/u/Project", "WayRun.zip"),
-            ("/home/u/报告", "笔记.txt"),
-            ("/home", "u"),
-        ] {
-            let joined = format!("{dir}/{name}").to_lowercase();
-            let dir_lower = dir.to_lowercase();
-            let name_lower = name.to_lowercase();
-            for query in [
-                "wayrun",
-                "u/wayrun",
-                "project/wayrun",
-                "u/pro",
-                "/wayrun",
-                "run",
-                "报告",
-                "/u",
-                "nope",
-                "u wayrun",
-                "u //wayrun",
-            ] {
-                assert_eq!(
-                    score_split_path(name, &dir_lower, &name_lower, query, &tokens(query), 1),
-                    score_path(name, &joined, query, &tokens(query), 1),
-                    "{query:?} on {joined:?}"
-                );
-            }
+    fn a_plain_query_falls_back_to_the_first_home_level() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join("Project")).unwrap();
+
+        let hits = home_matches_in("Proj", home.path());
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].item.title, "Project/");
+        assert!(!hits[0].exact);
+        // not a prefix: no completion (the app-search typo tier is not reused)
+        assert!(home_matches_in("Proe", home.path()).is_empty());
+
+        // an exact home entry is the answer itself
+        let hits = home_matches_in("Project", home.path());
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].exact);
+
+        // a path query and an empty query are the path lookup's business
+        assert!(home_matches_in("Proe/", home.path()).is_empty());
+        assert!(home_matches_in("", home.path()).is_empty());
+    }
+
+    #[test]
+    fn a_listing_is_capped_and_sorted() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join("Many");
+        std::fs::create_dir_all(&dir).unwrap();
+        for at in 0..60 {
+            std::fs::write(dir.join(format!("f{at:02}.txt")), "x").unwrap();
         }
-    }
 
-    #[test]
-    fn a_shallower_path_breaks_a_tier_tie() {
-        let query = "wayrun";
-        assert!(score_name("wayrun", query, 1) > score_name("wayrun", query, 3));
-    }
-
-    #[test]
-    fn a_path_query_resolves_under_home() {
-        let home = Path::new("/home/u");
-        assert_eq!(
-            resolve_path_query("~/Project/WayRun", home),
-            Some(PathBuf::from("/home/u/Project/WayRun"))
-        );
-        assert_eq!(
-            resolve_path_query("~", home),
-            Some(PathBuf::from("/home/u"))
-        );
-        assert_eq!(
-            resolve_path_query("/etc/hosts", home),
-            Some(PathBuf::from("/etc/hosts"))
-        );
-        assert_eq!(
-            resolve_path_query("Project/WayRun", home),
-            Some(PathBuf::from("/home/u/Project/WayRun"))
-        );
-        // a bare name is not a path query
-        assert_eq!(resolve_path_query("wayrun", home), None);
-    }
-
-    #[test]
-    fn an_absolute_path_is_allowed_outside_home_but_a_relative_escape_is_not() {
-        let home = std::env::temp_dir();
-        if Path::new("/etc/hosts").exists() {
-            let canonical = Path::new("/etc/hosts").canonicalize().unwrap();
-            assert_eq!(exact_path("/etc/hosts", &home), Some(canonical));
-            // `~` and relative paths resolve under home and cannot climb out
-            assert!(exact_path("~/../etc/hosts", &home).is_none());
-            assert!(exact_path("../../etc/hosts", &home).is_none());
-        }
-    }
-
-    #[test]
-    fn the_home_roots_are_skipped_only_under_the_home_root() {
-        let exclude = shipped_exclude();
-        // depth 1 under `~`: walked as its own root, so skip it here.
-        assert!(!keep_entry("Desktop", 1, &exclude));
-        assert!(!keep_entry("Documents", 1, &exclude));
-        assert!(!keep_entry("Downloads", 1, &exclude));
-        // a same-named dir deeper, or one directly inside a root, is kept.
-        assert!(keep_entry("Desktop", 2, &exclude));
-        assert!(keep_entry("Desktop", 0, &exclude));
-        assert!(keep_entry("Documents", 2, &exclude));
-        // build caches and dotdirs are skipped anywhere.
-        assert!(!keep_entry(".config", 1, &exclude));
-        assert!(!keep_entry("node_modules", 1, &exclude));
-        assert!(!keep_entry("target", 3, &exclude));
-        assert!(!keep_entry("__pycache__", 2, &exclude));
-        assert!(keep_entry("notes.txt", 2, &exclude));
+        let rows = path_rows_in("Many/", home.path());
+        assert_eq!(rows.len(), crate::provider::SHOW_CAP);
+        assert_eq!(rows[0].item.title, "f00.txt");
+        assert_eq!(rows.last().unwrap().item.title, "f49.txt");
     }
 
     #[test]
@@ -659,25 +523,5 @@ mod tests {
         assert!(!keep_name(OsStr::new("vendor"), &custom));
         assert!(keep_name(OsStr::new("target"), &[]));
         assert!(keep_name(OsStr::new("notes.txt"), &custom));
-    }
-
-    #[test]
-    fn the_quick_walk_stops_at_the_fallback_depth() {
-        let dir = tempfile::tempdir().unwrap();
-        let shallow = dir.path().join("Documents/a/b");
-        let deep = shallow.join("c");
-        std::fs::create_dir_all(&deep).unwrap();
-        std::fs::write(shallow.join("shallow.txt"), "x").unwrap();
-        std::fs::write(deep.join("deep.txt"), "x").unwrap();
-
-        let files = Files::default();
-        let found = quick_search(dir.path(), "shallow.txt", false, true, &files);
-        assert_eq!(found.len(), 1, "{found:?}");
-        assert_eq!(found[0].title, "shallow.txt");
-
-        assert!(
-            quick_search(dir.path(), "deep.txt", false, true, &files).is_empty(),
-            "one level past the fallback depth is out of reach"
-        );
     }
 }

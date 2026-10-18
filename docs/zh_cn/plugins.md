@@ -1,6 +1,7 @@
 # 插件
 
-`~/.config/wayrun/plugins.toml` 是插件注册表。首次运行时自动生成一份带注释的模板，并且会被
+`$XDG_CONFIG_HOME/wayrun/plugins.toml`（默认 `~/.config/wayrun/plugins.toml`）
+是插件注册表。首次运行时自动生成一份带注释的模板，并且会被
 监听，修改后无需重启即可生效。
 
 ## 条目字段
@@ -38,6 +39,7 @@ enabled = true
 | `calculator` | `""` | 行内算术。 | — |
 | `system-commands` | `""` | `lock`、`reboot`、`shutdown`、`suspend`、`logout`。 | — |
 | `app-search` | `""` | 已安装应用（desktop 条目）：名字、名字的近似拼写，以及各元数据面按各自能承载的强度参与匹配（关键字与通用名按词、描述按前缀）。 | — |
+| `path-lookup` | `""` | 路径查询（`~…`、`/…` 或包含 `/`）：存在的路径本身，或所输入目录中匹配的条目；普通查询无任何 provider 命中时，也列出 `$HOME` 第一层。 | — |
 | `runner` | `r` | 模糊匹配 `$PATH` 可执行文件；可带参数。命中已安装应用时经 GLib 启动（遵循 `Terminal=`），其余在终端中运行。 | 终端模拟器 |
 | `file-search` | `f` | 主目录下的文件，任意深度。 | — |
 | `path-search` | `d` | 主目录下的目录，任意深度。 | — |

@@ -1,0 +1,97 @@
+use std::path::PathBuf;
+
+use mlua::{Function, Table};
+
+use super::areas;
+use super::warn;
+
+pub(super) struct Plugin {
+    pub id: String,
+    pub name: String,
+    pub icon: Option<String>,
+    pub api: u32,
+    pub description: Option<String>,
+    pub env: Vec<String>,
+    pub read: Vec<PathBuf>,
+    pub search: Option<Function>,
+    pub top: Option<Function>,
+}
+
+pub(super) fn read_plugins(declared: &Table, script: &str) -> mlua::Result<Vec<Plugin>> {
+    let mut plugins = Vec::new();
+    for entry in declared.sequence_values::<Table>() {
+        let entry = entry?;
+        let id: String = entry.get("id")?;
+        // The id becomes a filesystem scope root, so it must be a plain name.
+        if id.is_empty() || id.contains('/') || id == "." || id == ".." {
+            return Err(mlua::Error::RuntimeError(format!(
+                "{script}: plugin id {id:?} is not a plain name"
+            )));
+        }
+        if plugins.iter().any(|plugin: &Plugin| plugin.id == id) {
+            return Err(mlua::Error::RuntimeError(format!(
+                "{script}: duplicate plugin id {id:?}"
+            )));
+        }
+        let name: String = entry
+            .get::<Option<String>>("name")?
+            .unwrap_or_else(|| id.clone());
+        let icon: Option<String> = entry.get("icon")?;
+        let icon = match icon {
+            Some(spec) => {
+                let kept = crate::system::icon::host_icon_spec(&spec);
+                if kept.is_none() {
+                    warn(
+                        script,
+                        &format!("plugin {id}: icon {spec:?} is not an absolute path; dropped"),
+                    );
+                }
+                kept
+            }
+            None => None,
+        };
+        let env: Vec<String> = entry.get::<Option<Vec<String>>>("env")?.unwrap_or_default();
+        for name in &env {
+            // Names are exact: a pattern would defeat the manifest's point, a
+            // plugin naming the secrets it reads.
+            if name.is_empty() || name.contains('*') {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "{script}: plugin {id}: env {name:?} is not a plain name"
+                )));
+            }
+        }
+        let mut read = Vec::new();
+        for spec in entry
+            .get::<Option<Vec<String>>>("read")?
+            .unwrap_or_default()
+        {
+            // A pattern would defeat the manifest's point, a plugin naming the
+            // areas it looks at; `expand` already refuses `..` and relatives.
+            match areas::expand(&spec) {
+                Some(path) if !spec.contains('*') => read.push(path),
+                _ => {
+                    return Err(mlua::Error::RuntimeError(format!(
+                        "{script}: plugin {id}: read {spec:?} is not a plain path"
+                    )));
+                }
+            }
+        }
+        plugins.push(Plugin {
+            id,
+            name,
+            icon,
+            api: entry.get::<Option<u32>>("api")?.unwrap_or(0),
+            description: entry.get("description")?,
+            env,
+            read,
+            search: entry.get("search")?,
+            top: entry.get("top")?,
+        });
+    }
+    if plugins.is_empty() {
+        return Err(mlua::Error::RuntimeError(format!(
+            "{script} declares no plugins"
+        )));
+    }
+    Ok(plugins)
+}

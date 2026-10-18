@@ -1,6 +1,7 @@
 # 主题
 
-WayRun 的配色方式，以及 `~/.config/wayrun/theme.toml` 控制的内容。
+WayRun 的配色方式，以及 `$XDG_CONFIG_HOME/wayrun/theme.toml`（默认
+`~/.config/wayrun/theme.toml`）控制的内容。
 
 分两层：系统调色板（来自 DankMaterialShell）与 `theme.toml` 里的覆盖。两者都被监听，
 改动实时生效。
@@ -23,7 +24,7 @@ WayRun 的配色方式，以及 `~/.config/wayrun/theme.toml` 控制的内容。
 
 没有 DMS 时使用内置深色调色板（`mode = "dark"`）。
 
-## `~/.config/wayrun/theme.toml`
+## `$XDG_CONFIG_HOME/wayrun/theme.toml`
 
 所有 section 与键均为可选。缺省键保留默认值，无法解析的文件被忽略，越界值会被 clamp。
 首次运行时会写入一份带注释的模板，因此它把可选项列在字段旁，却不会把当前默认值钉死在文件里；
@@ -110,6 +111,7 @@ layerrule = blur, WayRun
 | `top_ratio` | float | `0.28` | 0–1 | 卡片顶部占输出高度的比例。 |
 | `align` | string | `center` | `left`/`center`/`right` | 在输出上的水平锚点。 |
 | `max_rows` | int | `5` | 1–8 | 可见结果行数。 |
+| `panel_header` | float | `28.0` | ≥ 0 | 动作面板中动作上方的标题栏高度。 |
 
 `align` 无法识别时保留默认值。
 

@@ -3,8 +3,11 @@ mod papirus;
 mod theme;
 
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::path::PathBuf;
+use std::sync::{Arc, LazyLock};
 
+use crate::live::{Live, Source};
+use crate::system::xdg;
 use crate::wire::{BUILTIN_FALLBACK, BUILTIN_GLYPHS};
 
 use self::papirus::find_papirus;
@@ -17,35 +20,32 @@ pub use self::theme::warn_if_no_icon_theme;
 /// be any string, and tiny values need a bound, not an eviction order.
 const CACHE_MAX: usize = 4096;
 
-static CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
-
-fn cache() -> &'static Mutex<HashMap<String, Option<String>>> {
-    CACHE.get_or_init(|| Mutex::new(HashMap::default()))
+/// Icon themes, pixmap roots and the GTK settings that name the start theme.
+fn theme_roots() -> Vec<PathBuf> {
+    let mut roots = xdg::icon_theme_dirs();
+    roots.extend(xdg::pixmap_dirs());
+    roots.extend(xdg::icon_settings_files());
+    roots
 }
+
+static THEME_SOURCE: LazyLock<Arc<Source>> = LazyLock::new(|| Arc::new(Source::new(theme_roots)));
+
+fn theme_source() -> Arc<Source> {
+    Arc::clone(&THEME_SOURCE)
+}
+
+/// A `[icon] theme` edit arrives through the config watcher, not a watched root.
+pub fn invalidate() {
+    THEME_SOURCE.invalidate();
+}
+
+static CACHE: LazyLock<Live<HashMap<String, Option<String>>>> =
+    LazyLock::new(|| Live::shared(theme_source()).bounded(CACHE_MAX));
 
 /// A renderable icon for `name` — an absolute path, or a `builtin:` glyph the shell
 /// draws — or `None` (unknown glyphs included); cached, as a miss scans the theme space.
 pub fn resolve(name: &str) -> Option<String> {
-    if let Ok(cache) = cache().lock()
-        && let Some(cached) = cache.get(name)
-    {
-        return cached.clone();
-    }
-
-    let result = lookup(name);
-
-    if let Ok(mut cache) = cache().lock() {
-        remember(&mut cache, name, &result);
-    }
-
-    result
-}
-
-fn remember(cache: &mut HashMap<String, Option<String>>, name: &str, result: &Option<String>) {
-    if cache.len() >= CACHE_MAX {
-        cache.clear();
-    }
-    cache.insert(name.to_string(), result.clone());
+    CACHE.memoized(name, || lookup(name))
 }
 
 pub fn find_icon_spec(name: &str) -> Option<String> {
@@ -114,19 +114,6 @@ mod tests {
         assert!(resolve("builtin:definitely-not-a-glyph").is_none());
         let path = find_icon_spec("definitely-not-an-icon-xyz").unwrap();
         assert_eq!(path, "builtin:app");
-    }
-
-    #[test]
-    fn the_resolve_cache_is_bounded() {
-        let mut map = HashMap::default();
-        for at in 0..CACHE_MAX {
-            remember(&mut map, &at.to_string(), &None);
-        }
-        assert_eq!(map.len(), CACHE_MAX);
-
-        remember(&mut map, "one-over", &None);
-        assert!(map.contains_key("one-over"));
-        assert_eq!(map.len(), 1, "the map is dropped whole at capacity");
     }
 
     #[test]

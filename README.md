@@ -98,6 +98,10 @@ cargo build --release
 ln -s "$(pwd)/target/release/wayrun" ~/.local/bin/wayrun
 ```
 
+The published binaries are built with fat LTO and one codegen unit; a local
+build uses thin LTO and parallel codegen, so it compiles faster and comes out
+slightly larger.
+
 Bind a hotkey (e.g. Alt+Space) to launch the shell — the syntax is
 compositor-specific (niri and Hyprland examples are in
 [resident mode](docs/en/resident.md)):
@@ -122,6 +126,65 @@ cargo build --release                                            # niri
 cargo build --release -p wayrun-shell --no-default-features --features compositor-hyprland
 cargo build --release -p wayrun-shell --no-default-features      # no window search
 ```
+
+## Performance
+
+A resident core answers a warm query over its JSON-RPC pipe in 0.2–2 ms,
+payloads included:
+
+| Query | Rows | P50 | P95 |
+|---|---|---|---|
+| app search — `firefox` | 1 | 0.18 ms | 0.29 ms |
+| file search — `f report` | 50 | 1.88 ms | 2.03 ms |
+| directory search — `d download` | 50 | 1.10 ms | 1.31 ms |
+| path lookup — `~/` | 15 | 0.50 ms | 0.61 ms |
+
+Cold start: the first `ping` reply comes back in 10.0 ms, and a cold app
+search takes 24 ms.
+
+<details>
+<summary>Full table, cold start and method</summary>
+
+Warm steady state (3 discarded + 30 measured rounds per run, shuffled):
+
+| Provider | Query | Rows | P50 (ms) | P95 (ms) | Max (ms) |
+|---|---|---|---|---|---|
+| `ping` | — | — | 0.042 | 0.060 | 0.123 |
+| `calculator` | `2 + 3 * 4` | 1 | 0.163 | 0.290 | 0.334 |
+| `system-commands` | `reboot` | 1 | 0.189 | 0.258 | 0.276 |
+| `app-search` | `firefox` | 1 | 0.180 | 0.290 | 0.325 |
+| `runner` | `r htop` | 10 | 0.383 | 0.583 | 0.638 |
+| `file-search` | `f report` | 50 | 1.876 | 2.029 | 2.598 |
+| `path-search` | `d download` | 50 | 1.104 | 1.312 | 1.400 |
+| `path-lookup` | `~/` | 15 | 0.500 | 0.609 | 0.689 |
+| `home-fallback` | `Proj` | 1 | 0.263 | 0.345 | 0.444 |
+| `clipboard` | `c a` | 50 | 0.191 | 0.218 | 0.235 |
+| `window` | `w kitty` | 1 | 0.085 | 0.110 | 0.114 |
+
+Cold first call (a fresh `wayrun --core` per run, 3 runs, run 1 shown):
+
+| Provider | Query | Rows | Index | Wall (ms) | MaxRSS (MB) |
+|---|---|---|---|---|---|
+| `ping` | — | — | — | 10.0 | 10.4 |
+| `calculator` | `2 + 3 * 4` | 1 | — | 23.3 | 14.2 |
+| `system-commands` | `reboot` | 1 | — | 23.1 | 14.8 |
+| `app-search` | `firefox` | 1 | — | 23.6 | 14.8 |
+| `runner` | `r htop` | 10 | — | 33.6 | 15.2 |
+| `file-search` | `f report` | 50 | loaded | 57.5 | 52.8 |
+| `path-search` | `d download` | 50 | loaded | 48.7 | 40.1 |
+| `path-lookup` | `~/` | 15 | — | 23.7 | 14.7 |
+| `home-fallback` | `Proj` | 1 | — | 22.4 | 14.2 |
+| `clipboard` | `c a` | 50 | — | 33.8 | 13.2 |
+| `window` | `w kitty` | 1 | — | 24.0 | 16.5 |
+
+Measured 2026-10-18 on an AMD Ryzen 5 5500U (6c/12t, `performance` governor),
+Arch Linux, niri 26.04, release build. Warm rows are synchronous `search`
+calls against one resident `--core` over stdin/stdout; cold rows start a fresh
+process each run, timed with GNU time. The real `$HOME` is read, with a 42 MB
+file index over 111k directories and 742k files. `ping` is the harness's own
+round-trip floor, and the clipboard and window rows hit a 500 ms burst cache.
+
+</details>
 
 ## Documentation
 
