@@ -1,4 +1,5 @@
 use std::io::Read;
+use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -16,6 +17,14 @@ pub fn output_within(mut command: Command, limit: Duration) -> Option<Output> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // SAFETY: the closure runs after fork and before exec, where `signal` is
+    // async-signal-safe.
+    unsafe {
+        command.pre_exec(|| {
+            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+            Ok(())
+        });
+    }
     let mut child = command.spawn().ok()?;
 
     let (out_tx, out_rx) = mpsc::channel();
@@ -76,6 +85,15 @@ mod tests {
         let started = Instant::now();
         assert!(output_within(command, Duration::from_millis(100)).is_none());
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn a_helper_gets_the_default_sigpipe() {
+        use std::os::unix::process::ExitStatusExt;
+        let mut command = Command::new("sh");
+        command.args(["-c", "kill -s PIPE $$"]);
+        let output = output_within(command, DEADLINE).unwrap();
+        assert_eq!(output.status.signal(), Some(libc::SIGPIPE));
     }
 
     #[test]

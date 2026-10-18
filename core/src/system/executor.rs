@@ -1,4 +1,5 @@
 use gio::prelude::{AppInfoExt, AppLaunchContextExt, FileExt};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::OnceLock;
@@ -46,7 +47,21 @@ fn scoped_command(scope: bool, program: &str, args: &[String]) -> process::Comma
         Some(language) => command.env("LANGUAGE", language),
         None => command.env_remove("LANGUAGE"),
     };
+    restore_signals(&mut command);
     command
+}
+
+/// Rust ignores SIGPIPE for itself, and an ignored disposition survives exec;
+/// launched programs get the default back.
+fn restore_signals(command: &mut process::Command) {
+    // SAFETY: the closure runs after fork and before exec, where `signal` is
+    // async-signal-safe.
+    unsafe {
+        command.pre_exec(|| {
+            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+            Ok(())
+        });
+    }
 }
 
 /// [`scoped_command`] with the probe's verdict.
@@ -398,13 +413,13 @@ pub fn execute(command: &crate::wire::Action) {
 /// Write text to the Wayland clipboard via `wl-copy`, no shell. A missing
 /// `wl-copy` is a no-op.
 pub fn copy_text(text: &str) {
-    let Some(mut child) = process::Command::new("wl-copy")
+    let mut command = process::Command::new("wl-copy");
+    command
         .stdin(process::Stdio::piped())
         .stdout(process::Stdio::null())
-        .stderr(process::Stdio::null())
-        .spawn()
-        .ok()
-    else {
+        .stderr(process::Stdio::null());
+    restore_signals(&mut command);
+    let Some(mut child) = command.spawn().ok() else {
         return;
     };
     if let Some(stdin) = child.stdin.as_mut() {
@@ -421,6 +436,15 @@ mod tests {
 
     fn argv(tokens: &[&str]) -> Vec<String> {
         tokens.iter().map(|t| t.to_string()).collect()
+    }
+
+    #[test]
+    fn a_launched_program_gets_the_default_sigpipe() {
+        use std::os::unix::process::ExitStatusExt;
+        let mut command = std::process::Command::new("sh");
+        restore_signals(&mut command);
+        let status = command.args(["-c", "kill -s PIPE $$"]).status().unwrap();
+        assert_eq!(status.signal(), Some(libc::SIGPIPE));
     }
 
     #[test]
