@@ -88,6 +88,9 @@ cargo build --release
 ln -s "$(pwd)/target/release/wayrun" ~/.local/bin/wayrun
 ```
 
+正式发布的二进制以 fat LTO 和单个 codegen unit 构建；本地构建使用 thin LTO 与并行
+codegen，编译更快、体积略大。
+
 在合成器配置中绑定一个快捷键（如 `Alt+Space`）来启动即可；绑定写法因合成器而异，
 niri 与 Hyprland 的示例见[常驻模式](resident.md)：
 

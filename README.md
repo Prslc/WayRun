@@ -98,6 +98,10 @@ cargo build --release
 ln -s "$(pwd)/target/release/wayrun" ~/.local/bin/wayrun
 ```
 
+The published binaries are built with fat LTO and one codegen unit; a local
+build uses thin LTO and parallel codegen, so it compiles faster and comes out
+slightly larger.
+
 Bind a hotkey (e.g. Alt+Space) to launch the shell — the syntax is
 compositor-specific (niri and Hyprland examples are in
 [resident mode](docs/en/resident.md)):

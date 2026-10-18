@@ -25,6 +25,9 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # The shipped binary's tuning; a local release build keeps the defaults.
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1"
+  CARGO_PROFILE_RELEASE_LTO: "fat"
 
 jobs:
   ci:

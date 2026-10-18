@@ -5,6 +5,6 @@ members = ["core", "shell"]
 [profile.release]
 opt-level = 3
 strip = true
-lto = true
-codegen-units = 1
+lto = "thin"
+# Fat LTO and one codegen unit are CI env overrides; local builds stay parallel.
 panic = "abort"
