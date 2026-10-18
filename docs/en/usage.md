@@ -29,7 +29,8 @@ way; the full dependency list is in the
 A query containing `/` or starting with `~` is a **path query**: the path is
 opened directly when it exists, without a name search. `~` and a relative path
 resolve under `$HOME`; an absolute path (`/etc/hosts`) is opened wherever it
-points.
+points. Before the path exists, the typed directory's entries matching the last
+component are listed, and a trailing `/` lists the directory itself.
 
 ## Keys
 

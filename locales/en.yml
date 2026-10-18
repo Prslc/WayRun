@@ -19,6 +19,9 @@ plugin.file.ready: Search files by name or path
 plugin.directory.name: Directories
 plugin.directory.ready: Search directories by path
 
+plugin.path.name: Path
+plugin.path.ready: Open a file or directory by its path
+
 plugin.runner.name: Run Action
 plugin.runner.ready: Run an executable on PATH
 

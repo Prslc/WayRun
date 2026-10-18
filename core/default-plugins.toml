@@ -13,6 +13,10 @@ id = "app-search"
 keyword = ""
 
 [[plugins]]
+id = "path-lookup"
+keyword = ""
+
+[[plugins]]
 id = "runner"
 keyword = "r"
 enabled = true

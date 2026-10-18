@@ -18,6 +18,9 @@ plugin.file.ready: 按名称或路径搜索文件
 plugin.directory.name: 目录
 plugin.directory.ready: 按路径搜索目录
 
+plugin.path.name: 路径
+plugin.path.ready: 按路径打开文件或目录
+
 plugin.runner.name: 运行命令
 plugin.runner.ready: 运行 PATH 中的可执行文件
 

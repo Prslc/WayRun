@@ -1,3 +1,4 @@
+use std::collections::BinaryHeap;
 use std::ffi::OsStr;
 use std::future::Future;
 use std::os::unix::ffi::OsStrExt;
@@ -79,7 +80,7 @@ macro_rules! search_plugin {
 
 /// A file or directory row's commands, in panel order: a terminal leads so the
 /// two ways to open sit together, then reveal in the file manager, then copy its path.
-fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
+pub(super) fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
     let Some(Action::Open { uri }) = item.on_click.as_ref() else {
         return Vec::new();
     };
@@ -168,6 +169,86 @@ pub(super) fn keep_name(name: &OsStr, exclude: &[String]) -> bool {
     !name.starts_with(b".") && !exclude.iter().any(|entry| entry.as_bytes() == name)
 }
 
+/// Whether the input names a path: `~` or a separator, the same trigger `f`/`d`
+/// use for their direct-path branch and the keywordless path lookup uses.
+pub(super) fn is_path_query(query: &str) -> bool {
+    query.starts_with('~') || query.contains('/')
+}
+
+/// One row the keywordless path lookup offers: an existing path (`exact`), or a
+/// completion under the typed directory.
+pub(super) struct PathHit {
+    pub item: ResultItem,
+    pub exact: bool,
+}
+
+/// The rows for a path-shaped query: the existing path itself, or the typed
+/// directory's matching entries. Only that directory is read, never a walk.
+pub(super) fn path_rows(query: &str) -> Vec<PathHit> {
+    let Ok(home) = get_home() else {
+        return Vec::new();
+    };
+    path_rows_in(query, &home)
+}
+
+fn path_rows_in(query: &str, home: &Path) -> Vec<PathHit> {
+    let query = query.trim();
+    if !is_path_query(query) {
+        return Vec::new();
+    }
+    // An existing path with no trailing separator is the answer itself; a
+    // trailing separator, or a `.`/`..` component, asks for a listing.
+    let leaf = query.rsplit('/').next().unwrap_or(query);
+    let listing = query.ends_with('/') || leaf == "." || leaf == "..";
+    if !listing && let Some(path) = path::exact_path(query, home) {
+        let is_dir = std::fs::metadata(&path)
+            .ok()
+            .is_some_and(|meta| meta.is_dir());
+        return vec![PathHit {
+            item: entry_item(&path, is_dir),
+            exact: true,
+        }];
+    }
+    let Some(slash) = query.rfind('/') else {
+        return Vec::new();
+    };
+    let Some(dir) = path::resolve_path_query(&query[..=slash], home) else {
+        return Vec::new();
+    };
+    let leaf = query[slash + 1..].to_lowercase();
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    // Keep the smallest names only, so a huge directory is one readdir pass
+    // and O(n log cap) work, not a full sort.
+    let cap = crate::provider::SHOW_CAP;
+    let mut kept: BinaryHeap<(String, std::ffi::OsString)> = BinaryHeap::with_capacity(cap + 1);
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(text) = name.to_str() else {
+            continue;
+        };
+        let lower = text.to_lowercase();
+        if (leaf.starts_with('.') || !lower.starts_with('.')) && lower.starts_with(&leaf) {
+            kept.push((lower, name));
+            if kept.len() > cap {
+                kept.pop();
+            }
+        }
+    }
+    let mut kept = kept.into_vec();
+    kept.sort_by(|a, b| a.0.cmp(&b.0));
+    kept.into_iter()
+        .map(|(_, name)| {
+            let path = dir.join(name);
+            PathHit {
+                item: entry_item(&path, path.is_dir()),
+                exact: false,
+            }
+        })
+        .collect()
+}
+
 /// `want_dir` keeps `f` to files and `d` to directories, so the two providers stay
 /// complementary; `by_name` is `f`'s name-only match; a path query matches the path.
 fn do_search(query: &str, want_dir: bool, by_name: bool) -> Vec<ResultItem> {
@@ -188,7 +269,7 @@ fn do_search(query: &str, want_dir: bool, by_name: bool) -> Vec<ResultItem> {
         return vec![item];
     }
 
-    let path_mode = query.starts_with('~') || query.contains('/');
+    let path_mode = is_path_query(query);
     let name_only = by_name && !path_mode;
     let query_lower = query.to_lowercase();
 
@@ -322,6 +403,60 @@ mod tests {
     fn empty_query_matches_nothing() {
         assert!(do_search("", false, true).is_empty());
         assert!(do_search("", true, false).is_empty());
+    }
+
+    #[test]
+    fn only_path_syntax_reaches_the_path_lookup() {
+        assert!(is_path_query("Project/WayRun"));
+        assert!(is_path_query("~"));
+        assert!(is_path_query("~/Project"));
+        assert!(is_path_query("/etc/hosts"));
+        assert!(!is_path_query("firefox"));
+        assert!(path_rows_in("firefox", Path::new("/")).is_empty());
+    }
+
+    #[test]
+    fn a_path_query_completes_the_directory_it_names() {
+        let home = tempfile::tempdir().unwrap();
+        let project = home.path().join("Project");
+        std::fs::create_dir_all(project.join("WayRun")).unwrap();
+        std::fs::create_dir_all(project.join("Wayland")).unwrap();
+        std::fs::write(project.join("Other.txt"), "x").unwrap();
+        std::fs::write(project.join(".hidden"), "x").unwrap();
+
+        let titles = |query: &str| -> Vec<String> {
+            path_rows_in(query, home.path())
+                .into_iter()
+                .map(|hit| hit.item.title)
+                .collect()
+        };
+        assert_eq!(titles("Project/Way"), ["Wayland/", "WayRun/"]);
+        // a trailing separator lists everything, hidden names only on demand
+        assert_eq!(titles("Project/"), ["Other.txt", "Wayland/", "WayRun/"]);
+        assert_eq!(titles("Project/."), [".hidden"]);
+
+        // an existing path is the answer itself, not a listing
+        let exact = path_rows_in("Project/WayRun", home.path());
+        assert_eq!(exact.len(), 1);
+        assert!(exact[0].exact);
+        assert_eq!(exact[0].item.title, "WayRun/");
+
+        assert!(path_rows_in("Project/Nope", home.path()).is_empty());
+    }
+
+    #[test]
+    fn a_listing_is_capped_and_sorted() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join("Many");
+        std::fs::create_dir_all(&dir).unwrap();
+        for at in 0..60 {
+            std::fs::write(dir.join(format!("f{at:02}.txt")), "x").unwrap();
+        }
+
+        let rows = path_rows_in("Many/", home.path());
+        assert_eq!(rows.len(), crate::provider::SHOW_CAP);
+        assert_eq!(rows[0].item.title, "f00.txt");
+        assert_eq!(rows.last().unwrap().item.title, "f49.txt");
     }
 
     #[test]

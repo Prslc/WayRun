@@ -3,6 +3,7 @@ pub mod calculator;
 pub mod clipboard;
 pub mod external;
 pub mod file;
+pub mod path;
 pub(crate) mod resident;
 pub mod runner;
 pub mod system_commands;
@@ -155,6 +156,7 @@ pub fn plugin_map() -> HashMap<&'static str, Box<dyn Plugin>> {
     m.insert("app-search", Box::new(application::AppSearch::new()));
     m.insert("file-search", Box::new(file::FileSearch::new()));
     m.insert("path-search", Box::new(file::PathSearch::new()));
+    m.insert("path-lookup", Box::new(path::PathLookup::new()));
     m.insert("clipboard", Box::new(clipboard::Clipboard::new()));
     m.insert(
         "system-commands",
