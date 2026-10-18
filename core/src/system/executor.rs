@@ -149,7 +149,7 @@ pub fn launch_app(desktop_id: &str) {
 }
 
 /// A launch context that hands the app the session's LANGUAGE, not the UI pin.
-fn launch_context() -> gio::AppLaunchContext {
+pub(crate) fn launch_context() -> gio::AppLaunchContext {
     let context = gio::AppLaunchContext::new();
     match crate::locale::ambient_language() {
         Some(language) => context.setenv("LANGUAGE", language),
@@ -388,6 +388,7 @@ pub fn execute(command: &crate::wire::Action) {
         } => {
             crate::system::desktop_action::launch(desktop_id, action_id);
         }
+
         Action::Reveal { uri } => reveal(uri),
         Action::Terminal { uri } => open_terminal(uri),
         Action::Open { uri } => open_uri(uri),
