@@ -44,6 +44,7 @@ first level of `$HOME` is listed the same way.
 | `Alt+Enter` | in the panel, set the highlighted action as its plugin's default, or clear it |
 | `↑` / `↓` | move the selection |
 | `PageUp` / `PageDown` | move by a page |
+| `Tab` | complete the last word or path component from the results |
 | `Home` / `End` | move the caret to the start/end of the query |
 | `Ctrl+A` | select the whole query |
 | `Shift+←/→` | extend the selection |
