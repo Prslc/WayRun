@@ -11,7 +11,7 @@ use gio::prelude::FileExt;
 use crate::plugin::{Meta, Plugin};
 use crate::system::fs::get_home;
 use crate::system::icon::{content_type_icon, resolve};
-use crate::wire::{Action, ActionItem, Preview, ResultItem};
+use crate::wire::{Action, ActionItem, ResultItem};
 use rust_i18n::t;
 
 // The index is a detail of this provider, but the registry has to know whether
@@ -140,18 +140,6 @@ search_plugin!(
     t!("plugin.directory.ready")
 );
 
-/// A file the preview pipeline can decode; the MIME database decides what is an
-/// image, so the extension list is not ours to keep.
-fn image_preview(path: &Path, is_dir: bool) -> Option<Preview> {
-    if is_dir || !path.is_absolute() {
-        return None;
-    }
-    let (content_type, _) = gio::content_type_guess(Some(path), None);
-    content_type.starts_with("image/").then(|| Preview::Image {
-        path: path.to_string_lossy().into_owned(),
-    })
-}
-
 /// One walked or stat'd path as a result row. GLib builds the URI, because raw
 /// paths are invalid for spaces and non-ASCII.
 pub(super) fn entry_item(path: &Path, is_dir: bool) -> ResultItem {
@@ -170,7 +158,7 @@ pub(super) fn entry_item(path: &Path, is_dir: bool) -> ResultItem {
         } else {
             mime_icon(path)
         },
-        preview: image_preview(path, is_dir),
+        preview: None,
         actions: Vec::new(),
     }
 }
@@ -504,35 +492,6 @@ mod tests {
         // a path query and an empty query are the path lookup's business
         assert!(home_matches_in("Proe/", home.path()).is_empty());
         assert!(home_matches_in("", home.path()).is_empty());
-    }
-
-    #[test]
-    fn an_image_file_carries_a_preview() {
-        let dir = tempfile::tempdir().unwrap();
-        let png = dir.path().join("shot.png");
-        std::fs::write(&png, b"x").unwrap();
-        assert_eq!(
-            entry_item(&png, false).preview,
-            Some(Preview::Image {
-                path: png.to_string_lossy().into_owned()
-            })
-        );
-
-        let jpg = dir.path().join("shot.jpg");
-        assert_eq!(
-            entry_item(&jpg, false).preview,
-            Some(Preview::Image {
-                path: jpg.to_string_lossy().into_owned()
-            }),
-            "the MIME database calls a JPEG an image"
-        );
-        let text = dir.path().join("notes.txt");
-        assert_eq!(entry_item(&text, false).preview, None);
-        assert_eq!(
-            entry_item(&png, true).preview,
-            None,
-            "a directory has no preview"
-        );
     }
 
     #[test]

@@ -125,7 +125,7 @@ layerrule = blur, WayRun
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `enabled` | bool | `true` | Show the split preview column for the selected row. `false` keeps the list full width; built-in and plugin previews alike are ignored. |
+| `enabled` | bool | `true` | Show the split preview column for the selected row. `false` keeps the list full width; plugin previews are ignored. |
 
 ### `[layout]`
 

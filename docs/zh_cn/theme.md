@@ -106,7 +106,7 @@ layerrule = blur, WayRun
 
 | 键 | 类型 | 默认值 | 含义 |
 | --- | --- | --- | --- |
-| `enabled` | bool | `true` | 选中行时是否显示右侧分栏预览。`false` 时列表保持整宽，内置与插件预览都不显示。 |
+| `enabled` | bool | `true` | 选中行时是否显示右侧分栏预览。`false` 时列表保持整宽，插件预览不显示。 |
 
 ### `[layout]`
 
