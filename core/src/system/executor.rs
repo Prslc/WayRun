@@ -336,12 +336,10 @@ fn terminal_command_from(terminal: Option<&str>) -> Option<Vec<String>> {
         .map(|name| vec![name.to_string()])
 }
 
-/// Whether a bare program name resolves on `PATH`.
+/// Whether a bare program name resolves to an executable on `PATH`.
 fn program_on_path(name: &str) -> bool {
-    let Some(path) = std::env::var_os("PATH") else {
-        return false;
-    };
-    std::env::split_paths(&path).any(|dir| dir.join(name).is_file())
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    crate::system::fs::which_in(path, name).is_some()
 }
 
 /// The directory flag a known emulator needs; the rest inherit the process cwd,
