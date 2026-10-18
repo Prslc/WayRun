@@ -1,4 +1,4 @@
-use crate::config::ColorOverrides;
+use crate::config::{ColorOverrides, Mode};
 use wayrun_core::wire::ThemeConfig;
 
 /// The three base roles every surface derives from.
@@ -55,9 +55,14 @@ impl Theme {
 }
 
 const CARD_ALPHA: f32 = 0.72;
+/// A dark card sits over a blurred wallpaper: more opacity keeps the backdrop's
+/// warm patches from bleeding through.
+const CARD_ALPHA_DARK: f32 = 0.85;
 const SELECTION_ALPHA: f32 = 0.15;
 const HOVER_ALPHA: f32 = 0.08;
 const HAIRLINE_ALPHA: f32 = 0.35;
+/// A white ring at the light alpha reads as a bright edge on a dark card.
+const HAIRLINE_ALPHA_DARK: f32 = 0.12;
 const MUTED_ALPHA: f32 = 0.55;
 const SUMMARY_ALPHA: f32 = 0.7;
 const FOOTER_ALPHA: f32 = 0.5;
@@ -84,20 +89,33 @@ pub struct Surfaces {
 impl Surfaces {
     /// The surfaces derived from the theme, with `[colors].dim`'s own override
     /// on top; every other surface follows its role.
-    pub fn resolve(theme: Theme, colors: &ColorOverrides) -> Self {
-        let mut surfaces = Self::derive(theme);
+    pub fn resolve(theme: Theme, colors: &ColorOverrides, mode: Mode) -> Self {
+        let mut surfaces = Self::derive(theme, mode);
         if let Some(color) = colors.dim {
             surfaces.dim = color;
         }
         surfaces
     }
 
-    fn derive(theme: Theme) -> Self {
+    fn derive(theme: Theme, mode: Mode) -> Self {
+        let dark = mode == Mode::Dark;
         Self {
-            card: tint(theme.container, CARD_ALPHA),
+            card: tint(
+                theme.container,
+                if dark { CARD_ALPHA_DARK } else { CARD_ALPHA },
+            ),
             selection: tint(theme.primary, SELECTION_ALPHA),
             hover: tint(theme.primary, HOVER_ALPHA),
-            hairline: [255, 255, 255, alpha_u8(HAIRLINE_ALPHA)],
+            hairline: [
+                255,
+                255,
+                255,
+                alpha_u8(if dark {
+                    HAIRLINE_ALPHA_DARK
+                } else {
+                    HAIRLINE_ALPHA
+                }),
+            ],
             muted: tint(theme.fg, MUTED_ALPHA),
             summary: tint(theme.fg, SUMMARY_ALPHA),
             footer: tint(theme.fg, FOOTER_ALPHA),
@@ -221,19 +239,24 @@ mod tests {
     #[test]
     fn a_surface_derives_from_its_role_except_dim() {
         let theme = Theme::default();
-        let derived = Surfaces::resolve(theme, &ColorOverrides::default());
-        assert_eq!(derived.card, tint(theme.container, CARD_ALPHA));
-        assert_eq!(derived.muted, tint(theme.fg, MUTED_ALPHA));
-        assert_eq!(derived.accent, tint(theme.primary, ACCENT_ALPHA));
-        assert_eq!(derived.dim, DEFAULT_DIM);
+        let light = Surfaces::resolve(theme, &ColorOverrides::default(), Mode::Light);
+        assert_eq!(light.card, tint(theme.container, CARD_ALPHA));
+        assert_eq!(light.hairline[3], alpha_u8(HAIRLINE_ALPHA));
+
+        let dark = Surfaces::resolve(theme, &ColorOverrides::default(), Mode::Dark);
+        assert_eq!(dark.card, tint(theme.container, CARD_ALPHA_DARK));
+        assert_eq!(dark.hairline[3], alpha_u8(HAIRLINE_ALPHA_DARK));
+        assert_eq!(dark.muted, tint(theme.fg, MUTED_ALPHA));
+        assert_eq!(dark.accent, tint(theme.primary, ACCENT_ALPHA));
+        assert_eq!(dark.dim, DEFAULT_DIM);
 
         let colors = ColorOverrides {
             dim: parse_color("#010203cc"),
             ..ColorOverrides::default()
         };
-        let overridden = Surfaces::resolve(theme, &colors);
+        let overridden = Surfaces::resolve(theme, &colors, Mode::Dark);
         assert_eq!(overridden.dim, [1, 2, 3, 0xcc]);
         // every other surface still derives
-        assert_eq!(overridden.card, tint(theme.container, CARD_ALPHA));
+        assert_eq!(overridden.card, tint(theme.container, CARD_ALPHA_DARK));
     }
 }

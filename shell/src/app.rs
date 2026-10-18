@@ -104,7 +104,7 @@ impl State {
         let theme = Theme::default();
         let mode = Mode::default();
         let colors = appearance.colors.for_mode(mode);
-        let surfaces = Surfaces::resolve(theme, &colors);
+        let surfaces = Surfaces::resolve(theme, &colors, mode);
         let card = appearance.layout.empty_h();
         Self {
             query: String::new(),

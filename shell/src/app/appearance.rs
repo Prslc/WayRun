@@ -25,7 +25,7 @@ impl State {
     fn refresh_theme(&mut self) {
         let colors = self.appearance.colors.for_mode(self.mode);
         self.theme = Theme::overlay(self.system_theme, &colors);
-        self.surfaces = Surfaces::resolve(self.theme, &colors);
+        self.surfaces = Surfaces::resolve(self.theme, &colors, self.mode);
     }
 
     /// The backdrop dim's colour, its alpha handled by [`Self::dim_alpha`].

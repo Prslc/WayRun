@@ -50,8 +50,9 @@ An unparseable value is skipped and the default stays.
 per mode (see below).
 
 Every other surface derives from a role at a shipped alpha: the card fill is
-`container` at 0.72, the selected row's tint `primary` at 0.15, the placeholder
-and hints `fg` at 0.55, and so on. An unset key keeps following the system
+`container` at 0.72 (0.85 in dark mode) and the hairline is white at 0.35 (0.12
+in dark mode), the selected row's tint `primary` at 0.15, the placeholder and
+hints `fg` at 0.55, and so on. An unset key keeps following the system
 palette, so a matugen/DMS change still recolours the rest live; setting a key
 pins that one value.
 
