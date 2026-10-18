@@ -25,11 +25,7 @@ pub fn get_home() -> Result<PathBuf> {
 
 /// `$XDG_CACHE_HOME/wayrun` (or `~/.cache/wayrun`), created on demand.
 pub fn cache_dir() -> Option<PathBuf> {
-    let base = env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
-        .unwrap_or_else(env::temp_dir);
-    let dir = base.join("wayrun");
+    let dir = dirs::cache_dir()?.join("wayrun");
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
 }

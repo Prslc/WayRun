@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -39,17 +39,21 @@ pub static VISIBLE: AtomicBool = AtomicBool::new(false);
 const TIMEOUT: Duration = Duration::from_secs(2);
 
 /// `$XDG_RUNTIME_DIR/wayrun.sock`, which is also the single-instance guard: the
-/// daemon binds it before touching Wayland.
-pub fn socket_path() -> PathBuf {
-    let dir = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    dir.join("wayrun.sock")
+/// daemon binds it before touching Wayland. A missing value is an error, not a
+/// shared `/tmp` path.
+pub fn socket_path() -> Option<PathBuf> {
+    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from)?;
+    dir.is_absolute().then(|| dir.join("wayrun.sock"))
 }
 
 /// Bind the listener (also the single-instance guard) and spawn the accept loop.
 pub fn serve(tx: Sender<Command>) -> std::io::Result<()> {
-    let path = socket_path();
+    let Some(path) = socket_path() else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "XDG_RUNTIME_DIR is not set; the launcher socket has no safe location",
+        ));
+    };
     // Single-instance guard: a live listener means another daemon owns the
     // launcher; the lock makes the check race-free.
     lock_instance(&path)?;
@@ -82,7 +86,15 @@ static INSTANCE_LOCK: Mutex<Option<File>> = Mutex::new(None);
 
 /// Take the lock beside the socket, or refuse when another daemon holds it.
 fn lock_instance(path: &Path) -> std::io::Result<()> {
-    let file = File::create(path.with_extension("lock"))?;
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path.with_extension("lock"))?;
+    let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
     // SAFETY: `flock` takes an owned fd and a flag word; the file outlives it.
     let taken = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0;
     if !taken {
@@ -129,8 +141,12 @@ fn handle(stream: UnixStream, tx: Sender<Command>) {
 
 /// The client end: `wayrun open|close|toggle|status`.
 pub fn client(verb: &str) -> std::process::ExitCode {
-    let Ok(mut stream) = UnixStream::connect(socket_path()) else {
-        eprintln!("wayrun: no daemon listening on {}", socket_path().display());
+    let Some(path) = socket_path() else {
+        eprintln!("wayrun: XDG_RUNTIME_DIR is not set; no daemon can be reached");
+        return std::process::ExitCode::FAILURE;
+    };
+    let Ok(mut stream) = UnixStream::connect(&path) else {
+        eprintln!("wayrun: no daemon listening on {}", path.display());
         return std::process::ExitCode::FAILURE;
     };
 
@@ -151,6 +167,8 @@ pub fn client(verb: &str) -> std::process::ExitCode {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use super::{Command, lock_instance, parse_request};
 
     #[test]
@@ -160,6 +178,8 @@ mod tests {
         let path = dir.join("wayrun.sock");
 
         lock_instance(&path).unwrap();
+        let lock = std::fs::metadata(path.with_extension("lock")).unwrap();
+        assert_eq!(lock.permissions().mode() & 0o777, 0o600);
         let refused = lock_instance(&path).unwrap_err();
         assert_eq!(refused.kind(), std::io::ErrorKind::AddrInUse);
 
