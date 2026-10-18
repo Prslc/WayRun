@@ -6,8 +6,9 @@ use std::path::PathBuf;
 use std::sync::{Mutex, PoisonError};
 
 use crate::plugin::{Match, classify_bytes_confident, classify_ci_confident};
+use crate::provider::file::entry_item;
 use crate::provider::file::index::format::{Index, bloom64, bloom128, fold128, push_dir_path};
-use crate::provider::file::{entry_item, score_path, score_split_path};
+use crate::provider::file::path::{score_path, score_split_path};
 use crate::provider::{SHOW_CAP, push_lowered};
 use crate::wire::ResultItem;
 
