@@ -48,10 +48,16 @@ pub fn desktop_dirs() -> Vec<PathBuf> {
 
 /// Theme roots a named icon may live under, user first.
 pub fn icon_theme_dirs() -> Vec<PathBuf> {
-    let mut dirs = data_subdirs("icons");
-    // `~/.icons` is the Icon Theme spec's legacy user location.
+    let mut dirs = Vec::new();
+    if let Some(home) = data_home() {
+        push_unique(&mut dirs, home.join("icons"));
+    }
+    // The legacy user location, ahead of the system roots.
     if let Ok(home) = crate::system::fs::get_home() {
         push_unique(&mut dirs, home.join(".icons"));
+    }
+    for root in data_dirs() {
+        push_unique(&mut dirs, root.join("icons"));
     }
     dirs
 }
@@ -113,6 +119,20 @@ mod tests {
         let dirs = icon_theme_dirs();
         if let Some(home) = data_home() {
             assert_eq!(dirs.first(), Some(&home.join("icons")));
+        }
+        if let Ok(home) = crate::system::fs::get_home() {
+            let legacy = home.join(".icons");
+            let at = dirs
+                .iter()
+                .position(|dir| *dir == legacy)
+                .expect("legacy root");
+            let system = PathBuf::from("/usr/share/icons");
+            if let Some(system_at) = dirs.iter().position(|dir| *dir == system) {
+                assert!(
+                    at < system_at,
+                    "~/.icons precedes the system roots: {dirs:?}"
+                );
+            }
         }
         assert!(!dirs.is_empty());
     }
