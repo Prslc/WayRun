@@ -37,6 +37,11 @@ then by the row's usage count, then by entry order. A title match therefore lead
 a description match of comparable strength, while an exact keyword still beats a
 title the query only sits inside of.
 
+A provider that cannot score an item (an external host) lists its rows instead:
+they sit below every scored row and fill the remaining slots in the provider's
+own order. A keyword-less external host is bounded by a short deadline in that
+chain, so a stalled host never delays the card.
+
 ## Built-in plugins
 
 | Id | Keyword | What it searches | Needs |

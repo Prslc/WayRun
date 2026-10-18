@@ -130,6 +130,20 @@ mod tests {
     }
 
     #[test]
+    fn an_external_host_may_join_the_default_chain() {
+        let config = parse(
+            r#"
+            [[plugins]]
+            id = "translate"
+            keyword = ""
+            command = "ext-host"
+            "#,
+        );
+        assert_eq!(config.plugins[0].keyword, "");
+        assert_eq!(config.plugins[0].command.as_deref(), Some("ext-host"));
+    }
+
+    #[test]
     fn user_command_overrides_default_command() {
         let base = parse(
             r#"

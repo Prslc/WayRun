@@ -318,6 +318,18 @@ mod tests {
         assert_eq!(titles, ["scored", "first", "second"]);
     }
 
+    /// Usage reorders rows within a tier, never across the listed/scored line.
+    #[test]
+    fn usage_cannot_lift_a_listed_row_above_a_scored_one() {
+        let rows = vec![
+            (Rank::Listed(0), 0, row("plugin", "a")),
+            (Rank::title(Match::Loose), 1, row("builtin", "b")),
+        ];
+        let key = rows[0].2.on_click.as_ref().expect("clickable").key();
+        let counts = HashMap::from([(key, 100)]);
+        assert_eq!(merge(rows, &counts)[0].title, "builtin");
+    }
+
     /// The merge orders by the weight a provider computed, not by the kind band:
     /// a title word beats a description's prefix but not its exact match.
     #[test]

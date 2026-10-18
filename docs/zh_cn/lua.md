@@ -144,8 +144,9 @@ printf '{"jsonrpc":"2.0","method":"search","params":{"plugin":"<id>","text":"…
 
 ## 限制
 
-- Lua 插件必须有非空 keyword：它只应答自己的路由查询。默认链（keyword 为
-  `""`）保留给内置插件。
+- Lua 插件可以用 `keyword = ""` 加入默认链。它的行是 listed 而不是 scored，因此排在
+  所有 scored 行之后，只填补剩余槽位。默认链会给无 keyword 的宿主一个很短的期限，
+  超时就跳过本次，因此 `search` 要便宜，查询不相关时尽快返回空。
 - 行序即脚本返回的顺序；没有相关度通道。
 - 图标遵循 [plugins.md](plugins.md#外部主机) 的规则：脚本自带的文件，或
   `wayrun.icon(name)` 解析出的主题图标。

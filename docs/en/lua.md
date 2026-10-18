@@ -159,8 +159,11 @@ import raises rather than recursing.
 
 ## Limits
 
-- A Lua plugin needs a non-empty keyword: it answers its own routed queries.
-  The default chain (keyword `""`) is reserved for the built-ins.
+- A Lua plugin may join the default chain with `keyword = ""`. Its rows are
+  listed, not scored, so they rank below every scored provider row and only
+  fill the remaining slots. The default chain bounds a keyword-less host with a
+  short deadline and skips it when it overruns, so keep `search` cheap and
+  return nothing when the query is not yours.
 - Rows keep the order the script returns; there is no relevance channel.
 - Icons follow the rule in [plugins.md](plugins.md#external-hosts): a file the
   script ships, or a theme icon `wayrun.icon(name)` resolved.
