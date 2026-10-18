@@ -30,7 +30,9 @@ A query containing `/` or starting with `~` is a **path query**: the path is
 opened directly when it exists, without a name search. `~` and a relative path
 resolve under `$HOME`; an absolute path (`/etc/hosts`) is opened wherever it
 points. Before the path exists, the typed directory's entries matching the last
-component are listed, and a trailing `/` lists the directory itself.
+component are listed, and a trailing `/` lists the directory itself. When no
+provider matches a plain query, the first level of `$HOME` is listed the same
+way.
 
 ## Keys
 

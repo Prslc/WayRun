@@ -191,6 +191,26 @@ pub(super) fn path_rows(query: &str) -> Vec<PathHit> {
     path_rows_in(query, &home)
 }
 
+/// The first-level home entries a plain query names, used as the fallback when
+/// no provider answered; a path query is already the path lookup's job.
+pub(crate) fn home_matches(query: &str) -> Vec<ResultItem> {
+    let Ok(home) = get_home() else {
+        return Vec::new();
+    };
+    home_matches_in(query, &home)
+        .into_iter()
+        .map(|hit| hit.item)
+        .collect()
+}
+
+fn home_matches_in(query: &str, home: &Path) -> Vec<PathHit> {
+    let query = query.trim();
+    if query.is_empty() || is_path_query(query) {
+        return Vec::new();
+    }
+    path_rows_in(&format!("~/{query}"), home)
+}
+
 fn path_rows_in(query: &str, home: &Path) -> Vec<PathHit> {
     let query = query.trim();
     if !is_path_query(query) {
@@ -442,6 +462,28 @@ mod tests {
         assert_eq!(exact[0].item.title, "WayRun/");
 
         assert!(path_rows_in("Project/Nope", home.path()).is_empty());
+    }
+
+    #[test]
+    fn a_plain_query_falls_back_to_the_first_home_level() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join("Project")).unwrap();
+
+        let hits = home_matches_in("Proj", home.path());
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].item.title, "Project/");
+        assert!(!hits[0].exact);
+        // not a prefix: no completion (the app-search typo tier is not reused)
+        assert!(home_matches_in("Proe", home.path()).is_empty());
+
+        // an exact home entry is the answer itself
+        let hits = home_matches_in("Project", home.path());
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].exact);
+
+        // a path query and an empty query are the path lookup's business
+        assert!(home_matches_in("Proe/", home.path()).is_empty());
+        assert!(home_matches_in("", home.path()).is_empty());
     }
 
     #[test]

@@ -118,7 +118,15 @@ async fn search(input: &str) -> Vec<ResultItem> {
     else {
         return Vec::new();
     };
-    merge_ranked(rows, &keys, &counts)
+    let merged = merge_ranked(rows, &keys, &counts);
+    if !merged.is_empty() || input.trim().is_empty() {
+        return merged;
+    }
+    // No provider answered: complete the first home level, nothing deeper.
+    let query = input.to_string();
+    tokio::task::spawn_blocking(move || crate::provider::file::home_matches(&query))
+        .await
+        .unwrap_or_default()
 }
 
 /// Each row's usage key, aligned with `rows`, so the counts query and the merge

@@ -44,7 +44,7 @@ title the query only sits inside of.
 | `calculator` | `""` | Inline arithmetic. | — |
 | `system-commands` | `""` | `lock`, `reboot`, `shutdown`, `suspend`, `logout`. | — |
 | `app-search` | `""` | Installed applications (desktop entries): the name, a near-spelling of it, and each metadata surface at the strength it can carry (a keyword or generic name by word, a description by prefix). | — |
-| `path-lookup` | `""` | A path query (`~…`, `/…` or containing `/`): the existing path itself, or the typed directory's matching entries. | — |
+| `path-lookup` | `""` | A path query (`~…`, `/…` or containing `/`): the existing path itself, or the typed directory's matching entries; also the first `$HOME` level when no provider matches a plain query. | — |
 | `runner` | `r` | Fuzzy `$PATH` executables; accepts arguments. An installed app launches through GLib (honoring `Terminal=`), anything else runs in a terminal. | a terminal emulator |
 | `file-search` | `f` | Files under the home directory, at any depth. | — |
 | `path-search` | `d` | Directories under the home directory, at any depth. | — |
