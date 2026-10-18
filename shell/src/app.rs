@@ -1,3 +1,4 @@
+mod animation;
 mod appearance;
 mod complete;
 mod cursor;
@@ -15,7 +16,8 @@ use wayrun_core::wire::{Action, ResultItem};
 
 use self::menu::PanelKey;
 
-pub(crate) use self::appearance::emphasized_decelerate;
+pub(crate) use self::animation::emphasized_decelerate;
+pub use self::animation::{ROW_MOTION_MS, ROW_RISE, RowMotion};
 pub use self::cursor::{Cursor, Hover, whole_rows};
 pub use self::menu::{Menu, effective_action, marked_entry};
 
@@ -23,20 +25,6 @@ pub use self::menu::{Menu, effective_action, marked_entry};
 pub const EXIT_DELAY_MS: u64 = 150;
 /// The field's caret blink interval.
 pub const CARET_BLINK_MS: u64 = 500;
-/// A row's move or entry animation, on MD3's short4 duration.
-pub const ROW_MOTION_MS: u64 = 200;
-/// How far below its place a new row starts, in logical pixels.
-pub const ROW_RISE: f32 = 4.0;
-
-/// A row's layout motion: how far from its final place it starts (positive is
-/// below), whether it also fades in, and when the motion began.
-#[derive(Clone, Copy)]
-pub struct RowMotion {
-    pub offset: f32,
-    pub enter: bool,
-    pub started: Instant,
-}
-
 pub struct State {
     pub query: String,
     /// Caret, as a byte index into `query`, always on a char boundary.
@@ -195,10 +183,7 @@ impl State {
         self.hovered = None;
         self.dismiss_at = None;
         self.shown_at = now;
-        self.card_h = self.content_height();
-        self.card_v = 0.0;
-        self.card_target = self.card_h;
-        self.card_updated = now;
+        self.reset_height(now);
         self.contain();
         self.caret_visible = true;
         self.caret_at = now;
