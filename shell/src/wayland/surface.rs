@@ -179,30 +179,24 @@ impl Shell {
         let full = self.needs_full || animating;
         self.needs_full = false;
         {
+            let frame = self.app.frame(now);
             let Some(pixmap) = self.pixmap.as_mut() else {
                 return;
             };
-            render::draw(
-                pixmap,
-                &self.app,
-                &mut self.text,
-                &mut self.icons,
-                now,
-                full,
-            );
+            render::draw(pixmap, &frame, &mut self.text, &mut self.icons, now, full);
         }
 
         // What the frame just changed, in physical pixels: a settled repaint is
         // the card rect, spanned by the previous and current bottoms.
         let surface_size = self.app.surface;
         let scale = self.app.scale_factor();
-        let layout = self.app.appearance.layout;
+        let layout = self.app.layout();
         let top = layout.card_top(surface_size);
         let new_bottom = top + self.app.card_height();
         let damage = if full {
             Damage::FULL
         } else {
-            let base_bottom = new_bottom.max(self.app.last_card_bottom);
+            let base_bottom = new_bottom.max(self.app.presentation.last_card_bottom);
             Damage::rect(
                 (layout.card_x(surface_size) * scale).floor() as i32 - 1,
                 (top * scale).floor() as i32 - 1,
@@ -211,13 +205,14 @@ impl Shell {
             )
         };
         self.pending_damage.add(damage);
-        self.app.last_card_bottom = new_bottom;
+        self.app.presentation.last_card_bottom = new_bottom;
 
         // Capture the caret-free pixels before drawing the caret, so a blink
         // can restore them without a second frame pixmap.
         self.capture_caret_patch();
         if let Some(pixmap) = self.pixmap.as_mut() {
-            render::draw_caret(pixmap, &self.app, &mut self.text, now);
+            let frame = self.app.frame(now);
+            render::draw_caret(pixmap, &frame, &mut self.text);
         }
 
         // The blur region is double-buffered state: it must be set before the
@@ -251,7 +246,8 @@ impl Shell {
     pub(super) fn present_caret(&mut self, now: Instant) {
         self.restore_caret_patch();
         if let Some(pixmap) = self.pixmap.as_mut() {
-            render::draw_caret(pixmap, &self.app, &mut self.text, now);
+            let frame = self.app.frame(now);
+            render::draw_caret(pixmap, &frame, &mut self.text);
         }
         if let Some(patch) = self.caret_patch.as_ref() {
             self.pending_damage.add(Damage::rect(
@@ -274,7 +270,7 @@ impl Shell {
         };
         let _ = layer;
 
-        if !self.app.appearance.blur {
+        if !self.app.presentation.appearance.blur {
             // `None` clears a region set before the config disabled blur.
             if self.blur_sent.take().is_some() {
                 effect.set_blur_region(None);
@@ -286,6 +282,7 @@ impl Shell {
         let height = self.app.card_height();
         let rects = self
             .app
+            .presentation
             .frame_layout(now)
             .blur_rects(self.app.surface, height);
         let key = rects

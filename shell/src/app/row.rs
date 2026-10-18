@@ -3,7 +3,9 @@ use std::time::Instant;
 
 use wayrun_core::wire::{Action, ResultItem};
 
-use super::{ROW_RISE, RowMotion, State};
+use crate::ui::present::{ROW_RISE, RowMotion};
+
+use super::State;
 
 /// The selected row's commands: what usage records and what Enter runs.
 #[derive(Debug, Clone, PartialEq)]
@@ -59,7 +61,7 @@ impl State {
 
         // The selection resets to row 0 below, so the new window starts at 0 and
         // `index` is its screen slot; the old offset is measured from the old one.
-        let max_rows = self.appearance.layout.max_rows;
+        let max_rows = self.layout().max_rows;
         let old_first = self.cursor.first as isize;
         let old: HashMap<String, usize> = self
             .rows
@@ -97,7 +99,7 @@ impl State {
                 }
             })
             .collect();
-        if self.reduce_motion {
+        if self.presentation.reduce_motion {
             self.row_motion.fill(None);
         }
         self.rows = items;
@@ -162,7 +164,7 @@ mod tests {
     fn the_card_height_springs_towards_a_new_payload() {
         let mut state = state();
         state.query = "query".to_string();
-        state.entrance_started = true;
+        state.presentation.entrance_started = true;
         let now = std::time::Instant::now();
         let rows = |count: usize| {
             (0..count)
@@ -170,11 +172,11 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         let start = state.card_height();
-        assert_eq!(start, state.appearance.layout.empty_h());
+        assert_eq!(start, state.layout().empty_h());
 
         state.apply_results(rows(4), now);
-        let target = state.appearance.layout.content_h(4);
-        assert_eq!(state.card_target, target);
+        let target = state.layout().content_h(4);
+        assert_eq!(state.presentation.card_target, target);
         assert_eq!(state.card_height(), start, "the event itself does not jump");
 
         state.advance(now + std::time::Duration::from_millis(40));
@@ -185,8 +187,8 @@ mod tests {
         );
 
         state.apply_results(rows(1), now + std::time::Duration::from_millis(60));
-        let lower = state.appearance.layout.content_h(1);
-        assert_eq!(state.card_target, lower);
+        let lower = state.layout().content_h(1);
+        assert_eq!(state.presentation.card_target, lower);
         state.advance(now + std::time::Duration::from_secs(2));
         assert_eq!(state.card_height(), lower);
     }
@@ -195,7 +197,7 @@ mod tests {
     fn reduced_motion_settles_new_rows_at_once() {
         let mut state = state();
         state.query = "query".to_string();
-        state.reduce_motion = true;
+        state.presentation.reduce_motion = true;
         state.apply_results(
             vec![item("A", None, Some(run("a")), None)],
             std::time::Instant::now(),

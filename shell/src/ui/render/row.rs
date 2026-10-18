@@ -1,31 +1,22 @@
-use std::time::Instant;
-
 use cosmic_text::Weight;
 use tiny_skia::Pixmap;
 
-use crate::app::State;
 use crate::ui::geom;
 use crate::ui::icons::IconCache;
 use crate::ui::text::TextEngine;
+use crate::ui::view::Frame;
 
 use super::canvas::{Canvas, ENTER_GLYPH, Rect};
 
 /// The highlight shared by the result list and the action panel: a primary tint
 /// for the selected or hovered row, plus the accent bar on the selected one.
-fn draw_row_chrome(
-    canvas: &Canvas,
-    pixmap: &mut Pixmap,
-    state: &State,
-    now: Instant,
-    body: &RowBody<'_>,
-) {
+fn draw_row_chrome(canvas: &Canvas, pixmap: &mut Pixmap, frame: &Frame<'_>, body: &RowBody<'_>) {
     let rect = body.rect;
     let alpha = body.alpha;
-    let appearance = &state.appearance;
-    let layout = appearance.layout;
+    let layout = frame.layout;
     let background = match (body.selected, body.hovered) {
-        (true, _) => Some(state.fade_rgba_scaled(state.surfaces.selection, now, alpha)),
-        (false, true) => Some(state.fade_rgba_scaled(state.surfaces.hover, now, alpha)),
+        (true, _) => Some(frame.fade_rgba_scaled(frame.surfaces.selection, alpha)),
+        (false, true) => Some(frame.fade_rgba_scaled(frame.surfaces.hover, alpha)),
         (false, false) => None,
     };
     if let Some(background) = background {
@@ -42,7 +33,7 @@ fn draw_row_chrome(
                 h: geom::ACCENT_H,
             },
             layout.accent_radius(),
-            state.fade_rgba_scaled(state.surfaces.accent, now, alpha),
+            frame.fade_rgba_scaled(frame.surfaces.accent, alpha),
         );
     }
 }
@@ -68,16 +59,15 @@ pub(super) struct RowBody<'a> {
 pub(super) fn draw_row(
     canvas: &Canvas,
     pixmap: &mut Pixmap,
-    state: &State,
+    frame: &Frame<'_>,
     text: &mut TextEngine,
     icons: &mut IconCache,
-    now: Instant,
     body: &RowBody<'_>,
 ) {
-    let theme = state.theme;
-    let font = state.appearance.font;
+    let theme = frame.theme;
+    let font = frame.font;
     let rect = body.rect;
-    draw_row_chrome(canvas, pixmap, state, now, body);
+    draw_row_chrome(canvas, pixmap, frame, body);
 
     // A constant icon x, so the accent bar never shifts it.
     let icon_x = rect.x + 11.0;
@@ -89,11 +79,11 @@ pub(super) fn draw_row(
         let size = (font.icon() * canvas.scale).round() as u32;
         match body.icon_tint {
             Some(color) => {
-                let opacity = state.entrance(now) * body.alpha;
+                let opacity = frame.opacity * body.alpha;
                 icons.draw_tinted(pixmap, path, pos, size, opacity, color);
             }
             None => {
-                let opacity = state.entrance(now) * body.alpha;
+                let opacity = frame.opacity * body.alpha;
                 icons.draw(pixmap, path, pos.0, pos.1, size, opacity);
             }
         }
@@ -152,7 +142,7 @@ pub(super) fn draw_row(
     text.draw(
         pixmap,
         &title,
-        state.fade_scaled(theme.fg, 1.0, now, body.alpha),
+        frame.fade_scaled(theme.fg, 1.0, body.alpha),
         canvas.px(labels_x),
         canvas.px(labels_top),
         Some(clip),
@@ -161,7 +151,7 @@ pub(super) fn draw_row(
         text.draw(
             pixmap,
             summary,
-            state.fade_rgba_scaled(state.surfaces.summary, now, body.alpha),
+            frame.fade_rgba_scaled(frame.surfaces.summary, body.alpha),
             canvas.px(labels_x),
             canvas.px(labels_top + title_h + 2.0),
             Some(clip),
@@ -172,7 +162,7 @@ pub(super) fn draw_row(
         text.draw(
             pixmap,
             check,
-            state.fade_scaled(theme.primary, state.muted_alpha(), now, body.alpha),
+            frame.fade_scaled(theme.primary, frame.muted_alpha(), body.alpha),
             canvas.px(rect.right() - 10.0) - check.width,
             canvas.px(rect.center_y()) - check.height / 2.0,
             None,
@@ -190,7 +180,7 @@ pub(super) fn draw_row(
                 h: 6.0,
             },
             3.0,
-            state.fade_scaled(theme.primary, 1.0, now, body.alpha),
+            frame.fade_scaled(theme.primary, 1.0, body.alpha),
         );
     }
 }

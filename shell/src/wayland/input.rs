@@ -323,7 +323,7 @@ impl PointerHandler for Shell {
 
         for event in events {
             let inside_card = {
-                let layout = self.app.appearance.layout;
+                let layout = self.app.layout();
                 let (x, y) = (event.position.0 as f32, event.position.1 as f32);
                 x >= layout.card_x(self.app.surface)
                     && x <= layout.card_x(self.app.surface) + layout.card_w(self.app.surface)
@@ -358,7 +358,7 @@ impl PointerHandler for Shell {
                             .as_ref()
                             .map(|menu| (menu.cursor.first, menu.actions.len()))
                             .unwrap_or_default();
-                        if let Some(index) = self.app.appearance.layout.action_at(
+                        if let Some(index) = self.app.layout().action_at(
                             self.app.surface,
                             first,
                             count,
@@ -379,7 +379,7 @@ impl PointerHandler for Shell {
                         return;
                     }
 
-                    let row = self.app.appearance.layout.row_at(
+                    let row = self.app.layout().row_at(
                         self.app.surface,
                         self.app.cursor.first,
                         self.app.rows.len(),

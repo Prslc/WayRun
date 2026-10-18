@@ -1,12 +1,10 @@
-use std::time::Instant;
-
 use cosmic_text::Weight;
 use tiny_skia::Pixmap;
 
-use crate::app::{Hover, State, marked_entry};
 use crate::ui::geom;
 use crate::ui::icons::IconCache;
 use crate::ui::text::TextEngine;
+use crate::ui::view::{Body, Frame};
 
 use super::canvas::{Canvas, Rect};
 use super::{RowBody, draw_row};
@@ -16,24 +14,22 @@ use super::{RowBody, draw_row};
 pub(super) fn draw_actions(
     canvas: &Canvas,
     pixmap: &mut Pixmap,
-    surface: (u32, u32),
-    state: &State,
+    frame: &Frame<'_>,
     text: &mut TextEngine,
     icons: &mut IconCache,
-    now: Instant,
 ) {
-    let Some(menu) = &state.menu else {
+    let Body::Panel(panel) = &frame.body else {
         return;
     };
-    let theme = state.theme;
-    let layout = state.frame_layout(now);
-    let font = state.appearance.font;
-    let (left, width) = layout.row_band(surface);
+    let theme = frame.theme;
+    let layout = frame.layout;
+    let font = frame.font;
+    let (left, width) = layout.row_band(frame.surface);
 
-    if let Some(title) = state.menu_parent_title() {
+    if let Some(title) = panel.parent_title {
         let size = font.suggestion() * canvas.scale;
         let shaped = text.fit(title, size, Weight::BOLD, width * canvas.scale);
-        let y = layout.rows_top(surface);
+        let y = layout.rows_top(frame.surface);
         let clip = [
             canvas.px(left),
             canvas.px(y),
@@ -43,7 +39,7 @@ pub(super) fn draw_actions(
         text.draw(
             pixmap,
             &shaped,
-            state.fade(theme.primary, 0.9, now),
+            frame.fade(theme.primary, 0.9),
             canvas.px(left),
             canvas.px(y + (layout.panel_header_h - shaped.height / canvas.scale) / 2.0),
             Some(clip),
@@ -52,32 +48,31 @@ pub(super) fn draw_actions(
 
     // The dot marks the entry the row's Enter runs: the remembered default, or
     // the row's own command while none is remembered.
-    let marked = state.rows.get(menu.parent).and_then(marked_entry);
-    let top = layout.actions_top(surface);
-    for (index, action) in menu
+    let top = layout.actions_top(frame.surface);
+    for (index, action) in panel
         .actions
         .iter()
         .enumerate()
-        .skip(menu.cursor.first)
+        .skip(panel.first)
         .take(layout.max_rows)
     {
         let body = RowBody {
             rect: Rect {
                 x: left,
-                y: top + (index - menu.cursor.first) as f32 * geom::ROW_H,
+                y: top + (index - panel.first) as f32 * geom::ROW_H,
                 w: width,
                 h: geom::ROW_H,
             },
-            selected: index == menu.cursor.selected,
-            hovered: state.hovered == Some(Hover::Action(index)),
+            selected: index == panel.selected,
+            hovered: panel.hovered == Some(index),
             icon: action.icon.as_deref(),
             icon_tint: Some(theme.fg),
             title: &action.title,
             bold: false,
             summary: None,
-            default_marker: marked == Some(index),
+            default_marker: panel.marked == Some(index),
             alpha: 1.0,
         };
-        draw_row(canvas, pixmap, state, text, icons, now, &body);
+        draw_row(canvas, pixmap, frame, text, icons, &body);
     }
 }

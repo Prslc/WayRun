@@ -1,27 +1,20 @@
 use std::sync::OnceLock;
-use std::time::Instant;
 
 use cosmic_text::Weight;
 use rust_i18n::t;
 use tiny_skia::Pixmap;
 
-use crate::app::State;
 use crate::ui::text::TextEngine;
+use crate::ui::view::Frame;
 
 use super::canvas::{Canvas, Rect, TEXT_INSET};
 
-pub(super) fn draw_magnifier(
-    canvas: &Canvas,
-    pixmap: &mut Pixmap,
-    field: Rect,
-    state: &State,
-    now: Instant,
-) {
+pub(super) fn draw_magnifier(canvas: &Canvas, pixmap: &mut Pixmap, field: Rect, frame: &Frame<'_>) {
     // A 2px circle of radius 6.2 at (9, 9) with a handle to (19, 19) in a 22×22
     // box, drawn rather than loaded.
     let x = field.x + 14.0;
     let y = field.center_y() - 11.0;
-    let color = state.fade_rgba(state.surfaces.muted, now);
+    let color = frame.fade_rgba(frame.surfaces.muted);
 
     canvas.stroke_circle(pixmap, (x + 9.0, y + 9.0), 6.2, 2.0, color);
     canvas.stroke_line(
@@ -55,14 +48,13 @@ pub(super) fn draw_query(
     canvas: &Canvas,
     pixmap: &mut Pixmap,
     field: Rect,
-    state: &State,
+    frame: &Frame<'_>,
     text: &mut TextEngine,
-    now: Instant,
 ) {
     let area = text_area(field);
     let (x, width) = area;
-    let size = state.appearance.font.query() * canvas.scale;
-    let fg = state.theme.fg;
+    let size = frame.font.query() * canvas.scale;
+    let fg = frame.theme.fg;
     let clip = [
         canvas.px(x),
         canvas.px(field.y),
@@ -70,14 +62,14 @@ pub(super) fn draw_query(
         canvas.px(field.h),
     ];
 
-    let placeholder = state.query.is_empty() && state.preedit.is_none();
+    let placeholder = frame.field.query.is_empty() && frame.field.preedit.is_none();
     if placeholder {
         let shaped = text.shape(placeholder_text(), size, Weight::MEDIUM);
         let top = field.center_y() - shaped.height / (2.0 * canvas.scale);
         text.draw(
             pixmap,
             &shaped,
-            state.fade_rgba(state.surfaces.muted, now),
+            frame.fade_rgba(frame.surfaces.muted),
             canvas.px(x),
             canvas.px(top),
             Some(clip),
@@ -85,16 +77,17 @@ pub(super) fn draw_query(
         return;
     }
 
-    let shaped = text.shape(&state.query, size, Weight::MEDIUM);
+    let query = frame.field.query;
+    let shaped = text.shape(query, size, Weight::MEDIUM);
     let top = field.center_y() - shaped.height / (2.0 * canvas.scale);
     // the drawn caret and the rectangle the IME is told about are one geometry
-    let (caret, shift) = caret_box(state, text, now);
+    let (caret, shift) = caret_box(frame, text);
 
     // A keyboard selection sits under the glyphs at the accent's 35%, clipped to
     // the same text area.
-    if let Some((start, end)) = state.selection() {
-        let from = text.shape(&state.query[..start], size, Weight::MEDIUM);
-        let to = text.shape(&state.query[..end], size, Weight::MEDIUM);
+    if let Some((start, end)) = frame.field.selection {
+        let from = text.shape(&query[..start], size, Weight::MEDIUM);
+        let to = text.shape(&query[..end], size, Weight::MEDIUM);
         let left = (x + from.width / canvas.scale - shift).max(x);
         let right = (x + to.width / canvas.scale - shift).min(x + width);
         if right > left {
@@ -106,7 +99,7 @@ pub(super) fn draw_query(
                     w: right - left,
                     h: caret.h,
                 },
-                state.fade(state.theme.primary, 0.35, now),
+                frame.fade(frame.theme.primary, 0.35),
             );
         }
     }
@@ -114,7 +107,7 @@ pub(super) fn draw_query(
     text.draw(
         pixmap,
         &shaped,
-        state.fade(fg, 1.0, now),
+        frame.fade(fg, 1.0),
         canvas.px(x - shift),
         canvas.px(top),
         Some(clip),
@@ -122,7 +115,7 @@ pub(super) fn draw_query(
 
     // The preedit is drawn at the caret, never inserted into the query: glyphs
     // over a translucent quad, so a composition stays legible.
-    if let Some(preedit) = &state.preedit {
+    if let Some(preedit) = frame.field.preedit {
         let shaped = text.shape(preedit, size, Weight::MEDIUM);
         let quad = Rect {
             x: caret.x,
@@ -131,11 +124,11 @@ pub(super) fn draw_query(
             w: (x + width - caret.x).clamp(0.0, shaped.width / canvas.scale + 1.0),
             h: 28.0,
         };
-        canvas.fill_rect(pixmap, quad, state.fade(fg, 0.25, now));
+        canvas.fill_rect(pixmap, quad, frame.fade(fg, 0.25));
         text.draw(
             pixmap,
             &shaped,
-            state.fade(fg, 1.0, now),
+            frame.fade(fg, 1.0),
             canvas.px(caret.x),
             canvas.px(top),
             Some(clip),
@@ -145,17 +138,21 @@ pub(super) fn draw_query(
 
 /// The caret's box and how far the query is scrolled so it fits. The one caret
 /// geometry, shared with the IME cursor rectangle, so the two cannot drift.
-fn caret_box(state: &State, text: &mut TextEngine, now: Instant) -> (Rect, f32) {
-    let surface = state.surface;
-    let layout = state.frame_layout(now);
+fn caret_box(frame: &Frame<'_>, text: &mut TextEngine) -> (Rect, f32) {
+    let surface = frame.surface;
+    let layout = frame.layout;
     let field = Rect::field_at(
         layout.card_x(surface),
         layout.card_top(surface),
         layout.card_w(surface),
     );
-    let scale = state.scale_factor();
-    let query_size = state.appearance.font.query();
-    let before = text.shape(state.before_caret(), query_size * scale, Weight::MEDIUM);
+    let scale = frame.scale;
+    let query_size = frame.font.query();
+    let before = text.shape(
+        &frame.field.query[..frame.field.caret],
+        query_size * scale,
+        Weight::MEDIUM,
+    );
     let area = text_area(field);
     let shift = scroll_for(area.0 + before.width / scale, area);
 
@@ -174,8 +171,8 @@ fn caret_box(state: &State, text: &mut TextEngine, now: Instant) -> (Rect, f32) 
 
 /// The caret as the IME's `set_cursor_rectangle` wants it: surface-local
 /// logical coordinates, so it follows the same scroll as the drawn caret.
-pub fn caret_rect(state: &State, text: &mut TextEngine, now: Instant) -> (i32, i32, i32, i32) {
-    let (caret, _) = caret_box(state, text, now);
+pub fn caret_rect(frame: &Frame<'_>, text: &mut TextEngine) -> (i32, i32, i32, i32) {
+    let (caret, _) = caret_box(frame, text);
     (
         caret.x.round() as i32,
         caret.y.round() as i32,
@@ -186,16 +183,14 @@ pub fn caret_rect(state: &State, text: &mut TextEngine, now: Instant) -> (i32, i
 
 /// The caret, drawn in its own pass: it is the only thing that changes on a
 /// blink, and a blink must not re-render the whole surface.
-pub fn draw_caret(pixmap: &mut Pixmap, state: &State, text: &mut TextEngine, now: Instant) {
-    if !state.caret_visible || state.preedit.is_some() {
+pub fn draw_caret(pixmap: &mut Pixmap, frame: &Frame<'_>, text: &mut TextEngine) {
+    if !frame.field.caret_visible || frame.field.preedit.is_some() {
         return;
     }
 
-    let canvas = Canvas {
-        scale: state.scale_factor(),
-    };
-    let (caret, _) = caret_box(state, text, now);
-    canvas.fill_rect(pixmap, caret, state.fade(state.theme.fg, 1.0, now));
+    let canvas = Canvas { scale: frame.scale };
+    let (caret, _) = caret_box(frame, text);
+    canvas.fill_rect(pixmap, caret, frame.fade(frame.theme.fg, 1.0));
 }
 
 #[cfg(test)]

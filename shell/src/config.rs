@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 
 use wayrun_core::{watch as watch_file, write_if_absent};
 
-pub use self::theme::{AppearanceConfig, ColorOverrides, Mode};
+pub use self::theme::{AppearanceConfig, ColorOverrides, FontConfig, Mode};
 
 const DEFAULT_TEMPLATE: &str = include_str!("../default-theme.toml");
 

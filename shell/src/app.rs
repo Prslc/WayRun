@@ -10,14 +10,13 @@ mod test_support;
 
 use std::time::Instant;
 
-use crate::config::{AppearanceConfig, Mode};
-use crate::ui::theme::{Surfaces, Theme};
+use crate::ui::geom::Layout;
+use crate::ui::present::{Presentation, RowMotion};
+use crate::ui::view::{Body, FieldView, FooterView, Frame, ListView, PanelView};
 use wayrun_core::wire::{Action, ResultItem};
 
 use self::menu::PanelKey;
 
-pub(crate) use self::animation::emphasized_decelerate;
-pub use self::animation::{ROW_MOTION_MS, ROW_RISE, RowMotion};
 pub use self::cursor::{Cursor, Hover, whole_rows};
 pub use self::menu::{Menu, effective_action, marked_entry};
 
@@ -44,17 +43,8 @@ pub struct State {
     /// The panel's row and entry, held across the re-emit a panel action sends,
     /// so the panel comes back where the user left it instead of dropping.
     panel_resume: Option<(Action, PanelKey)>,
-    /// The core's system theme (the DMS palette, or the fallback).
-    pub system_theme: Theme,
-    /// Which system palette is active, so `[colors.dark]`/`[colors.light]`
-    /// pick the matching table.
-    pub mode: Mode,
-    /// The `theme.toml` appearance config.
-    pub appearance: AppearanceConfig,
-    /// The effective theme: `system_theme` with `appearance.colors` on top.
-    pub theme: Theme,
-    /// The per-surface colours derived from `theme` and the colour overrides.
-    pub surfaces: Surfaces,
+    /// The appearance and motion state a frame is drawn from.
+    pub presentation: Presentation,
     /// The layer surface's logical size.
     pub surface: (u32, u32),
     /// The integer buffer scale `wl_surface` reports, used when the compositor
@@ -63,14 +53,8 @@ pub struct State {
     /// The exact ratio from `wp_fractional_scale_v1`: the buffer is
     /// `surface × this` and a viewport maps it back, so `scale` is not used.
     pub fractional: Option<f32>,
-    /// Whether the entrance animation has started on the first drawn frame; the
-    /// layer surface configures a round trip after `shown`.
-    pub entrance_started: bool,
     /// `WAYRUN_TIMING=1`: the per-frame draw marks and the frame-pacing logs.
     pub timing: bool,
-    /// `WAYRUN_REDUCED_MOTION`: ORed with the config's `motion.reduced`.
-    reduced_env: bool,
-    pub reduce_motion: bool,
     /// What the pointer is over, if anything.
     pub hovered: Option<Hover>,
     /// The pointer's last position over the surface, so a moving list can
@@ -82,30 +66,14 @@ pub struct State {
     pub preedit_active: bool,
     pub caret_visible: bool,
     pub caret_at: Instant,
-    shown_at: Instant,
-    /// The card's drawn height, its velocity (px/s) and the height it springs to.
-    card_h: f32,
-    card_v: f32,
-    card_target: f32,
-    card_updated: Instant,
     pub dismiss_at: Option<Instant>,
-    /// The bottom edge of the card drawn last. A settle repaint covers only the
-    /// card, so a shrink must restore the dim over the old edge too.
-    pub last_card_bottom: f32,
 }
 
 impl State {
     pub fn new() -> Self {
         let now = Instant::now();
-        let appearance = AppearanceConfig::default();
         let reduced_env = std::env::var_os("WAYRUN_REDUCED_MOTION").is_some();
         let timing = std::env::var_os("WAYRUN_TIMING").is_some();
-        let reduce_motion = reduced_env || appearance.reduced;
-        let theme = Theme::default();
-        let mode = Mode::default();
-        let colors = appearance.colors.for_mode(mode);
-        let surfaces = Surfaces::resolve(theme, &colors, mode);
-        let card = appearance.layout.empty_h();
         Self {
             query: String::new(),
             caret: 0,
@@ -116,32 +84,24 @@ impl State {
             row_motion: Vec::new(),
             menu: None,
             panel_resume: None,
-            system_theme: theme,
-            mode,
-            appearance,
-            theme,
-            surfaces,
+            presentation: Presentation::new(reduced_env),
             surface: (1920, 1080),
             scale: 1,
             fractional: None,
-            entrance_started: false,
             timing,
-            reduced_env,
-            reduce_motion,
             hovered: None,
             pointer: None,
             pointer_on_card: false,
             preedit_active: false,
             caret_visible: true,
             caret_at: now,
-            shown_at: now,
-            card_h: card,
-            card_v: 0.0,
-            card_target: card,
-            card_updated: now,
             dismiss_at: None,
-            last_card_bottom: 0.0,
         }
+    }
+
+    /// The geometry input and output share: config overrides with defaults.
+    pub fn layout(&self) -> Layout {
+        self.presentation.appearance.layout
     }
 
     /// The buffer scale to render at: the compositor's fractional ratio when
@@ -159,17 +119,90 @@ impl State {
     /// The card's resting height (panel when open, the field alone while the
     /// query is untouched, else the list). The footer, blur region and reflow read it.
     pub fn content_height(&self) -> f32 {
+        let layout = self.layout();
         match &self.menu {
-            Some(menu) => self.appearance.layout.panel_h(menu.actions.len()),
-            None if self.rows.is_empty() && self.query.is_empty() => {
-                self.appearance.layout.empty_h()
-            }
-            None => self.appearance.layout.content_h(self.rows.len()),
+            Some(menu) => layout.panel_h(menu.actions.len()),
+            None if self.rows.is_empty() && self.query.is_empty() => layout.empty_h(),
+            None => layout.content_h(self.rows.len()),
         }
     }
 
     pub fn card_height(&self) -> f32 {
-        self.card_h
+        self.presentation.card_height()
+    }
+
+    /// The frame's complete input: content borrowed from the state, appearance
+    /// and motion resolved, so the renderer never reads the state machine.
+    pub fn frame(&self, now: Instant) -> Frame<'_> {
+        let field = FieldView {
+            query: &self.query,
+            caret: self.caret,
+            selection: self.selection(),
+            preedit: self.preedit.as_deref(),
+            caret_visible: self.caret_visible,
+        };
+        let (hovered_row, hovered_action) = match self.hovered {
+            Some(Hover::Row(index)) => (Some(index), None),
+            Some(Hover::Action(index)) => (None, Some(index)),
+            None => (None, None),
+        };
+        let body = match &self.menu {
+            Some(menu) => Body::Panel(PanelView {
+                parent_title: self.menu_parent_title(),
+                actions: &menu.actions,
+                first: menu.cursor.first,
+                selected: menu.cursor.selected,
+                hovered: hovered_action,
+                marked: self.rows.get(menu.parent).and_then(marked_entry),
+            }),
+            None => Body::List(ListView {
+                rows: &self.rows,
+                motion: &self.row_motion,
+                first: self.cursor.first,
+                selected: self.cursor.selected,
+                hovered: hovered_row,
+            }),
+        };
+
+        let selected_row = self.rows.get(self.cursor.selected);
+        let panel = self.menu.is_some();
+        let footer = FooterView {
+            rows: self.rows.len(),
+            action_count: self.menu.as_ref().map_or(0, |menu| menu.actions.len()),
+            query_empty: self.query.is_empty(),
+            panel,
+            has_actions: selected_row.is_some_and(|row| !row.actions.is_empty()),
+            can_default: self.selected_default().is_some(),
+            is_default: self
+                .menu
+                .as_ref()
+                .and_then(Menu::selected_action)
+                .is_some_and(|action| action.default),
+            effective_label: if panel {
+                None
+            } else {
+                selected_row
+                    .and_then(effective_action)
+                    .map(|action| action.title.as_str())
+            },
+        };
+
+        Frame {
+            surface: self.surface,
+            scale: self.scale_factor(),
+            timing: self.timing,
+            layout: self.presentation.frame_layout(now),
+            card_h: self.presentation.card_height(),
+            content_h: self.content_height(),
+            last_card_bottom: self.presentation.last_card_bottom,
+            opacity: self.presentation.entrance(now),
+            theme: self.presentation.theme,
+            surfaces: self.presentation.surfaces,
+            font: self.presentation.appearance.font,
+            field,
+            body,
+            footer,
+        }
     }
 
     pub fn shown(&mut self, now: Instant) {
@@ -182,12 +215,11 @@ impl State {
         self.menu = None;
         self.hovered = None;
         self.dismiss_at = None;
-        self.shown_at = now;
-        self.reset_height(now);
+        self.presentation.begin_show(now);
+        self.presentation.snap_to(self.content_height(), now);
         self.contain();
         self.caret_visible = true;
         self.caret_at = now;
-        self.entrance_started = false;
     }
 
     pub fn hidden(&mut self) {
@@ -205,7 +237,7 @@ impl State {
 
     /// Keep the selection inside the `max_rows` window, minimally.
     pub fn contain(&mut self) {
-        self.cursor.contain(self.rows.len(), self.appearance.layout);
+        self.cursor.contain(self.rows.len(), self.layout());
         self.resync_hover();
     }
 }

@@ -1,14 +1,12 @@
 use std::sync::OnceLock;
-use std::time::Instant;
 
 use cosmic_text::Weight;
+use rust_i18n::t;
 use tiny_skia::Pixmap;
 
-use crate::app::{State, effective_action};
 use crate::ui::geom;
 use crate::ui::text::TextEngine;
-
-use rust_i18n::t;
+use crate::ui::view::Frame;
 
 use super::canvas::{Canvas, Rect};
 
@@ -107,52 +105,27 @@ fn count_label(n: usize, one: &'static str, many: &'static str) -> String {
     if n == 1 { t!(one) } else { t!(many, count = n) }
 }
 
-/// The action the selected row's `Enter` runs instead of its own command;
-/// only a remembered default changes it; `None` while the panel is open.
-fn effective_label(state: &State) -> Option<&str> {
-    if state.menu.is_some() {
-        return None;
-    }
-    Some(
-        effective_action(state.rows.get(state.cursor.selected)?)?
-            .title
-            .as_str(),
-    )
-}
-
 pub(super) fn draw_footer(
     canvas: &Canvas,
     pixmap: &mut Pixmap,
-    surface: (u32, u32),
-    state: &State,
+    frame: &Frame<'_>,
     text: &mut TextEngine,
-    now: Instant,
 ) {
-    let panel = state.menu.is_some();
-    let empty = state.rows.is_empty();
-    let has_actions = state
-        .rows
-        .get(state.cursor.selected)
-        .is_some_and(|row| !row.actions.is_empty());
-    // A highlighted panel action owned by a plugin can be made the default; the
-    // row's own command can too, and picking it clears the remembered one.
-    let is_default = state
-        .menu
-        .as_ref()
-        .and_then(|menu| menu.selected_action())
-        .is_some_and(|action| action.default);
+    let footer = &frame.footer;
+    let panel = footer.panel;
+    let empty = footer.rows == 0;
     let hints = footer_hints(
-        state.rows.len(),
-        state.query.is_empty(),
+        footer.rows,
+        footer.query_empty,
         panel,
-        has_actions,
-        state.selected_default().is_some(),
-        is_default,
+        footer.has_actions,
+        footer.can_default,
+        footer.is_default,
     );
 
     let count = if panel {
         count_label(
-            state.menu.as_ref().map_or(0, |menu| menu.actions.len()),
+            footer.action_count,
             "footer.count_action_one",
             "footer.count_action_many",
         )
@@ -160,7 +133,7 @@ pub(super) fn draw_footer(
         String::new()
     } else {
         count_label(
-            state.rows.len(),
+            footer.rows,
             "footer.count_result_one",
             "footer.count_result_many",
         )
@@ -168,12 +141,12 @@ pub(super) fn draw_footer(
 
     // The footer is the card's last band, so it rides the drawn height rather
     // than jumping ahead to the resting one.
-    let layout = state.frame_layout(now);
-    let top = layout.card_top(surface) + state.card_height() - geom::PAD - geom::FOOTER_H;
+    let layout = frame.layout;
+    let top = layout.card_top(frame.surface) + frame.card_h - geom::PAD - geom::FOOTER_H;
     let center_y = top + geom::FOOTER_H / 2.0;
-    let (left, width) = layout.row_band(surface);
+    let (left, width) = layout.row_band(frame.surface);
     let right = left + width;
-    let font_size = state.appearance.font.suggestion();
+    let font_size = frame.font.suggestion();
     let label_size = font_size * canvas.scale;
     let key_size = (font_size - 1.0).max(6.0) * canvas.scale;
 
@@ -190,7 +163,7 @@ pub(super) fn draw_footer(
         };
 
     let mut x = left;
-    let effective = effective_label(state);
+    let effective = footer.effective_label;
     for hint in hints {
         if hint.key.is_empty() {
             let shaped = text.shape(&hint.label, label_size, Weight::NORMAL);
@@ -198,7 +171,7 @@ pub(super) fn draw_footer(
             text.draw(
                 pixmap,
                 &shaped,
-                state.fade(state.theme.primary, 0.7, now),
+                frame.fade(frame.theme.primary, 0.7),
                 canvas.px(x),
                 canvas.px(center_y - height / 2.0),
                 None,
@@ -238,12 +211,12 @@ pub(super) fn draw_footer(
                 h: cap_h,
             },
             KEYCAP_RADIUS,
-            state.fade(state.theme.fg, 0.09, now),
+            frame.fade(frame.theme.fg, 0.09),
         );
         text.draw(
             pixmap,
             &key,
-            state.fade(state.theme.fg, 0.75, now),
+            frame.fade(frame.theme.fg, 0.75),
             canvas.px(x + KEYCAP_PAD_X),
             canvas.px(center_y - key.height / canvas.scale / 2.0),
             None,
@@ -251,7 +224,7 @@ pub(super) fn draw_footer(
         text.draw(
             pixmap,
             &label,
-            state.fade_rgba(state.surfaces.footer, now),
+            frame.fade_rgba(frame.surfaces.footer),
             canvas.px(x + cap_w + KEY_LABEL_GAP),
             canvas.px(center_y - label.height / canvas.scale / 2.0),
             None,
@@ -274,12 +247,12 @@ pub(super) fn draw_footer(
                 h: cap_h,
             },
             KEYCAP_RADIUS,
-            state.fade(state.theme.fg, 0.06, now),
+            frame.fade(frame.theme.fg, 0.06),
         );
         text.draw(
             pixmap,
             shaped,
-            state.fade_rgba(state.surfaces.muted, now),
+            frame.fade_rgba(frame.surfaces.muted),
             canvas.px(x + KEYCAP_PAD_X),
             canvas.px(center_y - height / 2.0),
             None,
@@ -290,7 +263,6 @@ pub(super) fn draw_footer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wayrun_core::wire::{Action, ActionItem, ResultItem};
 
     #[test]
     fn the_footer_separates_no_results_from_an_untouched_field() {
@@ -341,44 +313,6 @@ mod tests {
             footer_hints(3, false, true, true, false, false),
             hints().panel.as_slice()
         );
-    }
-
-    #[test]
-    fn the_enter_hint_names_a_default_action_and_keeps_launch_without_one() {
-        let now = Instant::now();
-        let uri = "file:///tmp/a.txt";
-        let mut state = State::new();
-        state.surface = (1920, 1080);
-        let mut row = ResultItem {
-            title: "a.txt".into(),
-            summary: None,
-            on_click: Some(Action::Open { uri: uri.into() }),
-            icon: None,
-            actions: vec![ActionItem {
-                title: "Open in terminal".into(),
-                action: Action::Terminal { uri: uri.into() },
-                icon: None,
-                id: Some("terminal".into()),
-                plugin: Some("file-search".into()),
-                default: true,
-            }],
-        };
-        state.apply_results(vec![row.clone()], now);
-        assert_eq!(effective_label(&state), Some("Open in terminal"));
-
-        // the panel's own Enter runs the highlighted action, so the row hint goes
-        assert!(state.open_actions());
-        assert_eq!(effective_label(&state), None);
-        state.menu = None;
-
-        // a default that runs the row's own command is not a different outcome
-        row.actions[0].action = Action::Open { uri: uri.into() };
-        state.apply_results(vec![row.clone()], now);
-        assert_eq!(effective_label(&state), None);
-
-        row.actions.clear();
-        state.apply_results(vec![row], now);
-        assert_eq!(effective_label(&state), None);
     }
 
     #[test]

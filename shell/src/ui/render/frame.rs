@@ -2,23 +2,23 @@ use std::time::Instant;
 
 use tiny_skia::Pixmap;
 
-use crate::app::State;
 use crate::ui::geom;
 use crate::ui::icons::IconCache;
 use crate::ui::text::TextEngine;
+use crate::ui::view::{Body, Frame};
 
 use super::canvas::{Canvas, Rect};
 use super::{field, footer, list, panel};
 
 pub fn draw(
     pixmap: &mut Pixmap,
-    state: &State,
+    frame: &Frame<'_>,
     text: &mut TextEngine,
     icons: &mut IconCache,
     now: Instant,
     full: bool,
 ) {
-    let timing = state.timing;
+    let timing = frame.timing;
     let mut marks: Vec<(&str, Instant)> = Vec::new();
     let mut mark = |name: &'static str| {
         if timing {
@@ -26,23 +26,21 @@ pub fn draw(
         }
     };
     mark("start");
-    let canvas = Canvas {
-        scale: state.scale_factor(),
-    };
-    let surface = state.surface;
-    let layout = state.frame_layout(now);
-    let dim_rgb = state.dim_color();
+    let canvas = Canvas { scale: frame.scale };
+    let surface = frame.surface;
+    let layout = frame.layout;
+    let dim_rgb = frame.dim_color();
 
     let card = Rect {
         x: layout.card_x(surface),
         y: layout.card_top(surface),
         w: layout.card_w(surface),
-        h: state.card_height(),
+        h: frame.card_h,
     };
 
     // The frame is retained, so a settled frame repaints only the card and
     // leaves the dim in place; an animation or fresh frame repaints it all.
-    let dim = state.dim_alpha(now);
+    let dim = frame.dim_alpha();
     if full {
         canvas.fill_all(
             pixmap,
@@ -56,7 +54,7 @@ pub fn draw(
     } else {
         // A shrink has to erase the old card's rows too, so the region spans the
         // union of the previous and current bottoms, not just the current card.
-        let base_bottom = card.bottom().max(state.last_card_bottom);
+        let base_bottom = card.bottom().max(frame.last_card_bottom);
         canvas.restore_dim(
             pixmap,
             Rect {
@@ -82,7 +80,7 @@ pub fn draw(
             h: card.h - 2.0,
         },
         layout.radius - 1.0,
-        state.fade_rgba(state.surfaces.card, now),
+        frame.fade_rgba(frame.surfaces.card),
     );
     canvas.stroke_round(
         pixmap,
@@ -94,28 +92,30 @@ pub fn draw(
         },
         layout.hairline_radius(),
         geom::HAIRLINE_W,
-        state.fade_rgba(state.surfaces.hairline, now),
+        frame.fade_rgba(frame.surfaces.hairline),
     );
 
     mark("card");
-    let field = Rect::field_at(card.x, card.y, card.w);
-    field::draw_magnifier(&canvas, pixmap, field, state, now);
-    field::draw_query(&canvas, pixmap, field, state, text, now);
+    let field_rect = Rect::field_at(card.x, card.y, card.w);
+    field::draw_magnifier(&canvas, pixmap, field_rect, frame);
+    field::draw_query(&canvas, pixmap, field_rect, frame, text);
     mark("query");
 
-    if state.menu.is_some() {
-        panel::draw_actions(&canvas, pixmap, surface, state, text, icons, now);
-    } else if !state.rows.is_empty() {
-        list::draw_list(&canvas, pixmap, surface, state, text, icons, now);
+    match &frame.body {
+        Body::Panel(_) => panel::draw_actions(&canvas, pixmap, frame, text, icons),
+        Body::List(view) if !view.rows.is_empty() => {
+            list::draw_list(&canvas, pixmap, frame, text, icons, now)
+        }
+        Body::List(_) => {}
     }
     mark("list");
 
-    footer::draw_footer(&canvas, pixmap, surface, state, text, now);
+    footer::draw_footer(&canvas, pixmap, frame, text);
     mark("footer");
 
     // A growing payload lays rows out immediately while the height animates, so
     // the band below the card's bottom belongs to the backdrop.
-    let resting = layout.card_top(surface) + state.content_height();
+    let resting = layout.card_top(surface) + frame.content_h;
     let bottom = card.y + card.h;
     let mut band = None;
     if full && bottom < resting {
@@ -145,6 +145,7 @@ pub fn draw(
 mod tests {
     use super::super::canvas::dim_u8;
     use super::*;
+    use crate::ui::view::test_frame;
     use tiny_skia::Color;
 
     /// A cache whose queue nobody drains: these frames draw no icons.
@@ -155,17 +156,14 @@ mod tests {
 
     #[test]
     fn the_base_fill_is_the_dim_with_no_clear_under_it() {
-        let mut state = State::new();
-        state.surface = (64, 64);
-        // Start at the settled end state so the dim is at full strength.
-        state.reduce_motion = true;
+        let frame = test_frame((64, 64));
 
         let mut pixmap = Pixmap::new(64, 64).unwrap();
         let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
         let mut icons = idle_icons();
         draw(
             &mut pixmap,
-            &state,
+            &frame,
             &mut text,
             &mut icons,
             Instant::now(),
@@ -181,9 +179,7 @@ mod tests {
 
     #[test]
     fn a_settled_repaint_only_touches_the_card_rectangle() {
-        let mut state = State::new();
-        state.surface = (1600, 1080);
-        state.reduce_motion = true;
+        let frame = test_frame((1600, 1080));
 
         let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
         let mut icons = idle_icons();
@@ -193,7 +189,7 @@ mod tests {
 
         draw(
             &mut pixmap,
-            &state,
+            &frame,
             &mut text,
             &mut icons,
             Instant::now(),
@@ -208,9 +204,9 @@ mod tests {
         // it can no longer be the sentinel.
         let inside = pixmap
             .pixel(
-                (state.appearance.layout.card_x(state.surface)
-                    + state.appearance.layout.card_w(state.surface) / 2.0) as u32,
-                (state.appearance.layout.card_top(state.surface) + 10.0) as u32,
+                (frame.layout.card_x(frame.surface) + frame.layout.card_w(frame.surface) / 2.0)
+                    as u32,
+                (frame.layout.card_top(frame.surface) + 10.0) as u32,
             )
             .unwrap();
         assert_ne!((inside.red(), inside.green(), inside.blue()), (255, 0, 255));
@@ -218,12 +214,10 @@ mod tests {
 
     #[test]
     fn a_settled_shrink_erases_the_old_cards_rows() {
-        let mut state = State::new();
-        state.surface = (1600, 1080);
-        state.reduce_motion = true;
-        let card_h = state.content_height();
+        let mut frame = test_frame((1600, 1080));
+        let card_h = frame.content_h;
         // The previous card was 200px taller than the current one.
-        state.last_card_bottom = state.appearance.layout.card_top(state.surface) + card_h + 200.0;
+        frame.last_card_bottom = frame.layout.card_top(frame.surface) + card_h + 200.0;
 
         let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
         let mut icons = idle_icons();
@@ -232,7 +226,7 @@ mod tests {
 
         draw(
             &mut pixmap,
-            &state,
+            &frame,
             &mut text,
             &mut icons,
             Instant::now(),
@@ -241,7 +235,7 @@ mod tests {
 
         // Below the current card but inside the old one: the dim, not the
         // sentinel and not a leftover row.
-        let y = (state.appearance.layout.card_top(state.surface) + card_h + 100.0) as u32;
+        let y = (frame.layout.card_top(frame.surface) + card_h + 100.0) as u32;
         let pixel = pixmap.pixel(800, y).unwrap();
         assert_ne!(
             (pixel.red(), pixel.green(), pixel.blue()),

@@ -51,14 +51,13 @@ impl State {
     /// The pointer position and the hover it implies; returns whether the hover changed.
     pub fn hover_at(&mut self, x: f32, y: f32) -> bool {
         self.pointer = Some((x, y));
+        let layout = self.layout();
         let hover = if let Some(menu) = &self.menu {
-            self.appearance
-                .layout
+            layout
                 .action_at(self.surface, menu.cursor.first, menu.actions.len(), x, y)
                 .map(Hover::Action)
         } else {
-            self.appearance
-                .layout
+            layout
                 .row_at(self.surface, self.cursor.first, self.rows.len(), x, y)
                 .map(Hover::Row)
         };
@@ -79,15 +78,14 @@ impl State {
     /// Rows that move under a stationary pointer are different rows and fire no
     /// enter/exit, so re-derive the hover.
     pub fn resync_hover(&mut self) {
+        let layout = self.layout();
         let hit = self.pointer.and_then(|(x, y)| {
             if let Some(menu) = &self.menu {
-                self.appearance
-                    .layout
+                layout
                     .action_at(self.surface, menu.cursor.first, menu.actions.len(), x, y)
                     .map(Hover::Action)
             } else {
-                self.appearance
-                    .layout
+                layout
                     .row_at(self.surface, self.cursor.first, self.rows.len(), x, y)
                     .map(Hover::Row)
             }
@@ -123,13 +121,13 @@ impl State {
     }
 
     pub fn page_up(&mut self) {
-        self.cursor.page_up(self.appearance.layout.max_rows);
+        self.cursor.page_up(self.layout().max_rows);
         self.contain();
     }
 
     pub fn page_down(&mut self) {
         self.cursor
-            .page_down(self.rows.len(), self.appearance.layout.max_rows);
+            .page_down(self.rows.len(), self.layout().max_rows);
         self.contain();
     }
 }
@@ -202,7 +200,7 @@ mod tests {
         state.apply_results(items, std::time::Instant::now());
 
         // the pointer sits on the second visible row
-        let layout = state.appearance.layout;
+        let layout = state.layout();
         let x = layout.card_x(state.surface) + 10.0;
         let y = layout.rows_top(state.surface) + geom::ROW_H + 1.0;
         assert!(state.hover_at(x, y));

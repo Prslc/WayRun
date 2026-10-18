@@ -315,11 +315,11 @@ impl Shell {
                 }
                 let now = Instant::now();
                 self.app.apply_results(items, now);
-                let font = self.app.appearance.font;
+                let font = self.app.presentation.appearance.font;
                 let scale = self.app.scale_factor();
                 let icon_size = (font.icon() * scale).round() as u32;
-                let fg = self.app.theme.fg;
-                let layout = self.app.appearance.layout;
+                let fg = self.app.presentation.theme.fg;
+                let layout = self.app.layout();
                 let first = self.app.cursor.first;
                 // Ask for what the visible window draws; a row scrolled in
                 // later asks when the frame draws it.

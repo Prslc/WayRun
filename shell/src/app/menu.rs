@@ -197,7 +197,7 @@ impl State {
     }
 
     pub fn menu_page_up(&mut self) {
-        let page = self.appearance.layout.max_rows;
+        let page = self.layout().max_rows;
         if let Some(menu) = &mut self.menu {
             menu.cursor.page_up(page);
         }
@@ -205,7 +205,7 @@ impl State {
     }
 
     pub fn menu_page_down(&mut self) {
-        let page = self.appearance.layout.max_rows;
+        let page = self.layout().max_rows;
         if let Some(menu) = &mut self.menu {
             menu.cursor.page_down(menu.actions.len(), page);
         }
@@ -213,7 +213,7 @@ impl State {
     }
 
     fn menu_contain(&mut self) {
-        let layout = self.appearance.layout;
+        let layout = self.layout();
         if let Some(menu) = &mut self.menu {
             menu.cursor.contain(menu.actions.len(), layout);
         }
@@ -343,11 +343,11 @@ mod tests {
             "Reveal in file manager"
         );
         // the panel is taller than the one-row list it replaced
-        assert_eq!(state.content_height(), state.appearance.layout.panel_h(1));
+        assert_eq!(state.content_height(), state.layout().panel_h(1));
 
         state.menu = None;
         assert!(state.menu.is_none());
-        assert_eq!(state.content_height(), state.appearance.layout.content_h(2));
+        assert_eq!(state.content_height(), state.layout().content_h(2));
     }
 
     #[test]
@@ -602,7 +602,7 @@ mod tests {
         );
         assert!(state.open_actions());
 
-        let max = state.appearance.layout.max_rows;
+        let max = state.layout().max_rows;
         state.menu_down();
         state.menu_down();
         state.menu_down();
@@ -613,5 +613,51 @@ mod tests {
 
         state.menu_page_up();
         assert_eq!(state.menu.as_ref().unwrap().cursor.selected, 5 - max);
+    }
+
+    #[test]
+    fn the_enter_hint_names_a_default_action_and_keeps_launch_without_one() {
+        let now = std::time::Instant::now();
+        let uri = "file:///tmp/a.txt";
+        let mut state = state();
+        let mut row = item(
+            "a.txt",
+            None,
+            Some(Action::Open {
+                uri: uri.to_string(),
+            }),
+            None,
+        );
+        row.actions = vec![ActionItem {
+            title: "Open in terminal".into(),
+            action: Action::Terminal {
+                uri: uri.to_string(),
+            },
+            icon: None,
+            id: Some("terminal".into()),
+            plugin: Some("file-search".into()),
+            default: true,
+        }];
+        state.apply_results(vec![row.clone()], now);
+        assert_eq!(
+            state.frame(now).footer.effective_label,
+            Some("Open in terminal")
+        );
+
+        // the panel's own Enter runs the highlighted action, so the row hint goes
+        assert!(state.open_actions());
+        assert_eq!(state.frame(now).footer.effective_label, None);
+        state.menu = None;
+
+        // a default that runs the row's own command is not a different outcome
+        row.actions[0].action = Action::Open {
+            uri: uri.to_string(),
+        };
+        state.apply_results(vec![row.clone()], now);
+        assert_eq!(state.frame(now).footer.effective_label, None);
+
+        row.actions.clear();
+        state.apply_results(vec![row], now);
+        assert_eq!(state.frame(now).footer.effective_label, None);
     }
 }
