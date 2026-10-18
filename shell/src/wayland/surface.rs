@@ -174,6 +174,7 @@ impl Shell {
         self.app.start_entrance(now);
         // A fresh pixmap, a moving dim (entrance) or a springing card needs the
         // whole surface; a settled redraw only repaints the card rectangle.
+        self.app.sync_split_height(now);
         let animating = self.app.animating(now);
         self.app.advance(now);
         let full = self.needs_full || animating;

@@ -22,6 +22,13 @@ pub struct ListView<'a> {
     pub first: usize,
     pub selected: usize,
     pub hovered: Option<usize>,
+    /// The selected row's split-view payload, when there is one.
+    pub preview: Option<PreviewView<'a>>,
+}
+
+/// What the split view shows beside the list.
+pub enum PreviewView<'a> {
+    Image { path: &'a str },
 }
 
 /// The action panel that replaces the list.
@@ -154,6 +161,7 @@ pub(crate) fn test_frame(surface: (u32, u32)) -> Frame<'static> {
             first: 0,
             selected: 0,
             hovered: None,
+            preview: None,
         }),
         footer: FooterView::default(),
     }

@@ -11,6 +11,8 @@ path = "src/lib.rs"
 [dependencies]
 wayrun-core = { path = "../core", default-features = false }
 cosmic-text = "0.15"
+# Non-PNG raster previews/icons (JPEG, WebP, GIF, BMP); PNG stays on tiny-skia.
+image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "webp"] }
 libc = "0.2"
 # Icons are paths, never text: the default `text`/`system-fonts` features would
 # build and load a system font database for every `Options::default()`, which

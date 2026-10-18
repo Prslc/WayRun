@@ -8,7 +8,7 @@ use crate::text::TextEngine;
 use crate::view::{Body, Frame};
 
 use super::canvas::{Canvas, Rect};
-use super::{field, footer, list, panel};
+use super::{field, footer, list, panel, preview};
 
 pub fn draw(
     pixmap: &mut Pixmap,
@@ -104,7 +104,10 @@ pub fn draw(
     match &frame.body {
         Body::Panel(_) => panel::draw_actions(&canvas, pixmap, frame, text, icons),
         Body::List(view) if !view.rows.is_empty() => {
-            list::draw_list(&canvas, pixmap, frame, text, icons, now)
+            list::draw_list(&canvas, pixmap, frame, text, icons, now);
+            if let Some(preview) = &view.preview {
+                preview::draw_preview(&canvas, pixmap, frame, view.rows.len(), preview, icons);
+            }
         }
         Body::List(_) => {}
     }

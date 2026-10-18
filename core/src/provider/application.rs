@@ -144,6 +144,7 @@ impl Hit<'_> {
                     desktop_id: app.id.clone(),
                 }),
                 icon: app.icon_path(),
+                preview: None,
                 actions: Vec::new(),
             },
             Hit::Action(app, action) => ResultItem {
@@ -154,6 +155,7 @@ impl Hit<'_> {
                     action_id: action.id.clone(),
                 }),
                 icon: app.icon_path(),
+                preview: None,
                 actions: Vec::new(),
             },
         }

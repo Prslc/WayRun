@@ -1,6 +1,8 @@
 use std::borrow::Cow;
 
-use tiny_skia::{FilterQuality, Pixmap, PixmapPaint, PixmapRef, PremultipliedColorU8, Transform};
+use tiny_skia::{
+    FilterQuality, IntSize, Pixmap, PixmapPaint, PixmapRef, PremultipliedColorU8, Transform,
+};
 
 use super::builtin;
 
@@ -10,13 +12,31 @@ pub(super) fn render(path: &str, size: u32) -> Option<Pixmap> {
     if is_svg(path) {
         render_svg(&data, size)
     } else {
-        // Anything that is not an SVG is decoded as a PNG: that is what the
-        // theme's raster icons and every plugin directory hold.
-        let source = Pixmap::decode_png(&data).ok()?;
+        // PNG is tiny-skia's fast path; the `image` decoders cover the rest of
+        // the common raster formats a file preview can point at.
+        let source = Pixmap::decode_png(&data)
+            .ok()
+            .or_else(|| decode_image(&data))?;
         let mut target = Pixmap::new(size, size)?;
         resample(source.as_ref(), &mut target);
         Some(target)
     }
+}
+
+/// Decode JPEG/WebP/GIF/BMP through `image` and premultiply into tiny-skia's
+/// representation; a GIF and an animated WebP contribute their first frame.
+fn decode_image(data: &[u8]) -> Option<Pixmap> {
+    let image = image::load_from_memory(data).ok()?.to_rgba8();
+    let (width, height) = image.dimensions();
+    let mut rgba = image.into_raw();
+    let (pixels, _) = rgba.as_chunks_mut::<4>();
+    for pixel in pixels {
+        let alpha = u32::from(pixel[3]);
+        for channel in &mut pixel[..3] {
+            *channel = ((u32::from(*channel) * alpha + 127) / 255) as u8;
+        }
+    }
+    Pixmap::from_vec(rgba, IntSize::from_wh(width, height)?)
 }
 
 /// The bytes behind an icon spec: a compiled `builtin:` glyph, or the file's.
@@ -237,5 +257,30 @@ fn resample(source: PixmapRef, target: &mut Pixmap) {
                 target.pixels_mut()[(y * target_width + x) as usize] = pixel;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use image::ImageEncoder;
+
+    use super::*;
+
+    #[test]
+    fn a_jpeg_decodes_through_the_image_crate() {
+        let mut data = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new(&mut data)
+            .write_image(&[220, 40, 40], 1, 1, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        let path = std::env::temp_dir().join(format!("wayrun-preview-{}.jpg", std::process::id()));
+        std::fs::write(&path, data).unwrap();
+
+        let pixmap = render(path.to_str().unwrap(), 8).unwrap();
+        assert_eq!((pixmap.width(), pixmap.height()), (8, 8));
+        let pixel = pixmap.pixel(4, 4).unwrap();
+        assert!(pixel.alpha() > 0);
+        assert!(pixel.red() > pixel.blue());
+
+        let _ = std::fs::remove_file(path);
     }
 }

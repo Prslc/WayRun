@@ -10,4 +10,5 @@ mod footer;
 mod frame;
 mod list;
 mod panel;
+mod preview;
 mod row;

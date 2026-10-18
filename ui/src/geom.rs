@@ -6,6 +6,12 @@ pub const FOOTER_H: f32 = 28.0;
 pub const HAIRLINE_W: f32 = 1.0;
 pub const ACCENT_W: f32 = 3.0;
 pub const ACCENT_H: f32 = 28.0;
+/// The split view's preview column and the gap before it. The card's width is
+/// unchanged; the list gives this column up.
+pub const PREVIEW_W: f32 = 300.0;
+pub const PREVIEW_GAP: f32 = 16.0;
+/// A short list still gives the preview a usable square; the card grows down.
+pub const PREVIEW_MIN_H: f32 = 300.0;
 
 /// The card's horizontal anchor on the output.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -90,6 +96,26 @@ impl Layout {
         (self.card_x(surface) + PAD, self.card_w(surface) - 2.0 * PAD)
     }
 
+    /// The list's band: the row band minus the preview column when split.
+    pub fn list_band(&self, surface: (u32, u32), split: bool) -> (f32, f32) {
+        let (left, width) = self.row_band(surface);
+        if split {
+            (left, (width - PREVIEW_W - PREVIEW_GAP).max(0.0))
+        } else {
+            (left, width)
+        }
+    }
+
+    /// The preview pane's band: the card's right edge, inset by `PAD`.
+    pub fn preview_band(&self, surface: (u32, u32)) -> (f32, f32) {
+        let (_, width) = self.row_band(surface);
+        let width = PREVIEW_W.min(width);
+        (
+            self.card_x(surface) + PAD + self.card_w(surface) - 2.0 * PAD - width,
+            width,
+        )
+    }
+
     /// The y of the first list row: the card's padding, the search field and the
     /// column's spacing.
     pub fn rows_top(&self, surface: (u32, u32)) -> f32 {
@@ -103,12 +129,22 @@ impl Layout {
     /// `pad + search + gap + footer + pad`, plus a second gap and the list when
     /// rows exist. The list is capped at `max_rows`, so the card needs no cap.
     pub fn content_h(&self, rows: usize) -> f32 {
-        let base = PAD + SEARCH_H + GAP + FOOTER_H + PAD;
         if rows == 0 {
-            base
+            PAD + SEARCH_H + GAP + FOOTER_H + PAD
         } else {
-            base + GAP + self.list_h(rows)
+            self.content_h_for(self.list_h(rows))
         }
+    }
+
+    /// The card's height for an explicit body height, split view included.
+    pub fn content_h_for(&self, body_h: f32) -> f32 {
+        PAD + SEARCH_H + GAP + FOOTER_H + PAD + GAP + body_h
+    }
+
+    /// The body's height in the split view: a short list still reserves enough
+    /// room for the preview image.
+    pub fn split_h(&self, rows: usize) -> f32 {
+        self.list_h(rows).max(PREVIEW_MIN_H)
     }
 
     /// The card with only the search field: what a pristine show rests at,
@@ -209,13 +245,21 @@ impl Layout {
     pub fn row_at(
         &self,
         surface: (u32, u32),
+        split: bool,
         first: usize,
         rows: usize,
         x: f32,
         y: f32,
     ) -> Option<usize> {
+        // The hit test keeps the card's side padding (a press there selects
+        // the row beside the pointer) but stops at the preview pane.
         let left = self.card_x(surface);
-        if x < left || x > left + self.card_w(surface) {
+        let right = if split {
+            self.preview_band(surface).0
+        } else {
+            left + self.card_w(surface)
+        };
+        if x < left || x >= right {
             return None;
         }
 
@@ -276,21 +320,54 @@ mod tests {
         let left = l.card_x(surface) + 10.0;
         let top = l.rows_top(surface);
 
-        assert_eq!(l.row_at(surface, 0, 20, left, top), Some(0));
-        assert_eq!(l.row_at(surface, 0, 20, left, top + ROW_H + 1.0), Some(1));
+        assert_eq!(l.row_at(surface, false, 0, 20, left, top), Some(0));
+        assert_eq!(
+            l.row_at(surface, false, 0, 20, left, top + ROW_H + 1.0),
+            Some(1)
+        );
         // `first` is the window's top row, so surface row 0 is `first`
-        assert_eq!(l.row_at(surface, 2, 20, left, top + 0.5), Some(2));
+        assert_eq!(l.row_at(surface, false, 2, 20, left, top + 0.5), Some(2));
 
         // only the five-row window is drawn
         assert_eq!(
-            l.row_at(surface, 0, 20, left, top + l.max_rows as f32 * ROW_H),
+            l.row_at(surface, false, 0, 20, left, top + l.max_rows as f32 * ROW_H),
             None
         );
         // outside the card, and above the list
-        assert_eq!(l.row_at(surface, 0, 20, l.card_x(surface) - 1.0, top), None);
-        assert_eq!(l.row_at(surface, 0, 20, left, top - 1.0), None);
+        assert_eq!(
+            l.row_at(surface, false, 0, 20, l.card_x(surface) - 1.0, top),
+            None
+        );
+        assert_eq!(l.row_at(surface, false, 0, 20, left, top - 1.0), None);
         // a short list has nothing below its last row
-        assert_eq!(l.row_at(surface, 0, 2, left, top + 2.0 * ROW_H + 1.0), None);
+        assert_eq!(
+            l.row_at(surface, false, 0, 2, left, top + 2.0 * ROW_H + 1.0),
+            None
+        );
+    }
+
+    #[test]
+    fn the_split_layout_reserves_the_preview_pane() {
+        let l = Layout::default();
+        let surface = (1920, 1080);
+        let (left, width) = l.list_band(surface, true);
+        let (preview_left, preview_w) = l.preview_band(surface);
+        let (_, full) = l.row_band(surface);
+
+        assert_eq!(preview_w, PREVIEW_W);
+        assert_eq!(
+            l.card_w(surface),
+            Layout::default().card_w(surface),
+            "the card keeps its width"
+        );
+        assert_eq!(full, width + PREVIEW_W + PREVIEW_GAP);
+        assert_eq!(left + width + PREVIEW_GAP, preview_left);
+        assert_eq!(l.split_h(1), PREVIEW_MIN_H);
+        assert!(l.content_h_for(l.split_h(1)) > l.content_h(1));
+
+        let top = l.rows_top(surface);
+        assert_eq!(l.row_at(surface, true, 0, 20, preview_left, top), None);
+        assert_eq!(l.row_at(surface, false, 0, 20, preview_left, top), Some(0));
     }
 
     #[test]

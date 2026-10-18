@@ -22,7 +22,7 @@ pub(super) fn draw_list(
         return;
     };
     let layout = frame.layout;
-    let (left, width) = layout.row_band(frame.surface);
+    let (left, width) = layout.list_band(frame.surface, list.preview.is_some());
     let top = layout.rows_top(frame.surface);
 
     for (index, row) in list

@@ -30,8 +30,10 @@ return {
 ```
 
 行就是 [jsonrpc.md](jsonrpc.md#结果项) 所记录的那种普通表——`title`、`summary`、
-`on_click`、`icon`、`actions`——不需要构造器，例如
+`on_click`、`icon`、`preview`、`actions`——不需要构造器，例如
 `on_click = { type = "open", uri = "https://example.com" }`。
+`preview = { type = "image", path = "/absolute/file.png" }` 会在选中行旁边打开分栏预览；
+当前版本解码 PNG、SVG、JPEG、WebP、GIF 与 BMP。
 
 ## 插件表
 

@@ -117,6 +117,7 @@ fn do_search(input: &str) -> Vec<(Rank, ResultItem)> {
                     }),
                     icon: find_icon_spec(icon),
                     actions: Vec::new(),
+                    preview: None,
                 },
             )
         })

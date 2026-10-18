@@ -58,7 +58,14 @@ impl State {
                 .map(Hover::Action)
         } else {
             layout
-                .row_at(self.surface, self.cursor.first, self.rows.len(), x, y)
+                .row_at(
+                    self.surface,
+                    self.split(),
+                    self.cursor.first,
+                    self.rows.len(),
+                    x,
+                    y,
+                )
                 .map(Hover::Row)
         };
 
@@ -86,7 +93,14 @@ impl State {
                     .map(Hover::Action)
             } else {
                 layout
-                    .row_at(self.surface, self.cursor.first, self.rows.len(), x, y)
+                    .row_at(
+                        self.surface,
+                        self.split(),
+                        self.cursor.first,
+                        self.rows.len(),
+                        x,
+                        y,
+                    )
                     .map(Hover::Row)
             }
         });

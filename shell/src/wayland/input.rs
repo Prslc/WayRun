@@ -381,6 +381,7 @@ impl PointerHandler for Shell {
 
                     let row = self.app.layout().row_at(
                         self.app.surface,
+                        self.app.split(),
                         self.app.cursor.first,
                         self.app.rows.len(),
                         event.position.0 as f32,

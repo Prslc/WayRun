@@ -31,8 +31,11 @@ return {
 ```
 
 A row is a plain table in the shape [jsonrpc.md](jsonrpc.md#result-items)
-documents — `title`, `summary`, `on_click`, `icon` and `actions` — so no builder
-is needed: `on_click = { type = "open", uri = "https://example.com" }`.
+documents — `title`, `summary`, `on_click`, `icon`, `preview` and `actions` — so
+no builder is needed: `on_click = { type = "open", uri = "https://example.com" }`.
+A `preview = { type = "image", path = "/absolute/file.png" }` opens the split
+view beside the list for the selected row; PNG, SVG, JPEG, WebP, GIF and BMP
+decode in this version.
 
 ## The plugin table
 

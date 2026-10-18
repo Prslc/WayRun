@@ -139,8 +139,8 @@ identity and its rows.
 ## Result items
 
 `search`, and a host's `top`, return an array of items. Every item is an object
-with these keys — the first four are always present (`null` for an absent
-optional field), and `actions` only when set:
+with these keys — `title`, `summary`, `on_click` and `icon` are always present
+(`null` for an absent optional field); `preview` and `actions` only when set:
 
 | Key | Type | Meaning |
 |-----|------|---------|
@@ -148,7 +148,13 @@ optional field), and `actions` only when set:
 | `summary` | string \| null | secondary line (command, path, description, …) |
 | `on_click` | [`Action`](#actions) \| null | action bound to Enter |
 | `icon` | string \| null | the icon spec, an absolute path or a `builtin:` glyph; see [Icon specs](#icon-specs) |
+| `preview` | object | optional split-view payload, `{"type":"image","path":"/abs/file.png"}` |
 | `actions` | array | optional secondary commands for the `Shift+Enter` action panel |
+
+A `preview` is tagged by `type` like an `Action`; `image` carries an absolute
+path and is shown beside the list for the selected row. PNG, SVG, JPEG, WebP,
+GIF and BMP decode in this version. A host's preview path follows its icon rule:
+a file it ships, not a theme name or a `builtin:` glyph.
 
 An `actions` entry is
 `{"title": string, "action": Action, "icon"?: string}`, with the same icon-spec

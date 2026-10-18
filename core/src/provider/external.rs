@@ -8,7 +8,7 @@ use tokio::process::Command;
 
 use crate::plugin::{Meta, Plugin};
 use crate::system::icon::host_icon_spec;
-use crate::wire::ResultItem;
+use crate::wire::{Preview, ResultItem};
 use rust_i18n::t;
 
 /// Identity of one plugin as described by an external host's `list_plugins`.
@@ -254,6 +254,10 @@ fn parse_result_items(
     for item in &mut parsed {
         let spec = item.icon.as_deref().unwrap_or("");
         item.icon = resolve_item_icon(spec, identity.clone());
+        // A preview is a file the host ships, the same rule as its icon.
+        if let Some(Preview::Image { path }) = &item.preview {
+            item.preview = host_icon_spec(path).map(|path| Preview::Image { path });
+        }
         for action in &mut item.actions {
             action.icon = action.icon.as_deref().and_then(host_icon_spec);
             // The core owns this field; whatever the host sent is ignored.
@@ -479,6 +483,26 @@ mod tests {
             Some("/opt/identity.svg"),
             "an unset icon falls back to the identity"
         );
+    }
+
+    #[test]
+    fn a_hosts_preview_must_be_an_absolute_path() {
+        let response = serde_json::json!({
+            "result": [
+                {"title": "ok", "preview": {"type": "image", "path": "/tmp/a.png"}},
+                {"title": "theme", "preview": {"type": "image", "path": "theme:icon"}},
+                {"title": "relative", "preview": {"type": "image", "path": "a.png"}}
+            ]
+        });
+        let items = parse_result_items(response, "p", "").unwrap();
+        assert_eq!(
+            items[0].preview,
+            Some(Preview::Image {
+                path: "/tmp/a.png".to_string()
+            })
+        );
+        assert_eq!(items[1].preview, None);
+        assert_eq!(items[2].preview, None);
     }
 
     #[tokio::test]

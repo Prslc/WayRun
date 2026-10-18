@@ -10,10 +10,10 @@ mod test_support;
 
 use std::time::Instant;
 
-use wayrun_core::wire::{Action, ResultItem};
+use wayrun_core::wire::{Action, Preview, ResultItem};
 use wayrun_ui::geom::Layout;
 use wayrun_ui::present::{Presentation, RowMotion};
-use wayrun_ui::view::{Body, FieldView, FooterView, Frame, ListView, PanelView};
+use wayrun_ui::view::{Body, FieldView, FooterView, Frame, ListView, PanelView, PreviewView};
 
 use self::menu::PanelKey;
 
@@ -56,6 +56,9 @@ pub struct State {
     /// The bottom edge of the card drawn last. A settle repaint covers only the
     /// card, so a shrink must restore the dim over the old edge too.
     pub last_card_bottom: f32,
+    /// Whether the last frame drew the split view, so a short list can retarget
+    /// the height spring when the split appears or goes.
+    split_drawn: bool,
     /// `WAYRUN_TIMING=1`: the per-frame draw marks and the frame-pacing logs.
     pub timing: bool,
     /// What the pointer is over, if anything.
@@ -92,6 +95,7 @@ impl State {
             scale: 1,
             fractional: None,
             last_card_bottom: 0.0,
+            split_drawn: false,
             timing,
             hovered: None,
             pointer: None,
@@ -106,6 +110,29 @@ impl State {
     /// The geometry input and output share: config overrides with defaults.
     pub fn layout(&self) -> Layout {
         self.presentation.appearance.layout
+    }
+
+    /// The selected row's preview when the list owns the card, else nothing.
+    pub fn split(&self) -> bool {
+        self.menu.is_none()
+            && self
+                .rows
+                .get(self.cursor.selected)
+                .is_some_and(|row| row.preview.is_some())
+    }
+
+    fn selected_preview(&self) -> Option<&Preview> {
+        self.rows.get(self.cursor.selected)?.preview.as_ref()
+    }
+
+    /// A short list gains height when the preview appears, so entering or
+    /// leaving the split retargets the spring.
+    pub fn sync_split_height(&mut self, now: Instant) {
+        let split = self.split();
+        if split != self.split_drawn {
+            self.split_drawn = split;
+            self.retarget_height(now);
+        }
     }
 
     /// The buffer scale to render at: the compositor's fractional ratio when
@@ -127,6 +154,7 @@ impl State {
         match &self.menu {
             Some(menu) => layout.panel_h(menu.actions.len()),
             None if self.rows.is_empty() && self.query.is_empty() => layout.empty_h(),
+            None if self.split() => layout.content_h_for(layout.split_h(self.rows.len())),
             None => layout.content_h(self.rows.len()),
         }
     }
@@ -150,6 +178,13 @@ impl State {
             Some(Hover::Action(index)) => (None, Some(index)),
             None => (None, None),
         };
+        let preview = if self.split() {
+            self.selected_preview().map(|preview| match preview {
+                Preview::Image { path } => PreviewView::Image { path },
+            })
+        } else {
+            None
+        };
         let body = match &self.menu {
             Some(menu) => Body::Panel(PanelView {
                 parent_title: self.menu_parent_title(),
@@ -165,6 +200,7 @@ impl State {
                 first: self.cursor.first,
                 selected: self.cursor.selected,
                 hovered: hovered_row,
+                preview,
             }),
         };
 
@@ -221,6 +257,7 @@ impl State {
         self.dismiss_at = None;
         self.presentation.begin_show(now);
         self.presentation.snap_to(self.content_height(), now);
+        self.split_drawn = false;
         self.contain();
         self.caret_visible = true;
         self.caret_at = now;
@@ -237,6 +274,7 @@ impl State {
         // A show starts from an empty list: an empty query fetches nothing.
         self.rows = Vec::new();
         self.row_motion.clear();
+        self.split_drawn = false;
     }
 
     /// Keep the selection inside the `max_rows` window, minimally.
@@ -266,5 +304,46 @@ mod tests {
         // fractional ratio and 3072 through the integer scale
         assert_eq!((1536.0 * state.scale_factor()).round() as u32, 1920);
         assert_eq!((1536.0 * 2.0) as u32, 3072);
+    }
+
+    #[test]
+    fn a_preview_row_switches_the_card_into_the_split_layout() {
+        use crate::app::test_support::{item, state};
+        use wayrun_core::wire::Preview;
+
+        let mut state = state();
+        let now = Instant::now();
+        let mut picture = item(
+            "picture",
+            None,
+            Some(Action::Run {
+                cmd: "true".to_string(),
+            }),
+            None,
+        );
+        picture.preview = Some(Preview::Image {
+            path: "/tmp/p.png".to_string(),
+        });
+        state.apply_results(vec![picture, item("plain", None, None, None)], now);
+
+        assert!(state.split());
+        let split_height = state
+            .layout()
+            .content_h_for(state.layout().split_h(state.rows.len()));
+        assert_eq!(state.content_height(), split_height);
+        {
+            let frame = state.frame(now);
+            match &frame.body {
+                Body::List(list) => match &list.preview {
+                    Some(PreviewView::Image { path }) => assert_eq!(*path, "/tmp/p.png"),
+                    None => panic!("the selected row has a preview"),
+                },
+                Body::Panel(_) => panic!("the list owns the card"),
+            }
+        }
+
+        state.cursor.selected = 1;
+        assert!(!state.split());
+        assert_eq!(state.content_height(), state.layout().content_h(2));
     }
 }

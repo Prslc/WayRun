@@ -197,6 +197,7 @@ fn row_for(binary: &Binary, args: &str) -> ResultItem {
             run_cmd,
         )),
         icon: None,
+        preview: None,
         actions: Vec::new(),
     }
 }
