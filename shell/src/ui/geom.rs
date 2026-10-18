@@ -26,6 +26,7 @@ pub struct Layout {
     pub align: Align,
     pub radius: f32,
     pub max_rows: usize,
+    pub panel_header_h: f32,
 }
 
 impl Default for Layout {
@@ -36,6 +37,7 @@ impl Default for Layout {
             align: Align::Center,
             radius: 16.0,
             max_rows: 5,
+            panel_header_h: 28.0,
         }
     }
 }
@@ -105,22 +107,17 @@ impl Layout {
         PAD + SEARCH_H + PAD
     }
 
-    /// The action panel's header band: the parent row's title, above the actions offered.
-    pub fn panel_header_h(&self) -> f32 {
-        28.0
-    }
-
     /// The card height with the action panel open: like `content_h`, but the
     /// list band holds the actions under a header instead of the results.
     pub fn panel_h(&self, actions: usize) -> f32 {
         let base = PAD + SEARCH_H + GAP + FOOTER_H + PAD;
-        base + GAP + self.panel_header_h() + self.list_h(actions)
+        base + GAP + self.panel_header_h + self.list_h(actions)
     }
 
     /// The y of the first action row: the panel header sits where the first
     /// result row would.
     pub fn actions_top(&self, surface: (u32, u32)) -> f32 {
-        self.rows_top(surface) + self.panel_header_h()
+        self.rows_top(surface) + self.panel_header_h
     }
 
     /// The action index under a surface-local point, `None` outside the panel.
@@ -333,12 +330,12 @@ mod tests {
     #[test]
     fn the_action_panel_adds_a_header_above_the_actions() {
         let l = Layout::default();
-        assert_eq!(l.panel_h(3), l.content_h(3) + l.panel_header_h());
+        assert_eq!(l.panel_h(3), l.content_h(3) + l.panel_header_h);
         // the actions start where the first result row would, one header lower
         let surface = (1920, 1080);
         assert_eq!(
             l.actions_top(surface),
-            l.rows_top(surface) + l.panel_header_h()
+            l.rows_top(surface) + l.panel_header_h
         );
 
         let left = l.card_x(surface) + 10.0;

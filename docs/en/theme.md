@@ -129,6 +129,7 @@ layerrule = blur, WayRun
 | `top_ratio` | float | `0.28` | 0–1 | Card top as a fraction of the output height. |
 | `align` | string | `center` | `left`/`center`/`right` | Horizontal anchor on the output. |
 | `max_rows` | int | `5` | 1–8 | Visible result rows. |
+| `panel_header` | float | `28.0` | ≥ 0 | Action panel header band above the actions. |
 
 An unknown `align` keeps the default.
 

@@ -38,14 +38,14 @@ pub(super) fn draw_actions(
             canvas.px(left),
             canvas.px(y),
             canvas.px(width),
-            canvas.px(layout.panel_header_h()),
+            canvas.px(layout.panel_header_h),
         ];
         text.draw(
             pixmap,
             &shaped,
             state.fade(theme.primary, 0.9, now),
             canvas.px(left),
-            canvas.px(y + (layout.panel_header_h() - shaped.height / canvas.scale) / 2.0),
+            canvas.px(y + (layout.panel_header_h - shaped.height / canvas.scale) / 2.0),
             Some(clip),
         );
     }

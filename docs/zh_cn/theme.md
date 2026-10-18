@@ -111,6 +111,7 @@ layerrule = blur, WayRun
 | `top_ratio` | float | `0.28` | 0–1 | 卡片顶部占输出高度的比例。 |
 | `align` | string | `center` | `left`/`center`/`right` | 在输出上的水平锚点。 |
 | `max_rows` | int | `5` | 1–8 | 可见结果行数。 |
+| `panel_header` | float | `28.0` | ≥ 0 | 动作面板中动作上方的标题栏高度。 |
 
 `align` 无法识别时保留默认值。
 

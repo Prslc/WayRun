@@ -179,6 +179,7 @@ struct LayoutFile {
     top_ratio: Option<f32>,
     align: Option<String>,
     max_rows: Option<usize>,
+    panel_header: Option<f32>,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -236,6 +237,13 @@ impl AppearanceConfig {
             layout.align.as_deref().and_then(parse_align)
         );
         assign!(self.layout.max_rows, layout.max_rows.map(|v| v.clamp(1, 8)));
+        assign!(
+            self.layout.panel_header_h,
+            layout
+                .panel_header
+                .filter(|v| v.is_finite())
+                .map(|v| v.max(0.0))
+        );
 
         assign!(self.reduced, motion.reduced);
     }
@@ -326,6 +334,7 @@ mod tests {
             radius = 20.0
             width = 800.0
             max_rows = 3
+            panel_header = 34.0
 
             [motion]
             reduced = true
@@ -337,6 +346,7 @@ mod tests {
         assert_eq!(config.layout.radius, 20.0);
         assert_eq!(config.layout.width, 800.0);
         assert_eq!(config.layout.max_rows, 3);
+        assert_eq!(config.layout.panel_header_h, 34.0);
         assert!(config.reduced);
         // untouched defaults survive
         assert_eq!(config.font.size, 14.0);
@@ -359,10 +369,12 @@ mod tests {
 
             [layout]
             max_rows = 99
+            panel_header = -5.0
             "#,
         );
         assert_eq!(config.font.size, 96.0);
         assert_eq!(config.layout.max_rows, 8);
+        assert_eq!(config.layout.panel_header_h, 0.0);
     }
 
     #[test]
