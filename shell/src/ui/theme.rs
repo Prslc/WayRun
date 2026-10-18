@@ -60,8 +60,9 @@ const CARD_ALPHA: f32 = 0.72;
 const CARD_ALPHA_DARK: f32 = 0.85;
 const SELECTION_ALPHA: f32 = 0.15;
 const HOVER_ALPHA: f32 = 0.08;
-const HAIRLINE_ALPHA: f32 = 0.35;
-/// A white ring at the light alpha reads as a bright edge on a dark card.
+/// White over a dark card reads as a bright ring; black over a light one is
+/// the visible edge, while white there is nearly the card's own colour.
+const HAIRLINE_ALPHA: f32 = 0.10;
 const HAIRLINE_ALPHA_DARK: f32 = 0.12;
 const MUTED_ALPHA: f32 = 0.55;
 const SUMMARY_ALPHA: f32 = 0.7;
@@ -106,16 +107,11 @@ impl Surfaces {
             ),
             selection: tint(theme.primary, SELECTION_ALPHA),
             hover: tint(theme.primary, HOVER_ALPHA),
-            hairline: [
-                255,
-                255,
-                255,
-                alpha_u8(if dark {
-                    HAIRLINE_ALPHA_DARK
-                } else {
-                    HAIRLINE_ALPHA
-                }),
-            ],
+            hairline: if dark {
+                [255, 255, 255, alpha_u8(HAIRLINE_ALPHA_DARK)]
+            } else {
+                [0, 0, 0, alpha_u8(HAIRLINE_ALPHA)]
+            },
             muted: tint(theme.fg, MUTED_ALPHA),
             summary: tint(theme.fg, SUMMARY_ALPHA),
             footer: tint(theme.fg, FOOTER_ALPHA),
@@ -241,10 +237,12 @@ mod tests {
         let theme = Theme::default();
         let light = Surfaces::resolve(theme, &ColorOverrides::default(), Mode::Light);
         assert_eq!(light.card, tint(theme.container, CARD_ALPHA));
+        assert_eq!(light.hairline[..3], [0, 0, 0]);
         assert_eq!(light.hairline[3], alpha_u8(HAIRLINE_ALPHA));
 
         let dark = Surfaces::resolve(theme, &ColorOverrides::default(), Mode::Dark);
         assert_eq!(dark.card, tint(theme.container, CARD_ALPHA_DARK));
+        assert_eq!(dark.hairline[..3], [255, 255, 255]);
         assert_eq!(dark.hairline[3], alpha_u8(HAIRLINE_ALPHA_DARK));
         assert_eq!(dark.muted, tint(theme.fg, MUTED_ALPHA));
         assert_eq!(dark.accent, tint(theme.primary, ACCENT_ALPHA));
