@@ -4,7 +4,7 @@ use super::log::Log;
 
 /// The script's whole world: a curated core of Lua plus `wayrun`. `os`, `io`,
 /// `package` and `load` are absent; `print` writes to the journal, never stdout.
-pub(super) fn script_env(lua: &Lua, wayrun: &Table, log: Log) -> mlua::Result<Table> {
+pub(super) fn script_env(lua: &Lua, wayrun: &Table, script: &str, log: Log) -> mlua::Result<Table> {
     let globals = lua.globals();
     let env = lua.create_table()?;
     for name in SAFE_GLOBALS {
@@ -24,6 +24,7 @@ pub(super) fn script_env(lua: &Lua, wayrun: &Table, log: Log) -> mlua::Result<Ta
             Ok(())
         })?,
     )?;
+    super::module::bind(lua, wayrun, &env, script)?;
     Ok(env)
 }
 
@@ -71,7 +72,7 @@ mod tests {
         };
         let active: Active = Rc::new(RefCell::new(Some("p".to_string())));
         let log = Log::with_sink("/x.lua", active, sink);
-        let env = script_env(&lua, &wayrun, log).unwrap();
+        let env = script_env(&lua, &wayrun, "/x.lua", log).unwrap();
 
         let print: Function = env.get("print").unwrap();
         print.call::<()>((1, "x", true)).unwrap();

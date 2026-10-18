@@ -6,6 +6,7 @@ mod http;
 mod kv;
 mod log;
 mod manifest;
+mod module;
 mod sandbox;
 mod sdk;
 mod sqlite;

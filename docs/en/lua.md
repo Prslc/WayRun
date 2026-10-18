@@ -91,6 +91,7 @@ A row with no `on_click` is display-only; it can still carry `actions`.
 | `wayrun.env(name)` | a variable the plugin declares in `env`, or nil when unset; an undeclared name raises |
 | `wayrun.which(name)` | an executable's path on the launcher's `$PATH`, or nil; the same PATH a `run` row's command will see |
 | `wayrun.script_dir()` | the script's own directory, for an icon it ships |
+| `wayrun.import(name)` | loads `<script_dir>/<name>.lua` in the same sandbox and caches its value; a nil return becomes true; a circular or escaping import raises |
 | `wayrun.plugin_dir(id)` | the directory a plugin may read from, `$XDG_CONFIG_HOME/wayrun/plugins/<id>` |
 | `wayrun.fs.read(name)` | a file: a relative name under the plugin directory, or an absolute/`~/` path in a declared area or the script's directory; nil when absent, an error when it escapes |
 | `wayrun.toml.decode(text)` | TOML in, a table out |
@@ -146,6 +147,15 @@ printf '{"jsonrpc":"2.0","method":"search","params":{"plugin":"<id>","text":"…
 
 A missing `env` or `read` declaration is named in the error, so add it to the
 plugin table instead of probing for it.
+
+## Modules
+
+`wayrun.import("lib/util")` loads `<script_dir>/lib/util.lua` (the `.lua` is
+optional) in the same sandbox environment and returns its value; later imports
+of the same canonical path return the cached value. A nil return is cached as
+`true`, as `require` does. Names are relative, may not climb out with `..`, and
+a symlink that resolves outside the script's directory is refused. A circular
+import raises rather than recursing.
 
 ## Limits
 

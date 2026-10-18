@@ -174,7 +174,7 @@ pub(super) fn now_seconds() -> i64 {
 
 /// The script's own directory, so a plugin can ship an icon beside itself; the
 /// host has just read the file, so canonicalize only fails in theory.
-fn script_dir(script: &str) -> Option<PathBuf> {
+pub(super) fn script_dir(script: &str) -> Option<PathBuf> {
     let path = std::fs::canonicalize(script).unwrap_or_else(|_| PathBuf::from(script));
     path.parent().map(|dir| dir.to_path_buf())
 }
@@ -409,6 +409,14 @@ mod tests {
             &lua,
             "/test/script.lua",
             &shared,
+            Log::new("/test/script.lua", Rc::clone(&active)),
+        )
+        .unwrap();
+        // `wayrun.import` is bound by the sandbox, after the environment exists.
+        crate::lua::sandbox::script_env(
+            &lua,
+            &table,
+            "/test/script.lua",
             Log::new("/test/script.lua", active),
         )
         .unwrap();

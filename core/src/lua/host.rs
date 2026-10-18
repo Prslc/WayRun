@@ -60,7 +60,7 @@ impl Host {
         let load = || -> mlua::Result<(Lua, Vec<Plugin>)> {
             let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::default())?;
             let wayrun = sdk::build(&lua, script, &shared, log.clone())?;
-            let env = script_env(&lua, &wayrun, log.clone())?;
+            let env = script_env(&lua, &wayrun, script, log.clone())?;
             let declared: Table = lua
                 .load(source)
                 .set_name(script)
@@ -293,6 +293,24 @@ mod tests {
             return { { id = "demo", search = function() return {} end } }
             "#,
         );
+    }
+
+    #[test]
+    fn import_loads_a_module_next_to_the_script() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("util.lua"), "return { answer = 42 }").unwrap();
+        let script = dir.path().join("main.lua");
+        std::fs::write(
+            &script,
+            r#"return { { id = "demo", search = function()
+                local util = wayrun.import("util")
+                return { { title = tostring(util.answer) } }
+            end } }"#,
+        )
+        .unwrap();
+        let source = std::fs::read_to_string(&script).unwrap();
+        let host = Host::new(script.to_str().unwrap(), &source).unwrap();
+        assert_eq!(search(&host, "demo", "x")[0]["title"], "42");
     }
 
     #[test]

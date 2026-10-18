@@ -86,6 +86,7 @@ actions = {
 | `wayrun.env(name)` | 插件在 `env` 中声明的变量；未设置则为 nil；未声明的名字抛出 |
 | `wayrun.which(name)` | 启动器 `$PATH` 上某个可执行文件的路径，否则 nil；与 `run` 行的命令将看到的 PATH 相同 |
 | `wayrun.script_dir()` | 脚本自身所在目录，用于携带图标等文件 |
+| `wayrun.import(name)` | 在同一个沙箱里加载 `<script_dir>/<name>.lua` 并缓存其值；返回 nil 时缓存为 true；循环或越界 import 抛出 |
 | `wayrun.plugin_dir(id)` | 插件可读目录：`$XDG_CONFIG_HOME/wayrun/plugins/<id>` |
 | `wayrun.fs.read(name)` | 读取文件：相对名在插件目录下，绝对/`~/` 路径须在声明区域或脚本目录内；缺失返回 nil，越界报错 |
 | `wayrun.toml.decode(text)` | TOML 进，表出 |
@@ -133,6 +134,13 @@ printf '{"jsonrpc":"2.0","method":"search","params":{"plugin":"<id>","text":"…
 ```
 
 缺少 `env` 或 `read` 声明时，错误会直接点名，把它加进插件表即可，不必反复试探。
+
+## 模块
+
+`wayrun.import("lib/util")` 会在同一个沙箱环境里加载 `<script_dir>/lib/util.lua`
+（`.lua` 可省略）并返回其值；之后对同一规范路径的 import 返回缓存值。返回 nil 时按
+`require` 的习惯缓存为 true。名字必须是相对路径，不能用 `..` 爬出脚本目录，解析到
+目录外的 symlink 也会被拒绝；循环 import 直接报错而不是递归。
 
 ## 限制
 
