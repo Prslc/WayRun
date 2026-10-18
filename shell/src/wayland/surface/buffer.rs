@@ -56,36 +56,60 @@ impl Shell {
         if !sized(&self.pixmap) {
             self.pixmap = Pixmap::new(physical_w, physical_h);
             self.caret_patch = None;
-            // Room for two full-output buffers; each persistent buffer takes a
-            // slot, and the pool grows on demand rather than being a hard cap.
-            self.pool =
-                SlotPool::new(physical_w as usize * physical_h as usize * 4 * 2, &self.shm).ok();
             // A fresh pixmap holds nothing; the whole frame has to be laid down.
             self.needs_full = true;
         }
 
-        if self.buffer_physical != (physical_w, physical_h)
-            || self.buffers.iter().any(Option::is_none)
-        {
-            self.buffers = [None, None];
+        let resized = self.buffer_physical != (physical_w, physical_h);
+        if resized {
+            self.scratch_pool = None;
+            self.buffers[1] = None;
+        }
+        if resized || self.pool.is_none() || self.buffers[0].is_none() {
+            if resized || self.pool.is_none() {
+                // One full-output slot; the second buffer is the per-show scratch.
+                self.pool =
+                    SlotPool::new(physical_w as usize * physical_h as usize * 4, &self.shm).ok();
+            }
             self.buffer_physical = (physical_w, physical_h);
-            self.buffer_stale = [Damage::FULL, Damage::FULL];
-            self.buffer_next = 0;
+            self.buffer_stale[0] = Damage::FULL;
             self.pending_damage = Damage::FULL;
             self.needs_full = true;
+            self.buffer_next = 0;
             let len = physical_w as usize * physical_h as usize * 4;
-            for slot in 0..self.buffers.len() {
-                self.buffers[slot] = self.new_buffer(len, physical_w, physical_h);
-            }
+            self.buffers[0] = self.new_buffer(false, len, physical_w, physical_h);
         }
 
-        self.pixmap.is_some() && self.pool.is_some() && self.buffers.iter().all(Option::is_some)
+        if self.scratch_pool.is_none() {
+            self.scratch_pool =
+                SlotPool::new(physical_w as usize * physical_h as usize * 4, &self.shm).ok();
+        }
+        if self.buffers[1].is_none() {
+            self.buffer_stale[1] = Damage::FULL;
+            let len = physical_w as usize * physical_h as usize * 4;
+            self.buffers[1] = self.new_buffer(true, len, physical_w, physical_h);
+        }
+
+        self.pixmap.is_some()
+            && self.pool.is_some()
+            && self.scratch_pool.is_some()
+            && self.buffers.iter().all(Option::is_some)
     }
 
-    /// One persistent buffer over a fresh slot.
-    fn new_buffer(&mut self, len: usize, physical_w: u32, physical_h: u32) -> Option<Buffer> {
+    /// One buffer over a fresh slot in the retained or the scratch pool.
+    fn new_buffer(
+        &mut self,
+        scratch: bool,
+        len: usize,
+        physical_w: u32,
+        physical_h: u32,
+    ) -> Option<Buffer> {
         let format = self.shm_format;
-        let pool = self.pool.as_mut()?;
+        let pool = if scratch {
+            self.scratch_pool.as_mut()?
+        } else {
+            self.pool.as_mut()?
+        };
         let slot = pool.new_slot(len).ok()?;
         pool.create_buffer_in(
             &slot,
@@ -132,7 +156,12 @@ impl Shell {
             let Some(pixmap) = self.pixmap.as_ref() else {
                 return false;
             };
-            let Some(pool) = self.pool.as_mut() else {
+            let pool = if index == 1 {
+                self.scratch_pool.as_mut()
+            } else {
+                self.pool.as_mut()
+            };
+            let Some(pool) = pool else {
                 return false;
             };
             let Some(buffer) = self.buffers[index].as_ref() else {
@@ -250,6 +279,10 @@ impl Shell {
         let start = self.buffer_next;
         for offset in 0..self.buffers.len() {
             let index = (start + offset) % self.buffers.len();
+            // The first frame takes the retained buffer; the scratch one is cold.
+            if !self.first_frame_logged && index != 0 {
+                continue;
+            }
             if let Some(buffer) = self.buffers[index].as_ref()
                 && !buffer.slot().has_active_buffers()
             {

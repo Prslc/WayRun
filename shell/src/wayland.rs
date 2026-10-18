@@ -168,8 +168,11 @@ pub struct Shell {
     configured: bool,
     effect: Option<ExtBackgroundEffectSurfaceV1>,
     pool: Option<SlotPool>,
-    /// Two persistent shm buffers reused across presents; `buffer_stale[i]` is
-    /// what the pixmap changed since buffer `i` was last written.
+    /// The second frame's pool and buffer, rebuilt per show: the compositor
+    /// releases the current buffer only when the next commit replaces it.
+    scratch_pool: Option<SlotPool>,
+    /// Two shm buffers reused across presents; `buffer_stale[i]` is what the
+    /// pixmap changed since buffer `i` was last written.
     buffers: [Option<Buffer>; 2],
     buffer_stale: [Damage; 2],
     /// The buffer to write next, so the two alternate.
@@ -202,6 +205,8 @@ pub struct Shell {
     open_at: Option<Instant>,
     last_present: Option<Instant>,
     first_frame_logged: bool,
+    /// Bumped by each show, so a trim timer from an earlier dismissal no-ops.
+    hidden_generation: u64,
     timer_registered: bool,
     /// Whether a `wl_surface.frame` callback is outstanding. Presents are paced to
     /// it, so a burst of input cannot leave buffers in flight.
@@ -258,6 +263,7 @@ impl Shell {
             configured: false,
             effect: None,
             pool: None,
+            scratch_pool: None,
             buffers: [None, None],
             buffer_stale: [Damage::EMPTY, Damage::EMPTY],
             buffer_next: 0,
@@ -281,6 +287,7 @@ impl Shell {
             open_at: None,
             last_present: None,
             first_frame_logged: false,
+            hidden_generation: 0,
             timer_registered: false,
             frame_pending: false,
             needs_present: false,
