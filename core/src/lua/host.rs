@@ -49,12 +49,14 @@ impl Host {
         let active: kv::Active = Rc::new(RefCell::new(None));
         let kv_paths: kv::Paths = Rc::new(RefCell::new(HashMap::new()));
         let env_scope: sdk::EnvScope = Rc::new(RefCell::new(HashMap::new()));
+        let exec_scope: sdk::ExecScope = Rc::new(RefCell::new(HashMap::new()));
         let read_areas: areas::Areas = Rc::new(RefCell::new(HashMap::new()));
         let log = Log::new(script, Rc::clone(&active));
         let shared = sdk::Shared {
             active: Rc::clone(&active),
             kv_paths: Rc::clone(&kv_paths),
             env_scope: Rc::clone(&env_scope),
+            exec_scope: Rc::clone(&exec_scope),
             read_areas: Rc::clone(&read_areas),
         };
         let load = || -> mlua::Result<(Lua, Vec<Plugin>)> {
@@ -74,9 +76,11 @@ impl Host {
         // names and the read areas fill here.
         let mut paths = HashMap::new();
         let mut envs = HashMap::new();
+        let mut execs = HashMap::new();
         let mut areas = HashMap::new();
         for plugin in &plugins {
             envs.insert(plugin.id.clone(), plugin.env.clone());
+            execs.insert(plugin.id.clone(), plugin.exec.clone());
             areas.insert(plugin.id.clone(), plugin.read.clone());
             if let Some(dir) = sdk::plugin_dir(&plugin.id) {
                 paths.insert(plugin.id.clone(), dir.join("kv.db"));
@@ -84,6 +88,7 @@ impl Host {
         }
         *kv_paths.borrow_mut() = paths;
         *env_scope.borrow_mut() = envs;
+        *exec_scope.borrow_mut() = execs;
         *read_areas.borrow_mut() = areas;
         Ok(Self {
             lua,
@@ -283,6 +288,45 @@ mod tests {
             return { { id = "demo", search = function() return {} end } }
             "#,
         );
+    }
+
+    #[test]
+    fn exec_runs_a_declared_program_with_argv() {
+        let host = host(
+            r#"
+            return { { id = "demo", exec = { "sh" }, search = function()
+                local out = wayrun.exec("sh", { "-c", "printf out; printf err >&2; exit 3" })
+                return { { title = out.stdout, summary = out.stderr .. " " .. out.code } }
+            end } }
+            "#,
+        );
+        let rows = search(&host, "demo", "x");
+        assert_eq!(rows[0]["title"], "out");
+        assert_eq!(rows[0]["summary"], "err 3");
+    }
+
+    #[test]
+    fn exec_refuses_an_undeclared_program() {
+        let host = host(
+            r#"
+            return { { id = "demo", search = function()
+                wayrun.exec("sh", { "-c", "true" })
+                return {}
+            end } }
+            "#,
+        );
+        assert!(call(&host, "search", json!({ "plugin": "demo", "text": "x" })).is_err());
+    }
+
+    #[test]
+    fn exec_declarations_are_program_names() {
+        let error = Host::new(
+            "/test/script.lua",
+            r#"return { { id = "demo", exec = { "/bin/sh" }, search = function() return {} end } }"#,
+        )
+        .err()
+        .expect("a path is not a program name");
+        assert!(error.to_string().contains("program name"), "{error}");
     }
 
     #[test]

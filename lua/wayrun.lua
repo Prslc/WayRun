@@ -79,6 +79,16 @@ function wayrun.env(name) end
 ---@return string?
 function wayrun.which(name) end
 
+---@class WayrunExecResult
+---@field code integer
+---@field stdout string
+---@field stderr string
+
+---@param program string
+---@param args string[]?
+---@return WayrunExecResult
+function wayrun.exec(program, args) end
+
 ---@return string?
 function wayrun.script_dir() end
 

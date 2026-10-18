@@ -56,6 +56,10 @@ symlink，区域内的符号链接无法把路径带出区域；`fs.list`、`fs.
 `sqlite.snapshot` 遇到区域之外的路径直接报错，而插件自己的目录与脚本所在目录始终
 算在区域内。
 
+`exec` 列出插件可通过 `wayrun.exec` 运行的程序名：必须在 `PATH` 上，不接受带斜杠的
+路径。子进程只保留会话的 `PATH`、`HOME`、XDG、D-Bus 与 Wayland 变量，加上插件在
+`env` 里声明过的名字；启动器环境中的其他变量不会传入。
+
 ## 动作（Action）
 
 `on_click` 与行上 `actions` 里的每一项都是命令：带 `type` 标签的普通表，形状见
@@ -89,6 +93,7 @@ actions = {
 | `wayrun.time()` | Unix 秒，用于签名与缓存 TTL |
 | `wayrun.env(name)` | 插件在 `env` 中声明的变量；未设置则为 nil；未声明的名字抛出 |
 | `wayrun.which(name)` | 启动器 `$PATH` 上某个可执行文件的路径，否则 nil；与 `run` 行的命令将看到的 PATH 相同 |
+| `wayrun.exec(program, args?)` | 以 argv（不过 shell）运行插件声明过的 `PATH` 程序，2 秒超时；返回 `{code, stdout, stderr}`，输出上限 64 KiB / 8 KiB；未声明或超时会 raise |
 | `wayrun.script_dir()` | 脚本自身所在目录，用于携带图标等文件 |
 | `wayrun.import(name)` | 在同一个沙箱里加载 `<script_dir>/<name>.lua` 并缓存其值；返回 nil 时缓存为 true；循环或越界 import 抛出 |
 | `wayrun.plugin_dir(id)` | 插件可读目录：`$XDG_CONFIG_HOME/wayrun/plugins/<id>` |

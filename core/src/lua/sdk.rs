@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 
 use gio::prelude::FileExt;
 use mlua::{Lua, LuaSerdeExt, Table, Value};
@@ -19,6 +19,10 @@ use super::sqlite;
 /// after the script is read, refused for a name the calling plugin omits.
 pub(super) type EnvScope = Rc<RefCell<HashMap<String, Vec<String>>>>;
 
+/// Every declared plugin's runnable program names, by plugin id; a name the
+/// calling plugin omits is refused.
+pub(super) type ExecScope = Rc<RefCell<HashMap<String, Vec<String>>>>;
+
 /// `$XDG_CONFIG_HOME/wayrun/plugins/<id>`, the directory a plugin reads its own
 /// files from; the user places them, nothing here is created for the script.
 pub(super) fn plugin_dir(id: &str) -> Option<PathBuf> {
@@ -31,8 +35,25 @@ pub(super) struct Shared {
     pub active: kv::Active,
     pub kv_paths: kv::Paths,
     pub env_scope: EnvScope,
+    pub exec_scope: ExecScope,
     pub read_areas: areas::Areas,
 }
+
+/// The session variables a declared program keeps: enough to reach a socket or
+/// a display, with the rest of the launcher's environment hidden.
+const EXEC_ENV: [&str; 8] = [
+    "PATH",
+    "HOME",
+    "XDG_RUNTIME_DIR",
+    "XDG_CONFIG_HOME",
+    "XDG_STATE_HOME",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "WAYLAND_DISPLAY",
+    "DISPLAY",
+];
+const EXEC_TIMEOUT: Duration = Duration::from_secs(2);
+const EXEC_STDOUT_CAP: usize = 64 * 1024;
+const EXEC_STDERR_CAP: usize = 8 * 1024;
 
 pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua::Result<Table> {
     let sdk = lua.create_table()?;
@@ -91,6 +112,22 @@ pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua:
         lua.create_function(|_, name: String| {
             let path = std::env::var_os("PATH").unwrap_or_default();
             Ok(crate::system::fs::which_in(path, &name).map(|path| path.display().to_string()))
+        })?,
+    )?;
+    let exec_active = Rc::clone(&shared.active);
+    let exec_scope = Rc::clone(&shared.exec_scope);
+    let exec_env = Rc::clone(&shared.env_scope);
+    sdk.set(
+        "exec",
+        lua.create_function(move |lua, (program, args): (String, Option<Vec<String>>)| {
+            exec_program(
+                lua,
+                &program,
+                args.unwrap_or_default(),
+                &exec_active,
+                &exec_scope,
+                &exec_env,
+            )
         })?,
     )?;
     let dir = script_dir(script);
@@ -167,6 +204,70 @@ pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua:
     sdk.set("fuzzy", fuzzy::lib(lua)?)?;
     sdk.set("crypto", crypto::lib(lua)?)?;
     Ok(sdk)
+}
+
+/// Run a declared PATH program with argv and a deadline. The plugin's declared
+/// `env` names survive `env_clear`, so `exec("env")` cannot widen that list.
+fn exec_program(
+    lua: &Lua,
+    program: &str,
+    args: Vec<String>,
+    active: &kv::Active,
+    exec_scope: &ExecScope,
+    env_scope: &EnvScope,
+) -> mlua::Result<Table> {
+    let Some(id) = active.borrow().clone() else {
+        return Err(mlua::Error::RuntimeError(format!(
+            "exec {program}: this call ran outside a plugin call"
+        )));
+    };
+    let declared = exec_scope.borrow().get(&id).cloned().unwrap_or_default();
+    if !declared.iter().any(|name| name == program) {
+        return Err(mlua::Error::RuntimeError(format!(
+            "exec {program}: plugin {id} does not declare it; add the name to the plugin table's exec"
+        )));
+    }
+    let path = crate::system::fs::which_in(std::env::var_os("PATH").unwrap_or_default(), program)
+        .ok_or_else(|| {
+        mlua::Error::RuntimeError(format!("exec {program}: not on the launcher's PATH"))
+    })?;
+    let mut command = std::process::Command::new(path);
+    command.args(&args).env_clear();
+    for name in EXEC_ENV {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    let declared_env = env_scope.borrow().get(&id).cloned().unwrap_or_default();
+    for name in declared_env {
+        if let Some(value) = std::env::var_os(&name) {
+            command.env(name, value);
+        }
+    }
+    let output = crate::system::process::output_within_capped(
+        command,
+        EXEC_TIMEOUT,
+        EXEC_STDOUT_CAP,
+        EXEC_STDERR_CAP,
+    )
+    .ok_or_else(|| {
+        mlua::Error::RuntimeError(format!(
+            "exec {program}: could not start, or still running after {}s",
+            EXEC_TIMEOUT.as_secs()
+        ))
+    })?;
+
+    let result = lua.create_table()?;
+    result.set("code", output.status.code().unwrap_or(-1))?;
+    result.set(
+        "stdout",
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+    )?;
+    result.set(
+        "stderr",
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )?;
+    Ok(result)
 }
 
 /// The `file://` URI for an absolute path, encoded by GLib exactly as a built-in
@@ -428,6 +529,7 @@ mod tests {
             active: Rc::clone(&active),
             kv_paths: Rc::new(RefCell::new(HashMap::new())),
             env_scope: Rc::new(RefCell::new(HashMap::new())),
+            exec_scope: Rc::new(RefCell::new(HashMap::new())),
             read_areas: Rc::new(RefCell::new(HashMap::new())),
         };
         let table = build(

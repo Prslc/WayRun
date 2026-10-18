@@ -61,6 +61,11 @@ lead out of it; `fs.list`, `fs.stat` and `sqlite.snapshot` raise for anything
 outside those areas, while the plugin's own directory and the script's
 directory are always inside.
 
+`exec` lists the exact program names (on `PATH`, no slashes) a plugin may run
+with `wayrun.exec`. The child keeps the session's `PATH`, `HOME`, XDG, D-Bus
+and Wayland variables plus the plugin's declared `env` names; nothing else from
+the launcher's environment is inherited.
+
 ## Actions
 
 `on_click` and every entry of a row's `actions` are commands: plain tables
@@ -95,6 +100,7 @@ A row with no `on_click` is display-only; it can still carry `actions`.
 | `wayrun.time()` | Unix seconds, for signatures and cache TTLs |
 | `wayrun.env(name)` | a variable the plugin declares in `env`, or nil when unset; an undeclared name raises |
 | `wayrun.which(name)` | an executable's path on the launcher's `$PATH`, or nil; the same PATH a `run` row's command will see |
+| `wayrun.exec(program, args?)` | runs a declared `PATH` program with argv (no shell) under a 2s deadline; answers `{code, stdout, stderr}`, capped at 64 KiB/8 KiB; an undeclared program or a timeout raises |
 | `wayrun.script_dir()` | the script's own directory, for an icon it ships |
 | `wayrun.import(name)` | loads `<script_dir>/<name>.lua` in the same sandbox and caches its value; a nil return becomes true; a circular or escaping import raises |
 | `wayrun.plugin_dir(id)` | the directory a plugin may read from, `$XDG_CONFIG_HOME/wayrun/plugins/<id>` |

@@ -12,6 +12,7 @@ pub(super) struct Plugin {
     pub api: u32,
     pub description: Option<String>,
     pub env: Vec<String>,
+    pub exec: Vec<String>,
     pub read: Vec<PathBuf>,
     pub search: Option<Function>,
     pub top: Option<Function>,
@@ -60,6 +61,18 @@ pub(super) fn read_plugins(declared: &Table, script: &str) -> mlua::Result<Vec<P
                 )));
             }
         }
+        let exec: Vec<String> = entry
+            .get::<Option<Vec<String>>>("exec")?
+            .unwrap_or_default();
+        for name in &exec {
+            // A PATH name, never a path: a plugin reuses the session's tools
+            // instead of shipping an executable of its own.
+            if name.is_empty() || name.contains('/') || name.contains('\0') {
+                return Err(mlua::Error::RuntimeError(format!(
+                    "{script}: plugin {id}: exec {name:?} is not a program name"
+                )));
+            }
+        }
         let mut read = Vec::new();
         for spec in entry
             .get::<Option<Vec<String>>>("read")?
@@ -83,6 +96,7 @@ pub(super) fn read_plugins(declared: &Table, script: &str) -> mlua::Result<Vec<P
             api: entry.get::<Option<u32>>("api")?.unwrap_or(0),
             description: entry.get("description")?,
             env,
+            exec,
             read,
             search: entry.get("search")?,
             top: entry.get("top")?,
