@@ -36,8 +36,7 @@ applies live.
 
 The icon theme is optional: the panel and built-in plugin glyphs are
 built into the binary, and a row icon no theme resolves falls back to a bundled
-placeholder. `theme` beats the desktop setting. A change takes effect on the next
-launch.
+placeholder. `theme` beats the desktop setting.
 
 ## `[files]`
 

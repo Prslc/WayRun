@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock};
 
 use anyhow::Result;
 
+use crate::live::Live;
 use crate::plugin::{Match, classify};
 use crate::plugin::{Meta, Plugin};
 use crate::provider::{FreshCache, SHOW_CAP, rank_results};
@@ -164,18 +165,9 @@ fn row(compositor: &dyn Compositor, window: &Window) -> ResultItem {
 /// The app's icon, resolved once per app id: the `.desktop` read must not
 /// repeat for every keystroke that still lists the window.
 fn app_icon(app_id: &str) -> Option<String> {
-    static CACHE: LazyLock<Mutex<HashMap<String, Option<String>>>> =
-        LazyLock::new(|| Mutex::new(HashMap::default()));
-    if let Ok(cache) = CACHE.lock()
-        && let Some(icon) = cache.get(app_id)
-    {
-        return icon.clone();
-    }
-    let icon = desktop_action::icon_for_app_id(app_id);
-    if let Ok(mut cache) = CACHE.lock() {
-        cache.insert(app_id.to_string(), icon.clone());
-    }
-    icon
+    static CACHE: LazyLock<Live<HashMap<String, Option<String>>>> =
+        LazyLock::new(|| Live::shared(crate::provider::application::app_source()));
+    CACHE.memoized(app_id, || desktop_action::icon_for_app_id(app_id))
 }
 
 #[cfg(test)]

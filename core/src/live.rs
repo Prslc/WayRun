@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -71,6 +71,11 @@ impl Source {
 
     fn epoch(&self) -> u64 {
         self.signal.epoch.load(Ordering::Acquire)
+    }
+
+    /// Mark every reader stale without a filesystem event (a settings edit).
+    pub fn invalidate(&self) {
+        self.signal.epoch.fetch_add(1, Ordering::Release);
     }
 
     fn arm(&self) {
@@ -184,16 +189,29 @@ fn stamps(paths: &HashSet<PathBuf>) -> Vec<Stamp> {
 
 /// A value rebuilt lazily whenever its [`Source`] epoch moves.
 pub struct Live<T> {
-    source: Source,
+    source: Arc<Source>,
     value: Mutex<Option<(u64, Arc<T>)>>,
+    bound: Option<usize>,
 }
 
 impl<T: Send + Sync + 'static> Live<T> {
     pub fn new(roots: fn() -> Vec<PathBuf>) -> Self {
+        Self::shared(Arc::new(Source::new(roots)))
+    }
+
+    /// Several caches over one watched source share a watcher and an epoch.
+    pub fn shared(source: Arc<Source>) -> Self {
         Self {
-            source: Source::new(roots),
+            source,
             value: Mutex::new(None),
+            bound: None,
         }
+    }
+
+    /// Drop the map whole once it holds `bound` entries.
+    pub fn bounded(mut self, bound: usize) -> Self {
+        self.bound = Some(bound);
+        self
     }
 
     /// The last built value, stale by design: no arm, no build, no filesystem.
@@ -217,6 +235,39 @@ impl<T: Send + Sync + 'static> Live<T> {
         let mut slot = lock(&self.value);
         if slot.as_ref().is_none_or(|(at, _)| *at <= epoch) {
             *slot = Some((epoch, Arc::clone(&value)));
+        }
+        value
+    }
+}
+
+impl<V: Clone + Send + Sync + 'static> Live<HashMap<String, V>> {
+    /// The key's cached value, built on a miss; a stale epoch drops the map
+    /// whole. The source is armed on a miss only, so hits stay atomic-only.
+    pub fn memoized(&self, key: &str, build: impl FnOnce() -> V) -> V {
+        if let Some((at, map)) = lock(&self.value).as_ref()
+            && *at == self.source.epoch()
+            && let Some(value) = map.get(key)
+        {
+            return value.clone();
+        }
+
+        self.source.arm();
+        let epoch = self.source.epoch();
+        let value = build();
+        let mut slot = lock(&self.value);
+        match slot.as_mut() {
+            Some((at, map)) if *at == epoch => {
+                let map = Arc::make_mut(map);
+                if self.bound.is_some_and(|bound| map.len() >= bound) {
+                    map.clear();
+                }
+                map.insert(key.to_string(), value.clone());
+            }
+            _ => {
+                let mut map = HashMap::new();
+                map.insert(key.to_string(), value.clone());
+                *slot = Some((epoch, Arc::new(map)));
+            }
         }
         value
     }
@@ -298,6 +349,25 @@ mod tests {
         release_tx.send(()).unwrap();
         assert_eq!(*slow.join().unwrap(), 1);
         assert_eq!(*live.snapshot().unwrap(), 2);
+    }
+
+    #[test]
+    fn a_memoized_value_survives_until_the_epoch_moves() {
+        let live = Live::new(no_roots);
+        assert_eq!(live.memoized("key", || 1), 1);
+        assert_eq!(live.memoized("key", || 2), 1);
+        live.source.invalidate();
+        assert_eq!(live.memoized("key", || 2), 2);
+    }
+
+    #[test]
+    fn a_bounded_map_is_dropped_whole_at_capacity() {
+        let live = Live::new(no_roots).bounded(2);
+        assert_eq!(live.memoized("a", || 1), 1);
+        assert_eq!(live.memoized("b", || 2), 2);
+        assert_eq!(live.memoized("c", || 3), 3);
+        assert_eq!(live.memoized("a", || 9), 9);
+        assert_eq!(live.memoized("c", || 9), 3);
     }
 
     #[test]

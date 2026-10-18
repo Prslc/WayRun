@@ -4,12 +4,12 @@ mod score;
 use std::cmp::Reverse;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::OnceLock;
+use std::sync::{Arc, LazyLock, OnceLock};
 
 use anyhow::Result;
 use gio::prelude::{AppInfoExt, IconExt};
 
-use crate::live::Live;
+use crate::live::{Live, Source};
 use crate::plugin::{Meta, Plugin, Rank, Ranked};
 use crate::system::desktop_action;
 use crate::system::icon::resolve;
@@ -160,10 +160,17 @@ impl Hit<'_> {
     }
 }
 
+static SOURCE: LazyLock<Arc<Source>> = LazyLock::new(|| Arc::new(Source::new(xdg::desktop_dirs)));
+
+/// The watched desktop roots, shared by caches keyed to a desktop entry.
+pub(super) fn app_source() -> Arc<Source> {
+    Arc::clone(&SOURCE)
+}
+
 static APPS: OnceLock<Live<Vec<CachedApp>>> = OnceLock::new();
 
 fn app_cache() -> &'static Live<Vec<CachedApp>> {
-    APPS.get_or_init(|| Live::new(xdg::desktop_dirs))
+    APPS.get_or_init(|| Live::shared(app_source()))
 }
 
 /// Build the list for a caller on the blocking pool that needs it before any

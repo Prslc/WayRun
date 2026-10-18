@@ -40,6 +40,7 @@ pub fn watch_config() -> Option<RecommendedWatcher> {
         let handle = handle.clone();
         handle.spawn(async move {
             if crate::config::reload() {
+                crate::system::icon::invalidate();
                 crate::plugin::reload().await;
             }
         });
