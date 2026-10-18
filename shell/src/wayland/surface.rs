@@ -20,6 +20,9 @@ use super::{Damage, Shell, scale};
 
 const NAMESPACE: &str = "WayRun";
 
+/// How soon to retry a present when both buffers are still held.
+const RETRY_DELAY: Duration = Duration::from_millis(4);
+
 impl Shell {
     pub fn open(&mut self, now: Instant) {
         if self.layer.is_some() {
@@ -481,7 +484,7 @@ impl Shell {
         }
         self.retry_armed = true;
         let _ = self.loop_handle.insert_source(
-            Timer::from_duration(Duration::from_millis(4)),
+            Timer::from_duration(RETRY_DELAY),
             |_, _, state: &mut Shell| {
                 state.retry_armed = false;
                 state.pump();
