@@ -23,10 +23,19 @@ pub fn get_home() -> Result<PathBuf> {
     dirs::home_dir().context("finding the user HOME directory")
 }
 
+/// Create a directory (and parents) with the XDG spec's 0700.
+pub fn create_dir_private(dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(dir)
+}
+
 /// `$XDG_CACHE_HOME/wayrun` (or `~/.cache/wayrun`), created on demand.
 pub fn cache_dir() -> Option<PathBuf> {
     let dir = dirs::cache_dir()?.join("wayrun");
-    std::fs::create_dir_all(&dir).ok()?;
+    create_dir_private(&dir).ok()?;
     Some(dir)
 }
 
@@ -52,7 +61,7 @@ pub fn which_in(path: impl AsRef<OsStr>, name: &str) -> Option<PathBuf> {
 /// editor's atomic save is never truncated.
 pub fn write_if_absent(path: &Path, contents: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        create_dir_private(parent)?;
     }
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -113,6 +122,15 @@ pub fn ensure_flatpak_data_dirs() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_dirs_are_created_0700() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested/private");
+        create_dir_private(&path).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+    }
 
     #[test]
     fn which_in_scans_the_path_and_checks_the_exec_bit() {

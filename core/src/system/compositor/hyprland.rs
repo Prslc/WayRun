@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use super::{Compositor, Window};
+use crate::system::process::{DEADLINE, output_within};
 use rust_i18n::t;
 
 pub struct Hyprland;
@@ -42,10 +43,10 @@ impl Compositor for Hyprland {
     }
 
     fn windows(&self) -> Result<Vec<Window>> {
-        let output = std::process::Command::new("hyprctl")
-            .args(["-j", "clients"])
-            .output()
-            .context("running `hyprctl -j clients`")?;
+        let mut command = std::process::Command::new("hyprctl");
+        command.args(["-j", "clients"]);
+        let output = output_within(command, DEADLINE)
+            .context("`hyprctl -j clients` did not answer within the deadline")?;
         anyhow::ensure!(
             output.status.success(),
             "`hyprctl -j clients` exited with failure"

@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::OnceLock;
 
+use crate::system::process::{DEADLINE, output_within, wait_within};
+
 /// Shared by every scoped spawn and the probe, so an option an older
 /// `systemd-run` rejects fails the probe; `${VAR}` in an argument stays literal.
 const SCOPE_ARGS: [&str; 7] = [
@@ -20,15 +22,10 @@ const SCOPE_ARGS: [&str; 7] = [
 fn scope_available() -> bool {
     static AVAILABLE: OnceLock<bool> = OnceLock::new();
     *AVAILABLE.get_or_init(|| {
+        let mut probe = process::Command::new("systemd-run");
+        probe.args(SCOPE_ARGS).arg("true");
         program_on_path("systemd-run")
-            && process::Command::new("systemd-run")
-                .args(SCOPE_ARGS)
-                .arg("true")
-                .stdin(process::Stdio::null())
-                .stdout(process::Stdio::null())
-                .stderr(process::Stdio::null())
-                .status()
-                .is_ok_and(|status| status.success())
+            && output_within(probe, DEADLINE).is_some_and(|output| output.status.success())
     })
 }
 
@@ -59,7 +56,11 @@ fn scoped(program: &str, args: &[String]) -> process::Command {
 
 /// Spawn detached; a task waits the child, so the runtime reaps it — dropping
 /// the handle alone would leave a finished app as a zombie.
-fn spawn_detached(command: process::Command) {
+fn spawn_detached(mut command: process::Command) {
+    // A detached child must not inherit the core's JSON-RPC pipes.
+    command
+        .stdin(process::Stdio::null())
+        .stdout(process::Stdio::null());
     if let Ok(mut child) = tokio::process::Command::from(command).spawn() {
         tokio::spawn(async move {
             let _ = child.wait().await;
@@ -88,10 +89,8 @@ fn spawn_gio_scoped(verb: &str, arg: &str) -> bool {
 /// intended here: the line is the caller's, field codes and all.
 pub fn execute_command(cmd: &str) {
     let args = vec!["-c".to_string(), detached_line(cmd)];
-    let mut command = scoped("sh", &args);
-    // `sh` inherits the JSON-RPC pipe otherwise; its errors belong on the journal.
-    command.stdout(process::Stdio::null());
-    spawn_detached(command);
+    // stdin/stdout are detached by `spawn_detached`; stderr stays on the journal.
+    spawn_detached(scoped("sh", &args));
 }
 
 /// The shell line that runs `cmd` and lets the launcher return: detached from
@@ -128,17 +127,8 @@ fn shell_quote(token: &str) -> String {
 
 /// Run an argv detached, no shell: a `.desktop` `Exec=` already is argv, and
 /// `sh -c` would make a `;` or `$` inside an argument syntax again.
-pub fn execute_argv(argv: &[String]) {
-    if argv.is_empty() {
-        return;
-    }
-
-    let mut command = scoped("setsid", argv);
-    command
-        .stdin(process::Stdio::null())
-        .stdout(process::Stdio::null())
-        .stderr(process::Stdio::null());
-    spawn_detached(command);
+pub fn execute_argv(argv: &[String], dir: Option<&Path>) {
+    spawn_argv(argv, dir);
 }
 
 /// Launch an app by desktop id via GLib's `GAppInfo`, honoring Exec quoting,
@@ -186,7 +176,8 @@ fn reveal_via_file_manager(uri: &str) -> bool {
     let Ok(connection) = gio::bus_get_sync(gio::BusType::Session, None::<&gio::Cancellable>) else {
         return false;
     };
-    let params = ("", vec![uri.to_string()]).to_variant();
+    // `ShowItems(in as URIs, in s StartupId)`.
+    let params = (vec![uri.to_string()], "").to_variant();
     connection
         .call_sync(
             Some("org.freedesktop.FileManager1"),
@@ -224,7 +215,11 @@ pub fn open_terminal(uri: &str) {
 /// Run a command in a terminal: a PATH binary needs a tty to be usable (btop,
 /// htop, nvim), so it gets an interactive shell instead of a detached run.
 pub fn run_in_terminal(cmd: &str) {
-    let Some(argv) = terminal_run_argv(std::env::var("TERMINAL").ok().as_deref(), cmd) else {
+    run_in_terminal_in(cmd, None);
+}
+
+pub fn run_in_terminal_in(cmd: &str, dir: Option<&Path>) {
+    let Some(argv) = terminal_run_argv(std::env::var("TERMINAL").ok().as_deref(), cmd, dir) else {
         return;
     };
     spawn_argv(&argv, None);
@@ -248,8 +243,13 @@ fn spawn_argv(argv: &[String], dir: Option<&Path>) {
 
 /// The terminal argv that runs `cmd`: the emulator, its command separator and
 /// `sh -c cmd`, so a run keeps the shell semantics `run:` already had.
-fn terminal_run_argv(terminal: Option<&str>, cmd: &str) -> Option<Vec<String>> {
+fn terminal_run_argv(terminal: Option<&str>, cmd: &str, dir: Option<&Path>) -> Option<Vec<String>> {
     let mut argv = terminal_command_from(terminal)?;
+    if let Some(dir) = dir
+        && let Some(flag) = terminal_dir_arg(&argv, dir)
+    {
+        argv.extend(flag);
+    }
     if let Some(flag) = terminal_exec_flag(&argv) {
         argv.extend(flag);
     }
@@ -400,7 +400,7 @@ pub fn copy_text(text: &str) {
         let _ = stdin.write_all(text.as_bytes());
     }
     drop(child.stdin.take());
-    let _ = child.wait();
+    let _ = wait_within(&mut child, DEADLINE);
 }
 
 #[cfg(test)]
@@ -502,19 +502,19 @@ mod tests {
     #[test]
     fn a_terminal_runs_the_command_through_a_shell() {
         assert_eq!(
-            terminal_run_argv(Some("kitty"), "/usr/bin/btop"),
+            terminal_run_argv(Some("kitty"), "/usr/bin/btop", None),
             Some(argv(&["kitty", "sh", "-c", "/usr/bin/btop"]))
         );
         assert_eq!(
-            terminal_run_argv(Some("alacritty"), "htop"),
+            terminal_run_argv(Some("alacritty"), "htop", None),
             Some(argv(&["alacritty", "-e", "sh", "-c", "htop"]))
         );
         assert_eq!(
-            terminal_run_argv(Some("gnome-terminal"), "nvim"),
+            terminal_run_argv(Some("gnome-terminal"), "nvim", None),
             Some(argv(&["gnome-terminal", "--", "sh", "-c", "nvim"]))
         );
         assert_eq!(
-            terminal_run_argv(Some("wezterm"), "btop"),
+            terminal_run_argv(Some("wezterm"), "btop", None),
             Some(argv(&["wezterm", "start", "--", "sh", "-c", "btop"]))
         );
     }
@@ -522,7 +522,7 @@ mod tests {
     #[test]
     fn a_wezterm_already_given_a_subcommand_does_not_repeat_it() {
         assert_eq!(
-            terminal_run_argv(Some("wezterm start"), "btop"),
+            terminal_run_argv(Some("wezterm start"), "btop", None),
             Some(argv(&["wezterm", "start", "--", "sh", "-c", "btop"]))
         );
     }
@@ -535,7 +535,7 @@ mod tests {
             Some(argv(&["start", "--cwd", "/tmp/project"]))
         );
         assert_eq!(
-            terminal_run_argv(Some("/usr/bin/gnome-terminal"), "nvim"),
+            terminal_run_argv(Some("/usr/bin/gnome-terminal"), "nvim", None),
             Some(argv(&["/usr/bin/gnome-terminal", "--", "sh", "-c", "nvim"]))
         );
     }

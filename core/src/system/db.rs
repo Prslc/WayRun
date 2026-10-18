@@ -8,7 +8,7 @@ use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex, PoisonError};
 
-use crate::system::fs::get_home;
+use crate::system::fs::{create_dir_private, get_home};
 
 /// Bump when the wire types change; a mismatch drops every table, since a stored
 /// `on_click` is a serialized command and cannot survive.
@@ -29,7 +29,7 @@ fn db_path() -> Result<PathBuf> {
     let dir = dirs::state_dir()
         .context("no state directory")?
         .join("wayrun");
-    std::fs::create_dir_all(&dir).context("creating the wayrun state directory")?;
+    create_dir_private(&dir).context("creating the wayrun state directory")?;
     let path = dir.join("state.db");
     migrate_legacy_state(&path);
     Ok(path)

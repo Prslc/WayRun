@@ -4,5 +4,6 @@ pub mod desktop_action;
 pub mod executor;
 pub mod fs;
 pub mod icon;
+pub mod process;
 pub mod theme;
 pub mod xdg;

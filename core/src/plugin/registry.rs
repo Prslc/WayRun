@@ -599,9 +599,11 @@ mod tests {
 
     #[test]
     fn the_host_identity_cache_goes_stale_when_the_command_changes() {
+        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let cmd = dir.path().join("host");
         std::fs::write(&cmd, b"x").unwrap();
+        std::fs::set_permissions(&cmd, std::fs::Permissions::from_mode(0o755)).unwrap();
         let command = cmd.display().to_string();
 
         let mut cache = HostCache::default();

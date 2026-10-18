@@ -6,6 +6,7 @@ use std::sync::{Arc, LazyLock};
 use crate::plugin::{Meta, Plugin};
 use crate::provider::FreshCache;
 use crate::system::icon::resolve;
+use crate::system::process::{DEADLINE, output_within};
 use crate::wire::{Action, ResultItem};
 use anyhow::Result;
 use rust_i18n::t;
@@ -91,7 +92,9 @@ impl Entry {
 static LIST: LazyLock<FreshCache<Entry>> = LazyLock::new(FreshCache::new);
 
 fn fetch_entries() -> Option<Vec<Entry>> {
-    let output = Command::new("cliphist").arg("list").output().ok()?;
+    let mut command = Command::new("cliphist");
+    command.arg("list");
+    let output = output_within(command, DEADLINE)?;
     let text = String::from_utf8_lossy(&output.stdout);
     Some(parse_entries(&text))
 }

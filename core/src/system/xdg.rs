@@ -1,5 +1,5 @@
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// `$XDG_DATA_HOME`, or `~/.local/share` when unset.
 pub fn data_home() -> Option<PathBuf> {
@@ -15,7 +15,7 @@ pub fn data_dirs() -> Vec<PathBuf> {
 fn data_dir_list(text: &str) -> Vec<PathBuf> {
     let dirs: Vec<PathBuf> = text
         .split(':')
-        .filter(|dir| !dir.is_empty())
+        .filter(|dir| !dir.is_empty() && Path::new(dir).is_absolute())
         .map(PathBuf::from)
         .collect();
     if dirs.is_empty() {
@@ -68,20 +68,43 @@ pub fn icon_theme_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-/// Flat raster icons drop here outside any theme.
+/// Flat raster icons live in the icon roots themselves, plus `/usr/share/pixmaps`.
 pub fn pixmap_dirs() -> Vec<PathBuf> {
-    vec![PathBuf::from("/usr/share/pixmaps")]
+    let mut dirs = icon_theme_dirs();
+    push_unique(&mut dirs, PathBuf::from("/usr/share/pixmaps"));
+    dirs
 }
 
-/// The GTK settings files that can name the icon theme, newest first.
+/// `$XDG_CONFIG_DIRS` (absolute entries only), or `/etc/xdg`.
+pub fn config_dirs() -> Vec<PathBuf> {
+    let dirs: Vec<PathBuf> = env::var("XDG_CONFIG_DIRS")
+        .unwrap_or_default()
+        .split(':')
+        .filter(|dir| !dir.is_empty() && Path::new(dir).is_absolute())
+        .map(PathBuf::from)
+        .collect();
+    if dirs.is_empty() {
+        vec![PathBuf::from("/etc/xdg")]
+    } else {
+        dirs
+    }
+}
+
+/// The GTK settings files that can name the icon theme, user first.
 pub fn icon_settings_files() -> Vec<PathBuf> {
-    let Some(config) = dirs::config_dir() else {
-        return Vec::new();
+    let mut files = Vec::new();
+    let mut push = |base: &Path| {
+        for sub in ["gtk-4.0/settings.ini", "gtk-3.0/settings.ini"] {
+            push_unique(&mut files, base.join(sub));
+        }
     };
-    ["gtk-4.0/settings.ini", "gtk-3.0/settings.ini"]
-        .iter()
-        .map(|sub| config.join(sub))
-        .collect()
+    if let Some(config) = dirs::config_dir() {
+        push(&config);
+    }
+    for config in config_dirs() {
+        push(&config);
+    }
+    files
 }
 
 /// The icon theme the desktop settings name (`gtk-icon-theme-name`), which GTK
@@ -134,6 +157,20 @@ mod tests {
             data_dir_list("/a::/b"),
             vec![PathBuf::from("/a"), PathBuf::from("/b")]
         );
+        assert_eq!(data_dir_list("relative"), defaults());
+        assert_eq!(
+            data_dir_list("/a:relative:/b"),
+            vec![PathBuf::from("/a"), PathBuf::from("/b")]
+        );
+    }
+
+    #[test]
+    fn flat_pixmap_lookup_includes_the_icon_roots() {
+        let pixmaps = pixmap_dirs();
+        for root in icon_theme_dirs() {
+            assert!(pixmaps.contains(&root), "{root:?}");
+        }
+        assert!(pixmaps.contains(&PathBuf::from("/usr/share/pixmaps")));
     }
 
     #[test]

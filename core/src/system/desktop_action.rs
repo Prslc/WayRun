@@ -84,6 +84,10 @@ fn details_of(entry: &DesktopEntry, locales: &[String]) -> Details {
         .unwrap_or_default()
         .into_iter()
         .filter_map(|id| {
+            // An action with no Exec cannot be started by this launcher.
+            entry
+                .action_exec(id)
+                .filter(|exec| !exec.trim().is_empty())?;
             let name = entry.action_name(id, locales)?.trim().to_string();
             (!name.is_empty()).then(|| (id.to_string(), name))
         })
@@ -213,18 +217,27 @@ fn expand(exec: &str, entry: &DesktopEntry, action_id: &str, path: &Path) -> Vec
     argv
 }
 
-/// The argv of `[Desktop Action <action_id>]`, or `None` when the entry carries
-/// no such group or its `Exec=` expands to nothing.
-pub fn action_argv(desktop_id: &str, action_id: &str) -> Option<Vec<String>> {
-    let e = entry(desktop_id, None)?;
-    let argv = expand(e.action_exec(action_id)?, &e, action_id, &e.path);
-    (!argv.is_empty()).then_some(argv)
-}
-
 /// Runs one action of one desktop entry, returning the argv it ran.
 pub fn launch(desktop_id: &str, action_id: &str) -> Option<Vec<String>> {
-    let argv = action_argv(desktop_id, action_id)?;
-    crate::system::executor::execute_argv(&argv);
+    let entry = entry(desktop_id, None)?;
+    let argv = expand(
+        entry.action_exec(action_id)?,
+        &entry,
+        action_id,
+        &entry.path,
+    );
+    if argv.is_empty() {
+        return None;
+    }
+    let dir = entry.path().map(Path::new);
+    if entry.terminal() {
+        crate::system::executor::run_in_terminal_in(
+            &crate::system::executor::shell_join(&argv),
+            dir,
+        );
+    } else {
+        crate::system::executor::execute_argv(&argv, dir);
+    }
     Some(argv)
 }
 
@@ -325,7 +338,7 @@ Exec=nautilus %i --profile \"100%% sure\"
             "[Desktop Entry]\n\
              GenericName=Virtualization Software\n\
              Keywords=virtualization;\n\
-             Actions=Manager;\n\
+             Actions=Manager;NoExec;\n\
              Name[de]=Oracle VirtualBox\n\
              \n\
              [Desktop Action Manager]\n\
@@ -333,13 +346,16 @@ Exec=nautilus %i --profile \"100%% sure\"
              Name[de]=VM Manager oeffnen\n\
              Exec=VirtualBox\n\
              \n\
+             [Desktop Action NoExec]\n\
+             Name=No Exec\n\
+             \n\
              [Desktop Action Broken]\n\
              Name[de]=Nur auf Deutsch\n",
             &["en"],
         );
         assert_eq!(details.generic.as_deref(), Some("Virtualization Software"));
         assert_eq!(details.keywords, ["virtualization"]);
-        // an undeclared group is not a row, and neither is a localised-only name
+        // an undeclared group, a localised-only name and a missing Exec are not rows
         assert_eq!(
             details.actions,
             [("Manager".to_string(), "Open VM Manager".to_string())]
@@ -353,7 +369,8 @@ Exec=nautilus %i --profile \"100%% sure\"
                      Actions=Manager;\n\
                      [Desktop Action Manager]\n\
                      Name=Open VM Manager\n\
-                     Name[de]=VM Manager oeffnen\n";
+                     Name[de]=VM Manager oeffnen\n\
+                     Exec=VirtualBox\n";
 
         assert_eq!(
             details_of(entry, &["de_DE"]).actions[0].1,

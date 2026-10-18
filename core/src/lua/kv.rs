@@ -212,7 +212,7 @@ impl Stores {
         let Some(parent) = path.parent() else {
             anyhow::bail!("{} has no parent directory", path.display());
         };
-        std::fs::create_dir_all(parent)
+        crate::system::fs::create_dir_private(parent)
             .with_context(|| format!("creating {}", parent.display()))?;
         let connection = self.connection(id, path)?;
         connection.execute(
