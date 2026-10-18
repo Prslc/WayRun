@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::UNIX_EPOCH;
 
@@ -14,10 +14,6 @@ use super::kv;
 use super::log::Log;
 use super::sqlite;
 
-/// The plugin directories this script may read from, one per declared id;
-/// filled after the script is read, resolved by the bindings at call time.
-pub(super) type Scope = Rc<RefCell<Vec<PathBuf>>>;
-
 /// Every declared plugin's readable environment names, by plugin id; filled
 /// after the script is read, refused for a name the calling plugin omits.
 pub(super) type EnvScope = Rc<RefCell<HashMap<String, Vec<String>>>>;
@@ -28,31 +24,9 @@ pub(super) fn plugin_dir(id: &str) -> Option<PathBuf> {
     Some(crate::config::dir()?.join("plugins").join(id))
 }
 
-/// The text of `name` under the first scope root that holds it; `Ok(None)`
-/// when none does, and an error when the name itself is not allowed.
-fn scoped_read(roots: &[PathBuf], name: &str) -> Result<Option<String>, String> {
-    let allowed = !name.is_empty()
-        && !name.starts_with('/')
-        && !name
-            .split('/')
-            .any(|part| part.is_empty() || part == "." || part == "..");
-    if !allowed {
-        return Err("name must be a relative path without `..`".to_string());
-    }
-    for root in roots {
-        match std::fs::read_to_string(root.join(name)) {
-            Ok(text) => return Ok(Some(text)),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error.to_string()),
-        }
-    }
-    Ok(None)
-}
-
 /// The scope handles a script's bindings share: filled after the plugin table
 /// is read, then resolved by id at call time.
 pub(super) struct Shared {
-    pub scope: Scope,
     pub active: kv::Active,
     pub kv_paths: kv::Paths,
     pub env_scope: EnvScope,
@@ -133,7 +107,7 @@ pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua:
             Ok(())
         })?,
     )?;
-    let guard: areas::Guard = {
+    let read_guard: areas::Guard = {
         let read_areas = Rc::clone(&shared.read_areas);
         let guard_active = Rc::clone(&shared.active);
         let script = dir.clone();
@@ -141,22 +115,29 @@ pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua:
             let Some(id) = guard_active.borrow().clone() else {
                 return Err("this read ran outside a plugin call".to_string());
             };
-            let mut roots = read_areas.borrow().get(&id).cloned().unwrap_or_default();
-            if let Some(own) = plugin_dir(&id) {
-                roots.push(own);
-            }
-            if let Some(dir) = &script {
-                roots.push(dir.clone());
-            }
-            areas::check(&roots, path)
+            let Some(own) = plugin_dir(&id) else {
+                return Err("no plugin directory".to_string());
+            };
+            let areas = read_areas.borrow();
+            let declared = areas.get(&id).map(Vec::as_slice).unwrap_or(&[]);
+            read_path(&own, declared, script.as_deref(), path)
+        })
+    };
+    let write_guard: areas::Guard = {
+        let guard_active = Rc::clone(&shared.active);
+        Rc::new(move |path: &str| {
+            let Some(id) = guard_active.borrow().clone() else {
+                return Err("this write ran outside a plugin call".to_string());
+            };
+            let Some(own) = plugin_dir(&id) else {
+                return Err("no plugin directory".to_string());
+            };
+            write_path(&own, path)
         })
     };
     sdk.set("json", json_lib(lua)?)?;
     sdk.set("toml", toml_lib(lua)?)?;
-    sdk.set(
-        "fs",
-        fs_lib(lua, Rc::clone(&shared.scope), Rc::clone(&guard))?,
-    )?;
+    sdk.set("fs", fs_lib(lua, Rc::clone(&read_guard), write_guard)?)?;
     let stores: kv::Handle = Rc::new(RefCell::new(kv::Stores::default()));
     sdk.set(
         "http",
@@ -168,7 +149,7 @@ pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua:
             Rc::clone(&shared.kv_paths),
         )?,
     )?;
-    sdk.set("sqlite", sqlite::lib(lua, guard)?)?;
+    sdk.set("sqlite", sqlite::lib(lua, read_guard)?)?;
     sdk.set(
         "kv",
         kv::lib(
@@ -236,17 +217,58 @@ fn toml_lib(lua: &Lua) -> mlua::Result<Table> {
     Ok(toml)
 }
 
-fn fs_lib(lua: &Lua, scope: Scope, guard: areas::Guard) -> mlua::Result<Table> {
+/// A read path: relative names live under the plugin's own directory; absolute
+/// and `~/` paths must lie in a declared area, that directory or the script's.
+fn read_path(
+    own: &Path,
+    declared: &[PathBuf],
+    script: Option<&Path>,
+    path: &str,
+) -> Result<PathBuf, String> {
+    if areas::relative(path) {
+        return areas::inside(own, path);
+    }
+    let mut roots = declared.to_vec();
+    roots.push(own.to_path_buf());
+    if let Some(dir) = script {
+        roots.push(dir.to_path_buf());
+    }
+    areas::check(&roots, path)
+}
+
+/// A write path: only inside the plugin's own directory, and never the store.
+fn write_path(own: &Path, path: &str) -> Result<PathBuf, String> {
+    let resolved = if areas::relative(path) {
+        areas::inside(own, path)?
+    } else {
+        let Some(expanded) = areas::expand(path) else {
+            return Err("the name must be absolute or start with ~/".to_string());
+        };
+        let resolved = areas::resolve(&expanded);
+        if !resolved.starts_with(areas::resolve(own)) {
+            return Err("writes stay inside the plugin directory".to_string());
+        }
+        resolved
+    };
+    let name = resolved
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    if matches!(name, "kv.db" | "kv.db-wal" | "kv.db-shm" | "kv.db-journal") {
+        return Err("kv owns this file".to_string());
+    }
+    Ok(resolved)
+}
+
+fn fs_lib(lua: &Lua, read: areas::Guard, write: areas::Guard) -> mlua::Result<Table> {
     let fs = lua.create_table()?;
-    let list_guard = Rc::clone(&guard);
+    let list_guard = Rc::clone(&read);
     fs.set(
         "list",
         lua.create_function(move |lua, dir: String| {
-            if let Err(problem) = list_guard(&dir) {
-                return Err(mlua::Error::RuntimeError(format!(
-                    "fs.list {dir:?}: {problem}"
-                )));
-            }
+            let dir = list_guard(&dir).map_err(|problem| {
+                mlua::Error::RuntimeError(format!("fs.list {dir:?}: {problem}"))
+            })?;
             let Ok(entries) = std::fs::read_dir(&dir) else {
                 return Ok(Value::Nil);
             };
@@ -263,15 +285,13 @@ fn fs_lib(lua: &Lua, scope: Scope, guard: areas::Guard) -> mlua::Result<Table> {
             Ok(Value::Table(list))
         })?,
     )?;
-    let stat_guard = Rc::clone(&guard);
+    let stat_guard = Rc::clone(&read);
     fs.set(
         "stat",
         lua.create_function(move |lua, path: String| {
-            if let Err(problem) = stat_guard(&path) {
-                return Err(mlua::Error::RuntimeError(format!(
-                    "fs.stat {path:?}: {problem}"
-                )));
-            }
+            let path = stat_guard(&path).map_err(|problem| {
+                mlua::Error::RuntimeError(format!("fs.stat {path:?}: {problem}"))
+            })?;
             let Ok(meta) = std::fs::metadata(&path) else {
                 return Ok(Value::Nil);
             };
@@ -289,15 +309,35 @@ fn fs_lib(lua: &Lua, scope: Scope, guard: areas::Guard) -> mlua::Result<Table> {
     )?;
     fs.set(
         "read",
-        lua.create_function(
-            move |lua, name: String| match scoped_read(&scope.borrow(), &name) {
-                Ok(Some(text)) => Ok(Value::String(lua.create_string(text)?)),
-                Ok(None) => Ok(Value::Nil),
-                Err(problem) => Err(mlua::Error::RuntimeError(format!(
-                    "fs.read {name:?}: {problem}"
+        lua.create_function(move |lua, name: String| {
+            let path = read(&name).map_err(|problem| {
+                mlua::Error::RuntimeError(format!("fs.read {name:?}: {problem}"))
+            })?;
+            match std::fs::read_to_string(&path) {
+                Ok(text) => Ok(Value::String(lua.create_string(text)?)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Nil),
+                Err(error) => Err(mlua::Error::RuntimeError(format!(
+                    "fs.read {name:?}: {error}"
                 ))),
-            },
-        )?,
+            }
+        })?,
+    )?;
+    fs.set(
+        "write",
+        lua.create_function(move |_, (path, data): (String, mlua::LuaString)| {
+            let target = write(&path).map_err(|problem| {
+                mlua::Error::RuntimeError(format!("fs.write {path:?}: {problem}"))
+            })?;
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| {
+                    mlua::Error::RuntimeError(format!("fs.write {path:?}: {error}"))
+                })?;
+            }
+            std::fs::write(&target, data.as_bytes()).map_err(|error| {
+                mlua::Error::RuntimeError(format!("fs.write {path:?}: {error}"))
+            })?;
+            Ok(true)
+        })?,
     )?;
     Ok(fs)
 }
@@ -310,26 +350,48 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scoped_read_stays_inside_its_roots() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("config.toml"), "a = 1").unwrap();
-        std::fs::create_dir(dir.path().join("sub")).unwrap();
-        std::fs::write(dir.path().join("sub/data.txt"), "x").unwrap();
-        let roots = vec![dir.path().to_path_buf()];
+    fn a_read_path_uses_the_plugin_dir_or_a_declared_area() {
+        let own = tempfile::tempdir().unwrap();
+        let area = tempfile::tempdir().unwrap();
+        let script = tempfile::tempdir().unwrap();
+        std::fs::write(own.path().join("local.txt"), "x").unwrap();
+        std::fs::write(area.path().join("note.txt"), "y").unwrap();
+        let declared = [area.path().to_path_buf()];
+        let script_dir = script.path().to_path_buf();
 
-        assert_eq!(
-            scoped_read(&roots, "config.toml").unwrap().as_deref(),
-            Some("a = 1")
+        assert!(read_path(own.path(), &declared, Some(&script_dir), "local.txt").is_ok());
+        assert!(
+            read_path(
+                own.path(),
+                &declared,
+                Some(&script_dir),
+                area.path().join("note.txt").to_str().unwrap()
+            )
+            .is_ok()
         );
-        assert_eq!(
-            scoped_read(&roots, "sub/data.txt").unwrap().as_deref(),
-            Some("x")
+        assert!(
+            read_path(
+                own.path(),
+                &declared,
+                Some(&script_dir),
+                script.path().join("shipped.txt").to_str().unwrap()
+            )
+            .is_ok(),
+            "the script's own directory is readable"
         );
-        assert_eq!(scoped_read(&roots, "missing.txt").unwrap(), None);
-        assert!(scoped_read(&roots, "../escape.txt").is_err());
-        assert!(scoped_read(&roots, "a/../b").is_err());
-        assert!(scoped_read(&roots, "/etc/hostname").is_err());
-        assert!(scoped_read(&roots, "").is_err());
+        assert!(read_path(own.path(), &declared, Some(&script_dir), "/etc/hostname").is_err());
+        assert!(read_path(own.path(), &declared, Some(&script_dir), "../escape").is_err());
+    }
+
+    #[test]
+    fn a_write_path_stays_in_the_plugin_dir_and_leaves_kv_alone() {
+        let own = tempfile::tempdir().unwrap();
+        assert!(write_path(own.path(), "data/cache.json").is_ok());
+        assert!(write_path(own.path(), own.path().join("x.json").to_str().unwrap()).is_ok());
+        assert!(write_path(own.path(), "kv.db").is_err());
+        assert!(write_path(own.path(), "kv.db-wal").is_err());
+        assert!(write_path(own.path(), "/etc/hostname").is_err());
+        assert!(write_path(own.path(), "../escape").is_err());
     }
 
     /// Every name the sandbox binds, one level into a sub-table: the leaves the
@@ -338,7 +400,6 @@ mod tests {
         let lua = Lua::new_with(mlua::StdLib::ALL_SAFE, mlua::LuaOptions::default()).unwrap();
         let active = Rc::new(RefCell::new(None));
         let shared = Shared {
-            scope: Rc::new(RefCell::new(Vec::new())),
             active: Rc::clone(&active),
             kv_paths: Rc::new(RefCell::new(HashMap::new())),
             env_scope: Rc::new(RefCell::new(HashMap::new())),

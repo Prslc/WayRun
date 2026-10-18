@@ -35,11 +35,9 @@ pub(super) fn lib(lua: &Lua, guard: areas::Guard) -> mlua::Result<Table> {
     sqlite.set(
         "snapshot",
         lua.create_function(move |_, path: String| {
-            if let Err(problem) = snapshot_guard(&path) {
-                return Err(mlua::Error::RuntimeError(format!(
-                    "sqlite.snapshot {path:?}: {problem}"
-                )));
-            }
+            let path = snapshot_guard(&path).map_err(|problem| {
+                mlua::Error::RuntimeError(format!("sqlite.snapshot {path:?}: {problem}"))
+            })?;
             let cache = crate::system::fs::cache_dir().ok_or_else(|| {
                 mlua::Error::RuntimeError("sqlite.snapshot: no cache directory".to_string())
             })?;
@@ -75,8 +73,8 @@ pub(super) fn lib(lua: &Lua, guard: areas::Guard) -> mlua::Result<Table> {
 }
 
 impl Snapshots {
-    fn snapshot(&mut self, source: &str, cache: &Path) -> Result<u64> {
-        let source = PathBuf::from(source);
+    fn snapshot(&mut self, source: &Path, cache: &Path) -> Result<u64> {
+        let source = source.to_path_buf();
         let copy = snapshot_copy(&source, cache)?;
         if let Some(&id) = self.sources.get(&source) {
             // A changed source keeps its handle: the id is a live view of the
@@ -289,9 +287,7 @@ mod tests {
         }
 
         let mut snapshots = Snapshots::default();
-        let id = snapshots
-            .snapshot(source.to_str().unwrap(), dir.path())
-            .unwrap();
+        let id = snapshots.snapshot(&source, dir.path()).unwrap();
         let rows = snapshots
             .query(
                 id,
@@ -322,16 +318,15 @@ mod tests {
 
         write("alpha");
         let mut snapshots = Snapshots::default();
-        let source = source.to_str().unwrap();
-        let first = snapshots.snapshot(source, dir.path()).unwrap();
+        let first = snapshots.snapshot(&source, dir.path()).unwrap();
         assert_eq!(
-            snapshots.snapshot(source, dir.path()).unwrap(),
+            snapshots.snapshot(&source, dir.path()).unwrap(),
             first,
             "an unchanged source reuses its handle"
         );
 
         write("beta, and longer");
-        let third = snapshots.snapshot(source, dir.path()).unwrap();
+        let third = snapshots.snapshot(&source, dir.path()).unwrap();
         assert_eq!(third, first, "a changed source keeps its handle");
         let rows = snapshots
             .query(third, "SELECT name FROM t", vec![])

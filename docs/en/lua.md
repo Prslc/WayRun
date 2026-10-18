@@ -92,11 +92,12 @@ A row with no `on_click` is display-only; it can still carry `actions`.
 | `wayrun.which(name)` | an executable's path on the launcher's `$PATH`, or nil; the same PATH a `run` row's command will see |
 | `wayrun.script_dir()` | the script's own directory, for an icon it ships |
 | `wayrun.plugin_dir(id)` | the directory a plugin may read from, `$XDG_CONFIG_HOME/wayrun/plugins/<id>` |
-| `wayrun.fs.read(name)` | a file under those directories; a relative name, nil when absent, an error when the name escapes |
+| `wayrun.fs.read(name)` | a file: a relative name under the plugin directory, or an absolute/`~/` path in a declared area or the script's directory; nil when absent, an error when it escapes |
 | `wayrun.toml.decode(text)` | TOML in, a table out |
 | `wayrun.json.decode(text)` / `wayrun.json.encode(value)` | JSON in and out |
-| `wayrun.fs.list(dir)` | sorted entry names under `dir` inside a declared area, or nil |
-| `wayrun.fs.stat(path)` | `{ mtime_ns, size }` for a path inside a declared area, or nil |
+| `wayrun.fs.list(dir)` | sorted entry names under a directory in those places, or nil |
+| `wayrun.fs.stat(path)` | `{ mtime_ns, size }` for a path in those places, or nil |
+| `wayrun.fs.write(path, data)` | writes a string into the plugin directory (parents created); true on success; `kv.db` and its siblings are reserved |
 | `wayrun.http.get(url, params?, options?)` | blocking GET answering `{status, headers, body}`; a transport error raises; `params` adds query values and takes a reserved `headers` table; `options` is a table with `timeout_ms`, `headers` and `ttl`, or a bare timeout in ms |
 | `wayrun.http.post(url, params?, options?)` | the same, sending one body: `json = value`, `form = {…}` or `body = "…"`; never cached |
 | `wayrun.crypto.sha256(text)` / `wayrun.crypto.md5(text)` | lowercase hex digest |
@@ -120,17 +121,17 @@ for `pcall` rather than dying as a killed host.
 ## The sandbox
 
 `os`, `io`, `package` and `load` are not reachable: a script cannot
-run programs, and the only write is `kv`, whose keys are not paths and whose
-database lives in the plugin's own directory. `print` and `wayrun.log` write to
-the launcher's journal, never to stdout (stdout is the JSON-RPC wire), and both
-are bounded per call. Reading is wider: `fs.read` is
-the scoped one (relative names only, confined to
-`$XDG_CONFIG_HOME/wayrun/plugins/<id>/`), while `fs.list`, `fs.stat` and
-`sqlite.snapshot` reach only the areas a plugin declares for itself
-(`firefox.lua` declares `~/.mozilla/firefox` for `places.sqlite`),
-`wayrun.env` reads only the names the calling plugin declares, and `http`
-reaches the network. The sandbox bounds what a script can do; what it can read
-is what the plugin's `env` and `read` declare. A call that raises yields no rows
+run programs. Reading is scoped by path: a relative name resolves under the
+plugin's own directory (`$XDG_CONFIG_HOME/wayrun/plugins/<id>/`), while an
+absolute or `~/` path must lie in a declared read area, the plugin's directory,
+or the script's directory; `sqlite.snapshot` uses the same rule. Writing is
+narrower: `fs.write` stays inside the plugin's own directory (parents are
+created) and refuses `kv.db` and its `-wal`/`-shm`/`-journal` siblings; `kv`
+keeps its own store. `wayrun.env` reads only the names the calling plugin
+declares, and `http` reaches the network. `print` and `wayrun.log` write to the
+launcher's journal, never to stdout (stdout is the JSON-RPC wire), and both are
+bounded per call. The sandbox bounds what a script can do; what it can read is
+what the plugin's `env` and `read` declare. A call that raises yields no rows
 and reports to the journal, so `print`, `wayrun.log` and a `pcall` around risky
 work are the debugging tools.
 

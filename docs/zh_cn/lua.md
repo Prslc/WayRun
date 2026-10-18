@@ -87,11 +87,12 @@ actions = {
 | `wayrun.which(name)` | 启动器 `$PATH` 上某个可执行文件的路径，否则 nil；与 `run` 行的命令将看到的 PATH 相同 |
 | `wayrun.script_dir()` | 脚本自身所在目录，用于携带图标等文件 |
 | `wayrun.plugin_dir(id)` | 插件可读目录：`$XDG_CONFIG_HOME/wayrun/plugins/<id>` |
-| `wayrun.fs.read(name)` | 读取上述目录中的文件；相对名，缺失返回 nil，越界报错 |
+| `wayrun.fs.read(name)` | 读取文件：相对名在插件目录下，绝对/`~/` 路径须在声明区域或脚本目录内；缺失返回 nil，越界报错 |
 | `wayrun.toml.decode(text)` | TOML 进，表出 |
 | `wayrun.json.decode(text)` / `wayrun.json.encode(value)` | JSON 进出 |
-| `wayrun.fs.list(dir)` | 声明区域内 `dir` 下按名称排序的条目名，否则 nil |
-| `wayrun.fs.stat(path)` | 声明区域内路径的 `{ mtime_ns, size }`，否则 nil |
+| `wayrun.fs.list(dir)` | 上述位置中某目录下按名称排序的条目名，否则 nil |
+| `wayrun.fs.stat(path)` | 上述位置中路径的 `{ mtime_ns, size }`，否则 nil |
+| `wayrun.fs.write(path, data)` | 把字符串写入插件目录（自动建父目录）；成功返回 true；`kv.db` 及其兄弟文件保留 |
 | `wayrun.http.get(url, params?, options?)` | 阻塞式 GET，返回 `{status, headers, body}`；传输错误抛出；`params` 追加查询参数，其保留键 `headers` 为请求头表；`options` 是带 `timeout_ms`、`headers`、`ttl` 的表，或直接给一个毫秒数作超时 |
 | `wayrun.http.post(url, params?, options?)` | 同上，发送一个 body：`json = value`、`form = {…}` 或 `body = "…"` 三选一；永不缓存 |
 | `wayrun.crypto.sha256(text)` / `wayrun.crypto.md5(text)` | 小写十六进制摘要 |
@@ -112,15 +113,14 @@ actions = {
 
 ## 沙箱
 
-`os`、`io`、`package` 与 `load` 均不可达：脚本起不了进程，唯一的写是
-`kv`（键不是路径，库落在插件自己的目录里）。`print` 与 `wayrun.log` 写入启动器的
-journal，绝不写 stdout（stdout 是 JSON-RPC 线），且每次调用都有上限。能读的比这宽：
-`fs.read` 是受范围约束的那一个（只收相对路径，限定在
-`$XDG_CONFIG_HOME/wayrun/plugins/<id>/` 之内），而
-`fs.list`、`fs.stat` 与 `sqlite.snapshot` 只能触及插件自己声明的区域（`firefox.lua`
-声明 `~/.mozilla/firefox` 来读 `places.sqlite`），`wayrun.env` 只能读调用中的插件
-自己声明的那些名字，`http` 可访问网络。沙箱约束的是脚本能做什么；能读到什么，由
-插件表的 `env` 与 `read` 声明。调用中抛错则本次返回空行并记录到 journal，因此
+`os`、`io`、`package` 与 `load` 均不可达：脚本起不了进程。读取按路径约束：相对名落在
+插件自己的目录（`$XDG_CONFIG_HOME/wayrun/plugins/<id>/`）下，绝对或 `~/` 路径必须位于
+声明区域、插件目录或脚本目录内；`sqlite.snapshot` 用同一规则。写入更窄：`fs.write`
+只能在插件自己的目录内（自动建父目录），并拒绝 `kv.db` 及其 `-wal`/`-shm`/`-journal`
+兄弟文件；`kv` 保持自己的存储。`wayrun.env` 只能读调用中的插件自己声明的名字，`http`
+可访问网络。`print` 与 `wayrun.log` 写入启动器的 journal，绝不写 stdout（stdout 是
+JSON-RPC 线），且每次调用都有上限。沙箱约束的是脚本能做什么；能读到什么，由插件表的
+`env` 与 `read` 声明。调用中抛错则本次返回空行并记录到 journal，因此
 `print`、`wayrun.log` 与对风险操作的 `pcall` 就是调试手段。
 
 ## 调试

@@ -46,14 +46,12 @@ struct Host {
 impl Host {
     fn new(script: &str, source: &str) -> Result<Self> {
         // mlua's error carries no Send bound, so it converts here, once.
-        let scope: sdk::Scope = Rc::new(RefCell::new(Vec::new()));
         let active: kv::Active = Rc::new(RefCell::new(None));
         let kv_paths: kv::Paths = Rc::new(RefCell::new(HashMap::new()));
         let env_scope: sdk::EnvScope = Rc::new(RefCell::new(HashMap::new()));
         let read_areas: areas::Areas = Rc::new(RefCell::new(HashMap::new()));
         let log = Log::new(script, Rc::clone(&active));
         let shared = sdk::Shared {
-            scope: Rc::clone(&scope),
             active: Rc::clone(&active),
             kv_paths: Rc::clone(&kv_paths),
             env_scope: Rc::clone(&env_scope),
@@ -72,9 +70,8 @@ impl Host {
             Ok((lua, plugins))
         };
         let (lua, plugins) = load().map_err(|error| anyhow::anyhow!("{error}"))?;
-        // The declared ids are known only now; the read scope, the kv paths,
-        // the readable env names and the read areas fill here.
-        let mut roots = Vec::new();
+        // The declared ids are known only now; the kv paths, the readable env
+        // names and the read areas fill here.
         let mut paths = HashMap::new();
         let mut envs = HashMap::new();
         let mut areas = HashMap::new();
@@ -83,10 +80,8 @@ impl Host {
             areas.insert(plugin.id.clone(), plugin.read.clone());
             if let Some(dir) = sdk::plugin_dir(&plugin.id) {
                 paths.insert(plugin.id.clone(), dir.join("kv.db"));
-                roots.push(dir);
             }
         }
-        *scope.borrow_mut() = roots;
         *kv_paths.borrow_mut() = paths;
         *env_scope.borrow_mut() = envs;
         *read_areas.borrow_mut() = areas;
