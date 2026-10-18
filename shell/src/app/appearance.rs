@@ -7,6 +7,8 @@ use super::State;
 
 /// The entrance fade's duration: a flat pixmap cannot scale, so a show fades in.
 pub const ENTRANCE_MS: u64 = 240;
+/// How far below its resting place the card starts; the entrance rises into it.
+const ENTRANCE_SLIDE: f32 = 8.0;
 /// The card-height reflow's duration.
 pub const REFLOW_MS: u64 = 150;
 
@@ -67,7 +69,19 @@ impl State {
         }
 
         let elapsed = now.saturating_duration_since(self.shown_at).as_secs_f32() * 1000.0;
-        ease_out_quint((elapsed / ENTRANCE_MS as f32).clamp(0.0, 1.0))
+        ease_in_out_cubic((elapsed / ENTRANCE_MS as f32).clamp(0.0, 1.0))
+    }
+
+    /// How far the card still has to rise: the entrance starts it `SLIDE` px
+    /// low and settles at the configured position.
+    pub fn entrance_offset(&self, now: Instant) -> f32 {
+        (1.0 - self.entrance(now)) * ENTRANCE_SLIDE
+    }
+
+    /// The geometry a frame draws with: the card slides while the entrance runs,
+    /// and the dim and the stored layout stay put.
+    pub fn frame_layout(&self, now: Instant) -> crate::ui::geom::Layout {
+        self.appearance.layout.shifted(self.entrance_offset(now))
     }
 
     /// A card-content colour at `alpha`, scaled by the entrance fade: the whole
@@ -123,8 +137,12 @@ pub(super) fn ease_out_cubic(t: f32) -> f32 {
     1.0 - (1.0 - t).powi(3)
 }
 
-fn ease_out_quint(t: f32) -> f32 {
-    1.0 - (1.0 - t).powi(5)
+fn ease_in_out_cubic(t: f32) -> f32 {
+    if t < 0.5 {
+        4.0 * t * t * t
+    } else {
+        1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
+    }
 }
 
 #[cfg(test)]
@@ -168,5 +186,24 @@ mod tests {
         };
         state.apply_appearance(config, std::time::Instant::now());
         assert!(state.reduce_motion);
+    }
+
+    #[test]
+    fn the_entrance_rises_into_the_resting_layout() {
+        let mut state = state();
+        state.reduce_motion = false;
+        state.entrance_started = true;
+        let start = std::time::Instant::now();
+        state.shown_at = start;
+
+        assert!((state.entrance_offset(start) - 8.0).abs() < 0.001);
+        assert!(state.frame_layout(start).offset_y > 0.0);
+
+        let settled = start + Duration::from_millis(ENTRANCE_MS);
+        assert_eq!(state.entrance_offset(settled), 0.0);
+        assert_eq!(state.frame_layout(settled).offset_y, 0.0);
+
+        state.reduce_motion = true;
+        assert_eq!(state.entrance_offset(start), 0.0);
     }
 }

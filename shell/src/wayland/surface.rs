@@ -280,11 +280,11 @@ impl Shell {
             return;
         }
 
-        let height = self.app.card_height(Instant::now());
+        let now = Instant::now();
+        let height = self.app.card_height(now);
         let rects = self
             .app
-            .appearance
-            .layout
+            .frame_layout(now)
             .blur_rects(self.app.surface, height);
         let key = rects
             .first()

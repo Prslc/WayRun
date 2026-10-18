@@ -19,7 +19,7 @@ pub(super) fn draw_list(
     icons: &mut IconCache,
     now: Instant,
 ) {
-    let layout = state.appearance.layout;
+    let layout = state.frame_layout(now);
     let (left, width) = layout.row_band(surface);
     let top = layout.rows_top(surface);
 

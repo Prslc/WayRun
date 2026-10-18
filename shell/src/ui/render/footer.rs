@@ -168,7 +168,7 @@ pub(super) fn draw_footer(
 
     // The footer is the last band of the card, derived from the same height the
     // card itself animates to.
-    let layout = state.appearance.layout;
+    let layout = state.frame_layout(now);
     let top = layout.card_top(surface) + state.content_height() - geom::PAD - geom::FOOTER_H;
     let center_y = top + geom::FOOTER_H / 2.0;
     let (left, width) = layout.row_band(surface);

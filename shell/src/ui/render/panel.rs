@@ -26,7 +26,7 @@ pub(super) fn draw_actions(
         return;
     };
     let theme = state.theme;
-    let layout = state.appearance.layout;
+    let layout = state.frame_layout(now);
     let font = state.appearance.font;
     let (left, width) = layout.row_band(surface);
 

@@ -88,7 +88,7 @@ pub(super) fn draw_query(
     let shaped = text.shape(&state.query, size, Weight::MEDIUM);
     let top = field.center_y() - shaped.height / (2.0 * canvas.scale);
     // the drawn caret and the rectangle the IME is told about are one geometry
-    let (caret, shift) = caret_box(state, text);
+    let (caret, shift) = caret_box(state, text, now);
 
     // A keyboard selection sits under the glyphs at the accent's 35%, clipped to
     // the same text area.
@@ -145,9 +145,9 @@ pub(super) fn draw_query(
 
 /// The caret's box and how far the query is scrolled so it fits. The one caret
 /// geometry, shared with the IME cursor rectangle, so the two cannot drift.
-fn caret_box(state: &State, text: &mut TextEngine) -> (Rect, f32) {
+fn caret_box(state: &State, text: &mut TextEngine, now: Instant) -> (Rect, f32) {
     let surface = state.surface;
-    let layout = state.appearance.layout;
+    let layout = state.frame_layout(now);
     let field = Rect::field_at(
         layout.card_x(surface),
         layout.card_top(surface),
@@ -174,8 +174,8 @@ fn caret_box(state: &State, text: &mut TextEngine) -> (Rect, f32) {
 
 /// The caret as the IME's `set_cursor_rectangle` wants it: surface-local
 /// logical coordinates, so it follows the same scroll as the drawn caret.
-pub fn caret_rect(state: &State, text: &mut TextEngine) -> (i32, i32, i32, i32) {
-    let (caret, _) = caret_box(state, text);
+pub fn caret_rect(state: &State, text: &mut TextEngine, now: Instant) -> (i32, i32, i32, i32) {
+    let (caret, _) = caret_box(state, text, now);
     (
         caret.x.round() as i32,
         caret.y.round() as i32,
@@ -194,7 +194,7 @@ pub fn draw_caret(pixmap: &mut Pixmap, state: &State, text: &mut TextEngine, now
     let canvas = Canvas {
         scale: state.scale_factor(),
     };
-    let (caret, _) = caret_box(state, text);
+    let (caret, _) = caret_box(state, text, now);
     canvas.fill_rect(pixmap, caret, state.fade(state.theme.fg, 1.0, now));
 }
 

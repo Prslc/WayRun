@@ -27,6 +27,9 @@ pub struct Layout {
     pub radius: f32,
     pub max_rows: usize,
     pub panel_header_h: f32,
+    /// The entrance's remaining rise, in logical pixels: a frame draws with a
+    /// shifted copy and the configured layout stays at rest.
+    pub offset_y: f32,
 }
 
 impl Default for Layout {
@@ -38,6 +41,7 @@ impl Default for Layout {
             radius: 16.0,
             max_rows: 5,
             panel_header_h: 28.0,
+            offset_y: 0.0,
         }
     }
 }
@@ -69,7 +73,15 @@ impl Layout {
     /// Fixed card top: results only extend the card downward, so the search bar
     /// never moves when the row count changes.
     pub fn card_top(&self, surface: (u32, u32)) -> f32 {
-        ((surface.1 as f32) * self.top_ratio).round()
+        ((surface.1 as f32) * self.top_ratio).round() + self.offset_y
+    }
+
+    /// The same geometry with the card shifted down by `dy`.
+    pub fn shifted(self, dy: f32) -> Self {
+        Self {
+            offset_y: dy,
+            ..self
+        }
     }
 
     /// The band a row is drawn in, as `(left, width)`: the card inset by `PAD`,

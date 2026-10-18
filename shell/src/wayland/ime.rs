@@ -146,7 +146,8 @@ impl Shell {
             return;
         }
 
-        let (x, y, width, height) = render::caret_rect(&self.app, &mut self.text);
+        let (x, y, width, height) =
+            render::caret_rect(&self.app, &mut self.text, std::time::Instant::now());
         // 4px-quantised, like the blur region: a present must not commit a
         // text-input state change of its own.
         let key = (x / 4, y / 4, width, height);

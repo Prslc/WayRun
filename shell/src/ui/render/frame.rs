@@ -30,8 +30,7 @@ pub fn draw(
         scale: state.scale_factor(),
     };
     let surface = state.surface;
-    let appearance = &state.appearance;
-    let layout = appearance.layout;
+    let layout = state.frame_layout(now);
     let dim_rgb = state.dim_color();
 
     let card = Rect {
