@@ -13,9 +13,9 @@ use crate::config::{AppearanceConfig, Mode};
 use crate::ui::theme::{Surfaces, Theme};
 use wayrun_core::wire::{Action, ResultItem};
 
-use self::appearance::ease_out_cubic;
 use self::menu::PanelKey;
 
+pub(crate) use self::appearance::emphasized_decelerate;
 pub use self::cursor::{Cursor, Hover, whole_rows};
 pub use self::menu::{Menu, effective_action, marked_entry};
 
@@ -23,6 +23,19 @@ pub use self::menu::{Menu, effective_action, marked_entry};
 pub const EXIT_DELAY_MS: u64 = 150;
 /// The field's caret blink interval.
 pub const CARET_BLINK_MS: u64 = 500;
+/// A row's move or entry animation, on MD3's short4 duration.
+pub const ROW_MOTION_MS: u64 = 200;
+/// How far below its place a new row starts, in logical pixels.
+pub const ROW_RISE: f32 = 4.0;
+
+/// A row's layout motion: how far from its final place it starts (positive is
+/// below), whether it also fades in, and when the motion began.
+#[derive(Clone, Copy)]
+pub struct RowMotion {
+    pub offset: f32,
+    pub enter: bool,
+    pub started: Instant,
+}
 
 pub struct State {
     pub query: String,
@@ -35,6 +48,9 @@ pub struct State {
     pub preedit: Option<String>,
     pub rows: Vec<ResultItem>,
     pub cursor: Cursor,
+    /// A row's layout motion: a new row enters, a reordered one slides to its
+    /// place. A row that stayed put is `None` and does not animate.
+    pub row_motion: Vec<Option<RowMotion>>,
     /// The open action panel, if any. It takes over the list and the keyboard.
     pub menu: Option<Menu>,
     /// The panel's row and entry, held across the re-emit a panel action sends,
@@ -79,9 +95,11 @@ pub struct State {
     pub caret_visible: bool,
     pub caret_at: Instant,
     shown_at: Instant,
-    card_from: f32,
-    card_to: f32,
-    card_at: Instant,
+    /// The card's drawn height, its velocity (px/s) and the height it springs to.
+    card_h: f32,
+    card_v: f32,
+    card_target: f32,
+    card_updated: Instant,
     pub dismiss_at: Option<Instant>,
     /// The bottom edge of the card drawn last. A settle repaint covers only the
     /// card, so a shrink must restore the dim over the old edge too.
@@ -107,6 +125,7 @@ impl State {
             preedit: None,
             rows: Vec::new(),
             cursor: Cursor::default(),
+            row_motion: Vec::new(),
             menu: None,
             panel_resume: None,
             system_theme: theme,
@@ -128,9 +147,10 @@ impl State {
             caret_visible: true,
             caret_at: now,
             shown_at: now,
-            card_from: card,
-            card_to: card,
-            card_at: now,
+            card_h: card,
+            card_v: 0.0,
+            card_target: card,
+            card_updated: now,
             dismiss_at: None,
             last_card_bottom: 0.0,
         }
@@ -160,15 +180,8 @@ impl State {
         }
     }
 
-    pub fn card_height(&self, now: Instant) -> f32 {
-        let to = self.card_to;
-        if self.reduce_motion {
-            return to;
-        }
-
-        let elapsed = now.saturating_duration_since(self.card_at).as_secs_f32() * 1000.0;
-        let t = (elapsed / self::appearance::REFLOW_MS as f32).clamp(0.0, 1.0);
-        self.card_from + (to - self.card_from) * ease_out_cubic(t)
+    pub fn card_height(&self) -> f32 {
+        self.card_h
     }
 
     pub fn shown(&mut self, now: Instant) {
@@ -182,9 +195,10 @@ impl State {
         self.hovered = None;
         self.dismiss_at = None;
         self.shown_at = now;
-        self.card_at = now;
-        self.card_from = self.content_height();
-        self.card_to = self.card_from;
+        self.card_h = self.content_height();
+        self.card_v = 0.0;
+        self.card_target = self.card_h;
+        self.card_updated = now;
         self.contain();
         self.caret_visible = true;
         self.caret_at = now;
@@ -201,6 +215,7 @@ impl State {
         self.preedit_active = false;
         // A show starts from an empty list: an empty query fetches nothing.
         self.rows = Vec::new();
+        self.row_motion.clear();
     }
 
     /// Keep the selection inside the `max_rows` window, minimally.

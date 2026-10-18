@@ -172,9 +172,11 @@ impl Shell {
         self.needs_present = false;
         // The fade begins on the first frame that is actually drawn.
         self.app.start_entrance(now);
-        // A fresh pixmap, a moving dim (entrance) or a reflowing card needs the
+        // A fresh pixmap, a moving dim (entrance) or a springing card needs the
         // whole surface; a settled redraw only repaints the card rectangle.
-        let full = self.needs_full || self.app.animating(now);
+        let animating = self.app.animating(now);
+        self.app.advance(now);
+        let full = self.needs_full || animating;
         self.needs_full = false;
         {
             let Some(pixmap) = self.pixmap.as_mut() else {
@@ -196,7 +198,7 @@ impl Shell {
         let scale = self.app.scale_factor();
         let layout = self.app.appearance.layout;
         let top = layout.card_top(surface_size);
-        let new_bottom = top + self.app.card_height(now);
+        let new_bottom = top + self.app.card_height();
         let damage = if full {
             Damage::FULL
         } else {
@@ -281,7 +283,7 @@ impl Shell {
         }
 
         let now = Instant::now();
-        let height = self.app.card_height(now);
+        let height = self.app.card_height();
         let rects = self
             .app
             .frame_layout(now)

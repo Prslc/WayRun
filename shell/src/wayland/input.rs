@@ -328,7 +328,7 @@ impl PointerHandler for Shell {
                 x >= layout.card_x(self.app.surface)
                     && x <= layout.card_x(self.app.surface) + layout.card_w(self.app.surface)
                     && y >= layout.card_top(self.app.surface)
-                    && y <= layout.card_top(self.app.surface) + self.app.card_height(now)
+                    && y <= layout.card_top(self.app.surface) + self.app.card_height()
             };
 
             match event.kind {

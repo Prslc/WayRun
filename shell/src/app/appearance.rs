@@ -9,8 +9,10 @@ use super::State;
 pub const ENTRANCE_MS: u64 = 240;
 /// How far below its resting place the card starts; the entrance rises into it.
 const ENTRANCE_SLIDE: f32 = 8.0;
-/// The card-height reflow's duration.
-pub const REFLOW_MS: u64 = 150;
+/// The card height's spring rates: a growth settles in ~150ms so results
+/// appear promptly, a shrink in ~240ms so the card relaxes gently.
+const CARD_GROW_OMEGA: f32 = 32.0;
+const CARD_SHRINK_OMEGA: f32 = 20.0;
 
 impl State {
     /// The `theme.toml` config changed. Recompute the theme and the derived
@@ -19,9 +21,10 @@ impl State {
         self.reduce_motion = self.reduced_env || config.reduced;
         self.appearance = config;
         self.refresh_theme();
-        self.card_from = self.content_height();
-        self.card_to = self.card_from;
-        self.card_at = now;
+        self.card_h = self.content_height();
+        self.card_v = 0.0;
+        self.card_target = self.card_h;
+        self.card_updated = now;
     }
 
     /// The core's system theme changed, with the mode whose palette it holds.
@@ -100,6 +103,20 @@ impl State {
         self.fade([color[0], color[1], color[2]], color[3] as f32 / 255.0, now)
     }
 
+    /// [`Self::fade`] with a per-row alpha on top of the entrance.
+    pub fn fade_scaled(&self, color: [u8; 3], alpha: f32, now: Instant, scale: f32) -> [u8; 4] {
+        self.fade(color, alpha * scale, now)
+    }
+
+    /// [`Self::fade_rgba`] with a per-row alpha on top of the entrance.
+    pub fn fade_rgba_scaled(&self, color: [u8; 4], now: Instant, scale: f32) -> [u8; 4] {
+        self.fade(
+            [color[0], color[1], color[2]],
+            color[3] as f32 / 255.0 * scale,
+            now,
+        )
+    }
+
     pub fn animating(&self, now: Instant) -> bool {
         if self.reduce_motion || !self.entrance_started {
             return false;
@@ -107,8 +124,48 @@ impl State {
 
         let entrance =
             now.saturating_duration_since(self.shown_at) < Duration::from_millis(ENTRANCE_MS);
-        let reflow = now.saturating_duration_since(self.card_at) < Duration::from_millis(REFLOW_MS);
-        entrance || reflow
+        let height = (self.card_target - self.card_h).abs() > 0.5 || self.card_v.abs() > 5.0;
+        let moving = self.row_motion.iter().flatten().any(|motion| {
+            now.saturating_duration_since(motion.started)
+                < Duration::from_millis(super::ROW_MOTION_MS)
+        });
+        entrance || height || moving
+    }
+
+    /// Advance the card height one frame: the spring carries velocity across
+    /// target changes, so a new payload redirects the motion instead of restarting.
+    pub fn advance(&mut self, now: Instant) {
+        if self.reduce_motion {
+            self.card_h = self.card_target;
+            self.card_v = 0.0;
+            self.card_updated = now;
+            return;
+        }
+
+        let dt = now
+            .saturating_duration_since(self.card_updated)
+            .as_secs_f32();
+        if dt <= 0.0 {
+            return;
+        }
+        self.card_updated = now;
+
+        let offset = self.card_h - self.card_target;
+        let omega = if offset > 0.0 {
+            CARD_SHRINK_OMEGA
+        } else {
+            CARD_GROW_OMEGA
+        };
+        // The exact critically damped step: x(t) = (x0 + (v0 + ωx0)t)e^{-ωt}.
+        let decay = (-omega * dt).exp();
+        let slope = self.card_v + omega * offset;
+        let next = (offset + slope * dt) * decay;
+        self.card_v = (self.card_v - omega * slope * dt) * decay;
+        self.card_h = self.card_target + next;
+        if next.abs() < 0.5 && self.card_v.abs() < 5.0 {
+            self.card_h = self.card_target;
+            self.card_v = 0.0;
+        }
     }
 
     /// The first frame of a show: this is where the entrance fade begins.
@@ -118,23 +175,54 @@ impl State {
         }
         self.entrance_started = true;
         self.shown_at = now;
-        self.card_at = now;
-        self.card_from = self.content_height();
-        self.card_to = self.card_from;
+        self.card_h = self.content_height();
+        self.card_v = 0.0;
+        self.card_target = self.card_h;
+        self.card_updated = now;
     }
 
     pub fn retarget_height(&mut self, now: Instant) {
-        let target = self.content_height();
-        if target != self.card_to {
-            self.card_from = self.card_height(now);
-            self.card_to = target;
-            self.card_at = now;
+        self.card_target = self.content_height();
+        if self.reduce_motion {
+            self.card_h = self.card_target;
+            self.card_v = 0.0;
         }
+        // An idle gap must not settle the spring in one frame; keep the clock
+        // at the event, and the velocity carries into the new target.
+        self.card_updated = now;
     }
 }
 
-pub(super) fn ease_out_cubic(t: f32) -> f32 {
-    1.0 - (1.0 - t).powi(3)
+/// MD3's emphasized-decelerate curve, for a row entering or moving into place.
+pub(crate) fn emphasized_decelerate(t: f32) -> f32 {
+    cubic_bezier(t.clamp(0.0, 1.0), 0.05, 0.7, 0.1, 1.0)
+}
+
+fn cubic_bezier(x: f32, x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
+    if x <= 0.0 {
+        return 0.0;
+    }
+    if x >= 1.0 {
+        return 1.0;
+    }
+    let curve = |a: f32, b: f32, u: f32| {
+        3.0 * (1.0 - u).powi(2) * u * a + 3.0 * (1.0 - u) * u * u * b + u.powi(3)
+    };
+    let mut u = x;
+    for _ in 0..8 {
+        let error = curve(x1, x2, u) - x;
+        if error.abs() < 1e-5 {
+            break;
+        }
+        let slope = 3.0 * (1.0 - u).powi(2) * x1
+            + 6.0 * (1.0 - u) * u * (x2 - x1)
+            + 3.0 * u * u * (1.0 - x2);
+        if slope.abs() < 1e-6 {
+            break;
+        }
+        u = (u - error / slope).clamp(0.0, 1.0);
+    }
+    curve(y1, y2, u)
 }
 
 fn ease_in_out_cubic(t: f32) -> f32 {
@@ -172,7 +260,7 @@ mod tests {
         assert_eq!(state.theme.fg, [0x10, 0x20, 0x30]);
         assert_eq!(state.theme.container, [7, 8, 9]);
         assert_eq!(state.surfaces.dim, crate::ui::theme::DEFAULT_DIM);
-        assert_eq!(state.card_to, state.appearance.layout.empty_h());
+        assert_eq!(state.card_target, state.appearance.layout.empty_h());
     }
 
     #[test]
@@ -186,6 +274,13 @@ mod tests {
         };
         state.apply_appearance(config, std::time::Instant::now());
         assert!(state.reduce_motion);
+    }
+
+    #[test]
+    fn the_emphasized_curve_hits_its_endpoints() {
+        assert_eq!(emphasized_decelerate(0.0), 0.0);
+        assert_eq!(emphasized_decelerate(1.0), 1.0);
+        assert!(emphasized_decelerate(0.5) > 0.5);
     }
 
     #[test]

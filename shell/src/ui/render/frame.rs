@@ -37,7 +37,7 @@ pub fn draw(
         x: layout.card_x(surface),
         y: layout.card_top(surface),
         w: layout.card_w(surface),
-        h: state.card_height(now),
+        h: state.card_height(),
     };
 
     // The frame is retained, so a settled frame repaints only the card and

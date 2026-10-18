@@ -15,24 +15,24 @@ use super::canvas::{Canvas, ENTER_GLYPH, Rect};
 fn draw_row_chrome(
     canvas: &Canvas,
     pixmap: &mut Pixmap,
-    rect: Rect,
-    selected: bool,
-    hovered: bool,
     state: &State,
     now: Instant,
+    body: &RowBody<'_>,
 ) {
+    let rect = body.rect;
+    let alpha = body.alpha;
     let appearance = &state.appearance;
     let layout = appearance.layout;
-    let background = match (selected, hovered) {
-        (true, _) => Some(state.fade_rgba(state.surfaces.selection, now)),
-        (false, true) => Some(state.fade_rgba(state.surfaces.hover, now)),
+    let background = match (body.selected, body.hovered) {
+        (true, _) => Some(state.fade_rgba_scaled(state.surfaces.selection, now, alpha)),
+        (false, true) => Some(state.fade_rgba_scaled(state.surfaces.hover, now, alpha)),
         (false, false) => None,
     };
     if let Some(background) = background {
         canvas.fill_round(pixmap, rect, layout.row_radius(), background);
     }
 
-    if selected {
+    if body.selected {
         canvas.fill_round(
             pixmap,
             Rect {
@@ -42,7 +42,7 @@ fn draw_row_chrome(
                 h: geom::ACCENT_H,
             },
             layout.accent_radius(),
-            state.fade_rgba(state.surfaces.accent, now),
+            state.fade_rgba_scaled(state.surfaces.accent, now, alpha),
         );
     }
 }
@@ -59,6 +59,8 @@ pub(super) struct RowBody<'a> {
     pub bold: bool,
     pub summary: Option<&'a str>,
     pub default_marker: bool,
+    /// A new row's enter fade; 1 once it has settled.
+    pub alpha: f32,
 }
 
 /// A row's chrome, icon, labels column and tail marks: the result list and the
@@ -75,15 +77,7 @@ pub(super) fn draw_row(
     let theme = state.theme;
     let font = state.appearance.font;
     let rect = body.rect;
-    draw_row_chrome(
-        canvas,
-        pixmap,
-        rect,
-        body.selected,
-        body.hovered,
-        state,
-        now,
-    );
+    draw_row_chrome(canvas, pixmap, state, now, body);
 
     // A constant icon x, so the accent bar never shifts it.
     let icon_x = rect.x + 11.0;
@@ -95,9 +89,13 @@ pub(super) fn draw_row(
         let size = (font.icon() * canvas.scale).round() as u32;
         match body.icon_tint {
             Some(color) => {
-                icons.draw_tinted(pixmap, path, pos, size, state.entrance(now), color);
+                let opacity = state.entrance(now) * body.alpha;
+                icons.draw_tinted(pixmap, path, pos, size, opacity, color);
             }
-            None => icons.draw(pixmap, path, pos.0, pos.1, size, state.entrance(now)),
+            None => {
+                let opacity = state.entrance(now) * body.alpha;
+                icons.draw(pixmap, path, pos.0, pos.1, size, opacity);
+            }
         }
     }
 
@@ -154,7 +152,7 @@ pub(super) fn draw_row(
     text.draw(
         pixmap,
         &title,
-        state.fade(theme.fg, 1.0, now),
+        state.fade_scaled(theme.fg, 1.0, now, body.alpha),
         canvas.px(labels_x),
         canvas.px(labels_top),
         Some(clip),
@@ -163,7 +161,7 @@ pub(super) fn draw_row(
         text.draw(
             pixmap,
             summary,
-            state.fade_rgba(state.surfaces.summary, now),
+            state.fade_rgba_scaled(state.surfaces.summary, now, body.alpha),
             canvas.px(labels_x),
             canvas.px(labels_top + title_h + 2.0),
             Some(clip),
@@ -174,7 +172,7 @@ pub(super) fn draw_row(
         text.draw(
             pixmap,
             check,
-            state.fade(theme.primary, state.muted_alpha(), now),
+            state.fade_scaled(theme.primary, state.muted_alpha(), now, body.alpha),
             canvas.px(rect.right() - 10.0) - check.width,
             canvas.px(rect.center_y()) - check.height / 2.0,
             None,
@@ -192,7 +190,7 @@ pub(super) fn draw_row(
                 h: 6.0,
             },
             3.0,
-            state.fade(theme.primary, 1.0, now),
+            state.fade_scaled(theme.primary, 1.0, now, body.alpha),
         );
     }
 }
