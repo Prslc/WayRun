@@ -126,7 +126,7 @@ cargo build --release -p wayrun-shell --no-default-features      # 不做窗口�
 
 冷启动时首个 `ping` 回复为 10.0 ms，冷启动下的首次应用搜索为 24 ms。
 
-面板 warm 拉起（进程第一次之后的每次 show）首帧提交为 3.6 ms（P95 4.8 ms），
+面板 warm 拉起（进程第一次之后的每次 show）首帧提交为 4.4 ms（P95 5.3 ms），
 进程第一次 show 约 10 ms。首帧是全透明的（入场从 alpha 0 开始），
 第一帧可见还要再等一个刷新周期；240 ms 淡入是刻意动画。
 
@@ -169,7 +169,7 @@ warm 稳态（每次丢弃 3 轮 + 测量 30 轮，乱序）：
 
 | | 冷启动 | warm P50 | warm P95 |
 |---|---|---|---|
-| show | 10.1 ms | 3.6 ms | 4.8 ms |
+| show | 10.1 ms | 4.4 ms | 5.3 ms |
 
 测量于 2026-10-18：AMD Ryzen 5 5500U（6c/12t，`performance` 调频）、Arch Linux、
 niri 26.04、release 构建。warm 行为对同一个常驻 `--core` 的同步 `search` 调用；

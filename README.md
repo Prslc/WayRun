@@ -143,7 +143,7 @@ Cold start: the first `ping` reply comes back in 10.0 ms, and a cold app
 search takes 24 ms.
 
 A warm panel show — every show after the process's first — commits its first
-frame in 3.6 ms (P95 4.8 ms); that first show takes ~10 ms. The first frame is
+frame in 4.4 ms (P95 5.3 ms); that first show takes ~10 ms. The first frame is
 transparent (the entrance starts at alpha 0), so the first visible frame lands
 one refresh later, and the 240 ms fade is deliberate.
 
@@ -186,7 +186,7 @@ Show latency (IPC open → first committed frame, 3 warmups + 20 shows):
 
 | | Cold | Warm P50 | Warm P95 |
 |---|---|---|---|
-| show | 10.1 ms | 3.6 ms | 4.8 ms |
+| show | 10.1 ms | 4.4 ms | 5.3 ms |
 
 Measured 2026-10-18 on an AMD Ryzen 5 5500U (6c/12t, `performance` governor),
 Arch Linux, niri 26.04, release build. Warm rows are synchronous `search`

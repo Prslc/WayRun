@@ -12,6 +12,7 @@ use smithay_client_toolkit::shell::wlr_layer::{
 };
 use wayland_client::protocol::{wl_output, wl_surface};
 use wayland_client::{Connection, QueueHandle};
+use wayrun_core::trim_allocator;
 
 use crate::session::{backend, ipc};
 use crate::ui::render;
@@ -140,6 +141,8 @@ impl Shell {
         ipc::VISIBLE.store(false, Ordering::Relaxed);
 
         if self.resident {
+            // glibc keeps freed large allocations in its arenas; return the pages.
+            trim_allocator();
             return;
         }
 
