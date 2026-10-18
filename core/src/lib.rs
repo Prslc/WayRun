@@ -5,6 +5,7 @@ use anyhow::Result;
 rust_i18n::i18n!("../locales", fallback = "en");
 
 pub mod config;
+mod live;
 pub mod locale;
 pub mod lua;
 mod notify;

@@ -4,14 +4,16 @@ mod score;
 use std::cmp::Reverse;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 use anyhow::Result;
 use gio::prelude::{AppInfoExt, IconExt};
 
+use crate::live::Live;
 use crate::plugin::{Meta, Plugin, Rank, Ranked};
 use crate::system::desktop_action;
 use crate::system::icon::resolve;
+use crate::system::xdg;
 use crate::wire::{Action, ActionItem, ResultItem};
 use rust_i18n::t;
 
@@ -86,8 +88,8 @@ pub(super) struct DesktopAction {
     pub name_lower: String,
 }
 
-/// One installed application, precomputed at first search and reused for the
-/// process lifetime; the `Field`s carry every match form a query needs.
+/// One installed application, rebuilt when the desktop roots change; the
+/// `Field`s carry every match form a query needs.
 pub(super) struct CachedApp {
     pub id: String,
     pub title: String,
@@ -120,12 +122,12 @@ impl CachedApp {
 
 /// One scored candidate before its row exists: only the survivors of the cap
 /// pay for the icon lookup a row needs.
-pub(super) enum Hit {
-    App(&'static CachedApp),
-    Action(&'static CachedApp, &'static DesktopAction),
+pub(super) enum Hit<'a> {
+    App(&'a CachedApp),
+    Action(&'a CachedApp, &'a DesktopAction),
 }
 
-impl Hit {
+impl Hit<'_> {
     pub(super) fn title(&self) -> &str {
         match self {
             Hit::App(app) => &app.title,
@@ -158,7 +160,19 @@ impl Hit {
     }
 }
 
-static APPS: LazyLock<Vec<CachedApp>> = LazyLock::new(|| {
+static APPS: OnceLock<Live<Vec<CachedApp>>> = OnceLock::new();
+
+fn app_cache() -> &'static Live<Vec<CachedApp>> {
+    APPS.get_or_init(|| Live::new(xdg::desktop_dirs))
+}
+
+/// Build the list for a caller on the blocking pool that needs it before any
+/// app search has run.
+pub(super) fn ensure_apps() {
+    let _ = app_cache().get(build_apps);
+}
+
+fn build_apps() -> Vec<CachedApp> {
     let locales = desktop_action::locales();
     gio::AppInfo::all()
         .into_iter()
@@ -196,22 +210,23 @@ static APPS: LazyLock<Vec<CachedApp>> = LazyLock::new(|| {
             })
         })
         .collect()
-});
+}
 
 /// Whether the app behind `desktop_id` asks for a terminal, off the entry the
 /// app list already parsed.
 pub(super) fn needs_terminal(desktop_id: &str) -> bool {
-    APPS.iter()
-        .find(|app| app.id == desktop_id)
-        .is_some_and(|app| app.terminal)
+    APPS.get()
+        .and_then(|cache| cache.snapshot())
+        .is_some_and(|apps| apps.iter().any(|app| app.id == desktop_id && app.terminal))
 }
 
 /// The desktop id of the app whose `Exec=` names `executable`: a PATH hit that
 /// is an installed app launches through `gio`, so its `Terminal=` decides.
-pub fn desktop_id_for_exec(executable: &str) -> Option<&'static str> {
-    APPS.iter()
+pub fn desktop_id_for_exec(executable: &str) -> Option<String> {
+    let apps = APPS.get()?.snapshot()?;
+    apps.iter()
         .find(|app| app.exec.as_deref() == Some(executable))
-        .map(|app| app.id.as_str())
+        .map(|app| app.id.clone())
 }
 
 pub struct AppSearch {
@@ -274,7 +289,10 @@ impl Plugin for AppSearch {
         let Some(Action::Launch { desktop_id }) = item.on_click.as_ref() else {
             return Vec::new();
         };
-        let Some(app) = APPS.iter().find(|app| app.id == *desktop_id) else {
+        let Some(apps) = APPS.get().and_then(|cache| cache.snapshot()) else {
+            return Vec::new();
+        };
+        let Some(app) = apps.iter().find(|app| app.id == *desktop_id) else {
             return Vec::new();
         };
         let Some(meta) = app.meta.as_ref() else {
@@ -307,8 +325,10 @@ fn do_search(query: &str) -> Vec<(Rank, ResultItem)> {
         return Vec::new();
     }
 
-    let mut scored: Vec<(u32, Hit)> = Vec::new();
-    for app in APPS.iter() {
+    let cache = app_cache();
+    let apps = cache.get(build_apps);
+    let mut scored: Vec<(u32, Hit<'_>)> = Vec::new();
+    for app in apps.iter() {
         let app_score = score_app(
             &app.title_field,
             app.comment_field.as_ref(),
