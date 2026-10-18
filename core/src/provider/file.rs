@@ -260,11 +260,49 @@ pub(super) fn keep_name(name: &OsStr, exclude: &[String]) -> bool {
     !name.starts_with(b".") && !exclude.iter().any(|entry| entry.as_bytes() == name)
 }
 
-/// The quick walk's four roots: `Desktop`/`Documents`/`Downloads` are walked on
-/// their own, so skip them at depth 1 under `~` rather than twice.
-fn keep_entry(name: &str, depth: usize, exclude: &[String]) -> bool {
-    keep_name(OsStr::new(name), exclude)
-        && !(depth == 1 && matches!(name, "Desktop" | "Documents" | "Downloads"))
+/// The user roots are walked on their own, so skip them at depth 1 under `~`
+/// rather than twice.
+fn keep_entry(name: &str, depth: usize, exclude: &[String], user_dirs: &[String]) -> bool {
+    keep_name(OsStr::new(name), exclude) && !(depth == 1 && user_dirs.iter().any(|dir| dir == name))
+}
+
+/// The XDG user dirs (Desktop, Documents, Downloads), else the conventional
+/// names under `home`; a different root is a test fixture and takes the names.
+fn user_roots(home: &Path) -> Vec<PathBuf> {
+    let conventional = || {
+        vec![
+            home.join("Desktop"),
+            home.join("Documents"),
+            home.join("Downloads"),
+        ]
+    };
+    let roots = if dirs::home_dir().is_some_and(|real| real.as_path() == home) {
+        let known = dirs::config_dir().is_some_and(|dir| dir.join("user-dirs.dirs").is_file());
+        if known {
+            [
+                dirs::desktop_dir(),
+                dirs::document_dir(),
+                dirs::download_dir(),
+            ]
+            .into_iter()
+            .flatten()
+            .collect()
+        } else {
+            conventional()
+        }
+    } else {
+        conventional()
+    };
+    let mut unique: Vec<PathBuf> = Vec::new();
+    for root in roots {
+        if !unique.contains(&root) {
+            unique.push(root);
+        }
+    }
+    if !unique.iter().any(|root| root.as_path() == home) {
+        unique.push(home.to_path_buf());
+    }
+    unique
 }
 
 /// A walk may match thousands of entries; rank the first `MATCH_CAP` and show
@@ -312,7 +350,8 @@ fn do_search(query: &str, want_dir: bool, by_name: bool) -> Vec<ResultItem> {
 /// Not a config key: with the index on (the default) it has no effect at all.
 const FALLBACK_DEPTH: usize = 3;
 
-/// The fallback when no index is available: the four roots, [`FALLBACK_DEPTH`] levels.
+/// The fallback when no index is available: the user roots plus `~`, at most
+/// [`FALLBACK_DEPTH`] levels deep.
 fn quick_search(
     home: &Path,
     query_lower: &str,
@@ -320,12 +359,15 @@ fn quick_search(
     name_only: bool,
     files: &Files,
 ) -> Vec<ResultItem> {
-    let roots = [
-        home.join("Desktop"),
-        home.join("Documents"),
-        home.join("Downloads"),
-        home.to_path_buf(),
-    ];
+    let roots = user_roots(home);
+    let user_dirs: Vec<String> = roots
+        .iter()
+        .filter(|root| root.parent() == Some(home))
+        .filter_map(|root| {
+            root.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .collect();
 
     let mut scored: Vec<(u32, PathBuf, bool)> = Vec::new();
     let mut path_lower = String::new();
@@ -340,7 +382,12 @@ fn quick_search(
             .max_depth(FALLBACK_DEPTH)
             .into_iter()
             .filter_entry(|e| {
-                keep_entry(&e.file_name().to_string_lossy(), e.depth(), &files.exclude)
+                keep_entry(
+                    &e.file_name().to_string_lossy(),
+                    e.depth(),
+                    &files.exclude,
+                    &user_dirs,
+                )
             });
 
         for entry in walker.filter_map(Result::ok) {
@@ -627,20 +674,27 @@ mod tests {
     #[test]
     fn the_home_roots_are_skipped_only_under_the_home_root() {
         let exclude = shipped_exclude();
+        let user_dirs = ["Desktop", "Documents", "Downloads"]
+            .map(str::to_string)
+            .to_vec();
         // depth 1 under `~`: walked as its own root, so skip it here.
-        assert!(!keep_entry("Desktop", 1, &exclude));
-        assert!(!keep_entry("Documents", 1, &exclude));
-        assert!(!keep_entry("Downloads", 1, &exclude));
+        assert!(!keep_entry("Desktop", 1, &exclude, &user_dirs));
+        assert!(!keep_entry("Documents", 1, &exclude, &user_dirs));
+        assert!(!keep_entry("Downloads", 1, &exclude, &user_dirs));
         // a same-named dir deeper, or one directly inside a root, is kept.
-        assert!(keep_entry("Desktop", 2, &exclude));
-        assert!(keep_entry("Desktop", 0, &exclude));
-        assert!(keep_entry("Documents", 2, &exclude));
+        assert!(keep_entry("Desktop", 2, &exclude, &user_dirs));
+        assert!(keep_entry("Desktop", 0, &exclude, &user_dirs));
+        assert!(keep_entry("Documents", 2, &exclude, &user_dirs));
+        // a localized user dir is skipped the same way.
+        let localized = ["文档".to_string()];
+        assert!(!keep_entry("文档", 1, &exclude, &localized));
+        assert!(keep_entry("文档", 2, &exclude, &localized));
         // build caches and dotdirs are skipped anywhere.
-        assert!(!keep_entry(".config", 1, &exclude));
-        assert!(!keep_entry("node_modules", 1, &exclude));
-        assert!(!keep_entry("target", 3, &exclude));
-        assert!(!keep_entry("__pycache__", 2, &exclude));
-        assert!(keep_entry("notes.txt", 2, &exclude));
+        assert!(!keep_entry(".config", 1, &exclude, &user_dirs));
+        assert!(!keep_entry("node_modules", 1, &exclude, &user_dirs));
+        assert!(!keep_entry("target", 3, &exclude, &user_dirs));
+        assert!(!keep_entry("__pycache__", 2, &exclude, &user_dirs));
+        assert!(keep_entry("notes.txt", 2, &exclude, &user_dirs));
     }
 
     #[test]
