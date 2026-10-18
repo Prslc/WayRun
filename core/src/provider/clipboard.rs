@@ -78,7 +78,7 @@ impl Entry {
             title: self.title.clone(),
             summary: None,
             on_click: Some(Action::Run {
-                cmd: format!("sh -c 'cliphist decode {} | wl-copy'", self.id),
+                cmd: format!("cliphist decode {} | wl-copy", self.id),
             }),
             icon: icon.clone(),
             actions: Vec::new(),
@@ -127,6 +127,10 @@ fn parse_entries(raw: &str) -> Vec<Entry> {
             [id, preview] => (*id, *preview),
             _ => continue,
         };
+        // The id is interpolated into a shell line; cliphist emits digits only.
+        if id.is_empty() || !id.bytes().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
 
         entries.push(Entry {
             id: id.to_string(),
@@ -168,8 +172,16 @@ mod tests {
         let Some(Action::Run { cmd }) = row.on_click.as_ref() else {
             panic!("a clipboard row runs a command");
         };
-        assert!(cmd.contains("decode 1"));
+        assert_eq!(cmd, "cliphist decode 1 | wl-copy");
         assert_eq!(entries[1].title, "screenshot");
+    }
+
+    #[test]
+    fn a_non_numeric_id_is_skipped() {
+        let raw = "1\ttext/plain\tok\n2; touch /tmp/x\ttext/plain\tbad";
+        let entries = parse_entries(raw);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "1");
     }
 
     #[test]
