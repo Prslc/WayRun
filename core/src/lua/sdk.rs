@@ -11,8 +11,8 @@ use super::crypto;
 use super::fuzzy;
 use super::http;
 use super::kv;
+use super::log::Log;
 use super::sqlite;
-use super::warn;
 
 /// The plugin directories this script may read from, one per declared id;
 /// filled after the script is read, resolved by the bindings at call time.
@@ -49,15 +49,17 @@ fn scoped_read(roots: &[PathBuf], name: &str) -> Result<Option<String>, String> 
     Ok(None)
 }
 
-pub(super) fn build(
-    lua: &Lua,
-    script: &str,
-    scope: Scope,
-    active: kv::Active,
-    paths: kv::Paths,
-    env_scope: EnvScope,
-    read_areas: areas::Areas,
-) -> mlua::Result<Table> {
+/// The scope handles a script's bindings share: filled after the plugin table
+/// is read, then resolved by id at call time.
+pub(super) struct Shared {
+    pub scope: Scope,
+    pub active: kv::Active,
+    pub kv_paths: kv::Paths,
+    pub env_scope: EnvScope,
+    pub read_areas: areas::Areas,
+}
+
+pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua::Result<Table> {
     let sdk = lua.create_table()?;
     sdk.set(
         "home",
@@ -83,7 +85,8 @@ pub(super) fn build(
         lua.create_function(|_, text: String| Ok(urlencoding::encode(&text).into_owned()))?,
     )?;
     sdk.set("time", lua.create_function(|_, ()| Ok(now_seconds()))?)?;
-    let env_active = Rc::clone(&active);
+    let env_active = Rc::clone(&shared.active);
+    let env_scope = Rc::clone(&shared.env_scope);
     sdk.set(
         "env",
         lua.create_function(move |_, name: String| {
@@ -98,7 +101,7 @@ pub(super) fn build(
                 .is_some_and(|names| names.contains(&name));
             if !allowed {
                 return Err(mlua::Error::RuntimeError(format!(
-                    "env {name}: plugin {id} does not declare it"
+                    "env {name}: plugin {id} does not declare it; add the name to the plugin table's env"
                 )));
             }
             Ok(std::env::var(name).ok())
@@ -123,17 +126,16 @@ pub(super) fn build(
             Ok(plugin_dir(&id).map(|dir| dir.display().to_string()))
         })?,
     )?;
-    let name = script.to_string();
     sdk.set(
         "log",
         lua.create_function(move |_, message: String| {
-            warn(&name, &message);
+            log.write(&message);
             Ok(())
         })?,
     )?;
     let guard: areas::Guard = {
-        let read_areas = Rc::clone(&read_areas);
-        let guard_active = Rc::clone(&active);
+        let read_areas = Rc::clone(&shared.read_areas);
+        let guard_active = Rc::clone(&shared.active);
         let script = dir.clone();
         Rc::new(move |path: &str| {
             let Some(id) = guard_active.borrow().clone() else {
@@ -151,7 +153,10 @@ pub(super) fn build(
     };
     sdk.set("json", json_lib(lua)?)?;
     sdk.set("toml", toml_lib(lua)?)?;
-    sdk.set("fs", fs_lib(lua, scope, Rc::clone(&guard))?)?;
+    sdk.set(
+        "fs",
+        fs_lib(lua, Rc::clone(&shared.scope), Rc::clone(&guard))?,
+    )?;
     let stores: kv::Handle = Rc::new(RefCell::new(kv::Stores::default()));
     sdk.set(
         "http",
@@ -159,12 +164,20 @@ pub(super) fn build(
             lua,
             script,
             Rc::clone(&stores),
-            Rc::clone(&active),
-            Rc::clone(&paths),
+            Rc::clone(&shared.active),
+            Rc::clone(&shared.kv_paths),
         )?,
     )?;
     sdk.set("sqlite", sqlite::lib(lua, guard)?)?;
-    sdk.set("kv", kv::lib(lua, stores, active, paths)?)?;
+    sdk.set(
+        "kv",
+        kv::lib(
+            lua,
+            stores,
+            Rc::clone(&shared.active),
+            Rc::clone(&shared.kv_paths),
+        )?,
+    )?;
     sdk.set("fuzzy", fuzzy::lib(lua)?)?;
     sdk.set("crypto", crypto::lib(lua)?)?;
     Ok(sdk)
@@ -323,14 +336,19 @@ mod tests {
     /// reference page has to name, read off the built table, not the source.
     fn sdk_names() -> BTreeSet<String> {
         let lua = Lua::new_with(mlua::StdLib::ALL_SAFE, mlua::LuaOptions::default()).unwrap();
+        let active = Rc::new(RefCell::new(None));
+        let shared = Shared {
+            scope: Rc::new(RefCell::new(Vec::new())),
+            active: Rc::clone(&active),
+            kv_paths: Rc::new(RefCell::new(HashMap::new())),
+            env_scope: Rc::new(RefCell::new(HashMap::new())),
+            read_areas: Rc::new(RefCell::new(HashMap::new())),
+        };
         let table = build(
             &lua,
             "/test/script.lua",
-            Rc::new(RefCell::new(Vec::new())),
-            Rc::new(RefCell::new(None)),
-            Rc::new(RefCell::new(HashMap::new())),
-            Rc::new(RefCell::new(HashMap::new())),
-            Rc::new(RefCell::new(HashMap::new())),
+            &shared,
+            Log::new("/test/script.lua", active),
         )
         .unwrap();
         let mut names = BTreeSet::new();

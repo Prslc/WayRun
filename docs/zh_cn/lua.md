@@ -81,7 +81,7 @@ actions = {
 | `wayrun.cache_dir()` | 启动器的缓存目录，否则 nil |
 | `wayrun.icon(name)` | 把主题图标名或 `papirus:…` 规范解析为绝对路径（绝对路径原样通过）；未命中或 `builtin:` 字形为 nil |
 | `wayrun.urlencode(text)` | 按 URL 需要做百分号编码 |
-| `wayrun.log(message)` | 以脚本名义写入启动器的 journal |
+| `wayrun.log(message)` | 以脚本与调用插件的名义写入启动器的 journal |
 | `wayrun.time()` | Unix 秒，用于签名与缓存 TTL |
 | `wayrun.env(name)` | 插件在 `env` 中声明的变量；未设置则为 nil；未声明的名字抛出 |
 | `wayrun.which(name)` | 启动器 `$PATH` 上某个可执行文件的路径，否则 nil；与 `run` 行的命令将看到的 PATH 相同 |
@@ -112,14 +112,27 @@ actions = {
 
 ## 沙箱
 
-`os`、`io`、`package`、`load` 与 `print` 均不可达：脚本起不了进程，唯一的写是
-`kv`（键不是路径，库落在插件自己的目录里）。能读的比这宽：`fs.read` 是受范围约束
-的那一个（只收相对路径，限定在 `$XDG_CONFIG_HOME/wayrun/plugins/<id>/` 之内），而
+`os`、`io`、`package` 与 `load` 均不可达：脚本起不了进程，唯一的写是
+`kv`（键不是路径，库落在插件自己的目录里）。`print` 与 `wayrun.log` 写入启动器的
+journal，绝不写 stdout（stdout 是 JSON-RPC 线），且每次调用都有上限。能读的比这宽：
+`fs.read` 是受范围约束的那一个（只收相对路径，限定在
+`$XDG_CONFIG_HOME/wayrun/plugins/<id>/` 之内），而
 `fs.list`、`fs.stat` 与 `sqlite.snapshot` 只能触及插件自己声明的区域（`firefox.lua`
 声明 `~/.mozilla/firefox` 来读 `places.sqlite`），`wayrun.env` 只能读调用中的插件
 自己声明的那些名字，`http` 可访问网络。沙箱约束的是脚本能做什么；能读到什么，由
-插件表的 `env` 与 `read` 声明。调用中抛错则本次返回空行并记录到 journal，因此 `wayrun.log`
-与对风险操作的 `pcall` 就是调试手段。
+插件表的 `env` 与 `read` 声明。调用中抛错则本次返回空行并记录到 journal，因此
+`print`、`wayrun.log` 与对风险操作的 `pcall` 就是调试手段。
+
+## 调试
+
+不进启动器，直接驱动脚本并读一行回复：
+
+```sh
+printf '{"jsonrpc":"2.0","method":"search","params":{"plugin":"<id>","text":"…"},"id":1}\n' \
+  | wayrun --lua-host plugin.lua
+```
+
+缺少 `env` 或 `read` 声明时，错误会直接点名，把它加进插件表即可，不必反复试探。
 
 ## 限制
 

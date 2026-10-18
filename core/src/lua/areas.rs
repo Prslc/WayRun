@@ -65,7 +65,7 @@ pub(super) fn check(roots: &[PathBuf], requested: &str) -> Result<(), String> {
     if roots.iter().any(|root| resolved.starts_with(resolve(root))) {
         return Ok(());
     }
-    Err("outside the areas the plugin declares".to_string())
+    Err("outside the read areas; add the path to the plugin table's read".to_string())
 }
 
 #[cfg(test)]

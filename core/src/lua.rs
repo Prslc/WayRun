@@ -4,6 +4,7 @@ mod fuzzy;
 mod host;
 mod http;
 mod kv;
+mod log;
 mod manifest;
 mod sandbox;
 mod sdk;

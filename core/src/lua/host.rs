@@ -11,7 +11,7 @@ use crate::wire::ResultItem;
 
 use super::manifest::{Plugin, read_plugins};
 use super::sandbox::script_env;
-use super::{areas, kv, sdk, warn};
+use super::{areas, kv, log::Log, sdk, warn};
 
 /// `wayrun --lua-host <script.lua>`: answer the external-host JSON-RPC
 /// contract from one Lua script, with the VM living in a process of its own.
@@ -40,6 +40,7 @@ struct Host {
     script: String,
     plugins: Vec<Plugin>,
     active: kv::Active,
+    log: Log,
 }
 
 impl Host {
@@ -50,18 +51,18 @@ impl Host {
         let kv_paths: kv::Paths = Rc::new(RefCell::new(HashMap::new()));
         let env_scope: sdk::EnvScope = Rc::new(RefCell::new(HashMap::new()));
         let read_areas: areas::Areas = Rc::new(RefCell::new(HashMap::new()));
+        let log = Log::new(script, Rc::clone(&active));
+        let shared = sdk::Shared {
+            scope: Rc::clone(&scope),
+            active: Rc::clone(&active),
+            kv_paths: Rc::clone(&kv_paths),
+            env_scope: Rc::clone(&env_scope),
+            read_areas: Rc::clone(&read_areas),
+        };
         let load = || -> mlua::Result<(Lua, Vec<Plugin>)> {
             let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::default())?;
-            let wayrun = sdk::build(
-                &lua,
-                script,
-                Rc::clone(&scope),
-                Rc::clone(&active),
-                Rc::clone(&kv_paths),
-                Rc::clone(&env_scope),
-                Rc::clone(&read_areas),
-            )?;
-            let env = script_env(&lua, &wayrun)?;
+            let wayrun = sdk::build(&lua, script, &shared, log.clone())?;
+            let env = script_env(&lua, &wayrun, log.clone())?;
             let declared: Table = lua
                 .load(source)
                 .set_name(script)
@@ -94,6 +95,7 @@ impl Host {
             script: script.to_string(),
             plugins,
             active,
+            log,
         })
     }
 
@@ -191,6 +193,7 @@ impl Host {
             ));
         };
         *self.active.borrow_mut() = Some(plugin.id.clone());
+        self.log.reset();
         let returned: Value = function.call(arg).map_err(|error| {
             warn(
                 &self.script,
@@ -275,14 +278,23 @@ mod tests {
     }
 
     #[test]
-    fn os_io_package_load_and_print_are_unreachable() {
+    fn os_io_package_and_load_are_unreachable() {
         host(
             r#"
             assert(os == nil, "os leaked")
             assert(io == nil, "io leaked")
             assert(package == nil, "package leaked")
             assert(load == nil, "load leaked")
-            assert(print == nil, "print leaked")
+            return { { id = "demo", search = function() return {} end } }
+            "#,
+        );
+    }
+
+    #[test]
+    fn print_writes_to_the_journal() {
+        host(
+            r#"
+            print("debug", 1)
             return { { id = "demo", search = function() return {} end } }
             "#,
         );

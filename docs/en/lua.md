@@ -86,7 +86,7 @@ A row with no `on_click` is display-only; it can still carry `actions`.
 | `wayrun.cache_dir()` | the launcher's cache directory, or nil |
 | `wayrun.icon(name)` | resolves a theme icon name or `papirus:…` spec to an absolute path (an absolute path passes through); nil on a miss or a `builtin:` glyph |
 | `wayrun.urlencode(text)` | percent-encodes for use in a URL |
-| `wayrun.log(message)` | writes to the launcher's journal under the script's name |
+| `wayrun.log(message)` | writes to the launcher's journal under the script's and calling plugin's name |
 | `wayrun.time()` | Unix seconds, for signatures and cache TTLs |
 | `wayrun.env(name)` | a variable the plugin declares in `env`, or nil when unset; an undeclared name raises |
 | `wayrun.which(name)` | an executable's path on the launcher's `$PATH`, or nil; the same PATH a `run` row's command will see |
@@ -119,9 +119,11 @@ for `pcall` rather than dying as a killed host.
 
 ## The sandbox
 
-`os`, `io`, `package`, `load` and `print` are not reachable: a script cannot
+`os`, `io`, `package` and `load` are not reachable: a script cannot
 run programs, and the only write is `kv`, whose keys are not paths and whose
-database lives in the plugin's own directory. Reading is wider: `fs.read` is
+database lives in the plugin's own directory. `print` and `wayrun.log` write to
+the launcher's journal, never to stdout (stdout is the JSON-RPC wire), and both
+are bounded per call. Reading is wider: `fs.read` is
 the scoped one (relative names only, confined to
 `$XDG_CONFIG_HOME/wayrun/plugins/<id>/`), while `fs.list`, `fs.stat` and
 `sqlite.snapshot` reach only the areas a plugin declares for itself
@@ -129,8 +131,20 @@ the scoped one (relative names only, confined to
 `wayrun.env` reads only the names the calling plugin declares, and `http`
 reaches the network. The sandbox bounds what a script can do; what it can read
 is what the plugin's `env` and `read` declare. A call that raises yields no rows
-and reports to the journal, so `wayrun.log` and a `pcall` around risky work are
-the debugging tools.
+and reports to the journal, so `print`, `wayrun.log` and a `pcall` around risky
+work are the debugging tools.
+
+## Debugging
+
+Drive a script without the launcher and read one reply:
+
+```sh
+printf '{"jsonrpc":"2.0","method":"search","params":{"plugin":"<id>","text":"…"},"id":1}\n' \
+  | wayrun --lua-host plugin.lua
+```
+
+A missing `env` or `read` declaration is named in the error, so add it to the
+plugin table instead of probing for it.
 
 ## Limits
 
