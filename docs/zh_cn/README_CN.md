@@ -119,51 +119,52 @@ cargo build --release -p wayrun-shell --no-default-features      # 不做窗口�
 
 | 查询 | 行数 | P50 | P95 |
 |---|---|---|---|
-| 应用搜索 — `firefox` | 1 | 0.21 ms | 0.32 ms |
-| 文件搜索 — `f report` | 50 | 1.92 ms | 2.17 ms |
-| 目录搜索 — `d download` | 50 | 1.15 ms | 1.43 ms |
-| 路径查找 — `~/` | 15 | 0.52 ms | 0.61 ms |
+| 应用搜索 — `firefox` | 1 | 0.18 ms | 0.29 ms |
+| 文件搜索 — `f report` | 50 | 1.88 ms | 2.03 ms |
+| 目录搜索 — `d download` | 50 | 1.10 ms | 1.31 ms |
+| 路径查找 — `~/` | 15 | 0.50 ms | 0.61 ms |
 
-冷启动时首个 `ping` 回复为 10.5 ms，冷启动下的首次应用搜索为 23 ms。
+冷启动时首个 `ping` 回复为 10.0 ms，冷启动下的首次应用搜索为 24 ms。
 
 <details>
 <summary>完整表格、冷启动与测量方法</summary>
 
-warm 稳态（丢弃 3 轮 + 测量 30 轮，乱序）：
+warm 稳态（每次丢弃 3 轮 + 测量 30 轮，乱序）：
 
 | Provider | 查询 | 行数 | P50 (ms) | P95 (ms) | Max (ms) |
 |---|---|---|---|---|---|
-| `ping` | — | — | 0.045 | 0.062 | 0.088 |
-| `calculator` | `2 + 3 * 4` | 1 | 0.192 | 0.258 | 0.284 |
-| `system-commands` | `reboot` | 1 | 0.200 | 0.277 | 0.347 |
-| `app-search` | `firefox` | 1 | 0.207 | 0.316 | 0.333 |
-| `runner` | `r htop` | 10 | 0.393 | 0.503 | 0.686 |
-| `file-search` | `f report` | 50 | 1.923 | 2.169 | 2.648 |
-| `path-search` | `d download` | 50 | 1.149 | 1.433 | 1.520 |
-| `path-lookup` | `~/` | 15 | 0.518 | 0.611 | 0.620 |
-| `home-fallback` | `Proj` | 1 | 0.290 | 0.379 | 0.436 |
-| `clipboard` | `c a` | 50 | 0.207 | 0.260 | 0.352 |
-| `window` | `w kitty` | 2 | 0.091 | 0.141 | 0.157 |
+| `ping` | — | — | 0.042 | 0.060 | 0.123 |
+| `calculator` | `2 + 3 * 4` | 1 | 0.163 | 0.290 | 0.334 |
+| `system-commands` | `reboot` | 1 | 0.189 | 0.258 | 0.276 |
+| `app-search` | `firefox` | 1 | 0.180 | 0.290 | 0.325 |
+| `runner` | `r htop` | 10 | 0.383 | 0.583 | 0.638 |
+| `file-search` | `f report` | 50 | 1.876 | 2.029 | 2.598 |
+| `path-search` | `d download` | 50 | 1.104 | 1.312 | 1.400 |
+| `path-lookup` | `~/` | 15 | 0.500 | 0.609 | 0.689 |
+| `home-fallback` | `Proj` | 1 | 0.263 | 0.345 | 0.444 |
+| `clipboard` | `c a` | 50 | 0.191 | 0.218 | 0.235 |
+| `window` | `w kitty` | 1 | 0.085 | 0.110 | 0.114 |
 
 冷启动首次调用（每次全新 `wayrun --core`，共 3 次，取第 1 次）：
 
 | Provider | 查询 | 行数 | 索引 | Wall (ms) | MaxRSS (MB) |
 |---|---|---|---|---|---|
-| `ping` | — | — | — | 10.5 | 11.0 |
-| `calculator` | `2 + 3 * 4` | 1 | — | 24.1 | 15.8 |
-| `system-commands` | `reboot` | 1 | — | 23.6 | 15.9 |
-| `app-search` | `firefox` | 1 | — | 23.4 | 15.8 |
-| `runner` | `r htop` | 10 | — | 38.2 | 16.4 |
-| `file-search` | `f report` | 50 | 加载 | 57.4 | 54.3 |
-| `path-search` | `d download` | 50 | 加载 | 55.4 | 41.6 |
-| `path-lookup` | `~/` | 15 | — | 24.7 | 15.7 |
-| `home-fallback` | `Proj` | 1 | — | 24.9 | 15.5 |
-| `clipboard` | `c a` | 50 | — | 35.6 | 13.3 |
-| `window` | `w kitty` | 2 | — | 29.9 | 17.0 |
+| `ping` | — | — | — | 10.0 | 10.4 |
+| `calculator` | `2 + 3 * 4` | 1 | — | 23.3 | 14.2 |
+| `system-commands` | `reboot` | 1 | — | 23.1 | 14.8 |
+| `app-search` | `firefox` | 1 | — | 23.6 | 14.8 |
+| `runner` | `r htop` | 10 | — | 33.6 | 15.2 |
+| `file-search` | `f report` | 50 | 加载 | 57.5 | 52.8 |
+| `path-search` | `d download` | 50 | 加载 | 48.7 | 40.1 |
+| `path-lookup` | `~/` | 15 | — | 23.7 | 14.7 |
+| `home-fallback` | `Proj` | 1 | — | 22.4 | 14.2 |
+| `clipboard` | `c a` | 50 | — | 33.8 | 13.2 |
+| `window` | `w kitty` | 1 | — | 24.0 | 16.5 |
 
 测量于 2026-10-18：AMD Ryzen 5 5500U（6c/12t，`performance` 调频）、Arch Linux、
 niri 26.04、release 构建。warm 行为对同一个常驻 `--core` 的同步 `search` 调用；
-cold 行每次启动全新进程，用 GNU time 计时。读取真实 `$HOME`，文件索引 42 MB。
+cold 行每次启动全新进程，用 GNU time 计时。读取真实 `$HOME`，42 MB 的文件索引
+覆盖 11.1 万个目录、74.2 万个文件。
 `ping` 是测量程序自身的往返下限；clipboard 与 window 行命中 500 ms 的 burst 缓存。
 
 </details>
