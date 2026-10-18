@@ -13,9 +13,10 @@ wayrun-core = { path = "../core", default-features = false }
 cosmic-text = "0.15"
 # Non-PNG raster previews/icons (JPEG, WebP, GIF, BMP); PNG stays on tiny-skia.
 image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "webp"] }
-# JPEG decodes at a reduced DCT scale: a 4K preview must not build the full RGB
-# and RGBA buffers `image` would.
+# JPEG decodes at a reduced DCT scale and PNG row by row: a 4K preview must not
+# build the full RGB and RGBA buffers `image` or tiny-skia would.
 jpeg-decoder = "0.3"
+png = "0.17"
 libc = "0.2"
 # Icons are paths, never text: the default `text`/`system-fonts` features would
 # build and load a system font database for every `Options::default()`, which

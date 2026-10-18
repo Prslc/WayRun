@@ -2623,6 +2623,7 @@ dependencies = [
  "image",
  "jpeg-decoder",
  "libc",
+ "png",
  "resvg",
  "rust-i18n",
  "serde",

@@ -1,4 +1,6 @@
 use std::borrow::Cow;
+use std::fs::File;
+use std::io::{BufReader, Read, Seek, SeekFrom};
 
 use tiny_skia::{
     FilterQuality, IntSize, Pixmap, PixmapPaint, PixmapRef, PremultipliedColorU8, Transform,
@@ -6,31 +8,143 @@ use tiny_skia::{
 
 use super::builtin;
 
-/// Contain-fit `path` into a `size`×`size` box, transparent around it.
+const PNG_MAGIC: [u8; 8] = *b"\x89PNG\r\n\x1a\n";
+const JPEG_MAGIC: [u8; 2] = [0xff, 0xd8];
+
+/// Contain-fit `path` into a `size`×`size` box. PNG and JPEG stream from the
+/// file and decode at the target scale; the other formats read it whole.
 pub(super) fn render(path: &str, size: u32) -> Option<Pixmap> {
-    let data = load(path)?;
     if is_svg(path) {
-        render_svg(&data, size)
-    } else {
-        // PNG is tiny-skia's fast path; JPEG scales during decode, and `image`
-        // covers the rest of the common raster formats a preview can point at.
-        let source = Pixmap::decode_png(&data)
+        let data = load(path)?;
+        return render_svg(&data, size);
+    }
+    let source = streamed_source(path, size).or_else(|| {
+        let data = std::fs::read(path).ok()?;
+        Pixmap::decode_png(&data)
             .ok()
-            .or_else(|| decode_jpeg(&data, size))
-            .or_else(|| decode_image(&data))?;
-        let mut target = Pixmap::new(size, size)?;
-        resample(source.as_ref(), &mut target);
-        Some(target)
+            .or_else(|| decode_image(&data))
+    })?;
+    let mut target = Pixmap::new(size, size)?;
+    resample(source.as_ref(), &mut target);
+    Some(target)
+}
+
+/// Read the magic, then hand the file back at its start to a decoder that
+/// scales while it reads. A short/unseekable file and an interlaced PNG decline.
+fn streamed_source(path: &str, size: u32) -> Option<Pixmap> {
+    let mut file = File::open(path).ok()?;
+    let mut magic = [0u8; 8];
+    file.read_exact(&mut magic).ok()?;
+    file.seek(SeekFrom::Start(0)).ok()?;
+    let reader = BufReader::new(file);
+    if magic == PNG_MAGIC {
+        decode_png(reader, size)
+    } else if magic[..2] == JPEG_MAGIC {
+        decode_jpeg(reader, size)
+    } else {
+        None
+    }
+}
+
+/// Decode a PNG row by row, box-averaging straight into the preview box, so a
+/// 4K source never materializes its full RGBA buffer. An interlaced PNG declines.
+fn decode_png<R: Read>(reader: R, size: u32) -> Option<Pixmap> {
+    let mut decoder = png::Decoder::new(reader);
+    decoder.set_transformations(png::Transformations::normalize_to_color8());
+    let mut reader = decoder.read_info().ok()?;
+    let (source_w, source_h, interlaced) = {
+        let info = reader.info();
+        (info.width, info.height, info.interlaced)
+    };
+    if interlaced || source_w == 0 || source_h == 0 {
+        return None;
+    }
+    let channels = match reader.output_color_type().0 {
+        png::ColorType::Grayscale => 1,
+        png::ColorType::GrayscaleAlpha => 2,
+        png::ColorType::Rgb => 3,
+        png::ColorType::Rgba => 4,
+        png::ColorType::Indexed => return None,
+    };
+    let scale = (size as f32 / source_w as f32)
+        .min(size as f32 / source_h as f32)
+        .min(1.0);
+    let out_w = ((source_w as f32 * scale).round() as u32).max(1);
+    let out_h = ((source_h as f32 * scale).round() as u32).max(1);
+    let mut out = Pixmap::new(out_w, out_h)?;
+
+    let mut columns = vec![0u32; out_w as usize];
+    for x in 0..source_w {
+        columns[source_column(x, source_w, out_w)] += 1;
+    }
+    let mut sums = vec![[0u64; 4]; out_w as usize];
+    let mut current: Option<(u32, u64)> = None;
+    for y in 0..source_h {
+        let row = reader.next_row().ok()??;
+        let out_y = (u64::from(y) * u64::from(out_h) / u64::from(source_h)) as u32;
+        current = match current {
+            Some((row, rows)) if row == out_y => Some((out_y, rows + 1)),
+            Some((row, rows)) => {
+                flush_row(&mut out, row, &sums, &columns, rows);
+                sums.fill([0; 4]);
+                Some((out_y, 1))
+            }
+            None => Some((out_y, 1)),
+        };
+        let bytes = row.data();
+        for x in 0..source_w as usize {
+            let pixel = &bytes[x * channels..][..channels];
+            let (red, green, blue, alpha) = match channels {
+                1 => (pixel[0], pixel[0], pixel[0], 255),
+                2 => (pixel[0], pixel[0], pixel[0], pixel[1]),
+                3 => (pixel[0], pixel[1], pixel[2], 255),
+                _ => (pixel[0], pixel[1], pixel[2], pixel[3]),
+            };
+            let alpha = u64::from(alpha);
+            let column = source_column(x as u32, source_w, out_w);
+            let premultiply = |value: u8| u64::from(value) * alpha / 255;
+            sums[column][0] += premultiply(red);
+            sums[column][1] += premultiply(green);
+            sums[column][2] += premultiply(blue);
+            sums[column][3] += alpha;
+        }
+    }
+    if let Some((row, rows)) = current {
+        flush_row(&mut out, row, &sums, &columns, rows);
+    }
+    Some(out)
+}
+
+fn source_column(x: u32, source_w: u32, out_w: u32) -> usize {
+    (u64::from(x) * u64::from(out_w) / u64::from(source_w)) as usize
+}
+
+fn flush_row(out: &mut Pixmap, row: u32, sums: &[[u64; 4]], columns: &[u32], rows: u64) {
+    let width = out.width() as usize;
+    for (column, &source_pixels) in columns.iter().enumerate() {
+        let count = rows * u64::from(source_pixels);
+        if count == 0 {
+            continue;
+        }
+        let average = |sum: u64| ((sum + count / 2) / count) as u8;
+        let alpha = average(sums[column][3]);
+        let channel = |sum: u64| average(sum).min(alpha);
+        let pixel = PremultipliedColorU8::from_rgba(
+            channel(sums[column][0]),
+            channel(sums[column][1]),
+            channel(sums[column][2]),
+            alpha,
+        );
+        if let Some(pixel) = pixel {
+            out.pixels_mut()[row as usize * width + column] = pixel;
+        }
     }
 }
 
 /// Decode a JPEG at the smallest DCT scale covering the target box, so a 4K
 /// source never allocates its full buffers; CMYK and 16-bit grey decline.
-fn decode_jpeg(data: &[u8], size: u32) -> Option<Pixmap> {
-    if !data.starts_with(&[0xff, 0xd8]) {
-        return None;
-    }
-    let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(data));
+fn decode_jpeg<R: Read>(reader: R, size: u32) -> Option<Pixmap> {
+    let mut decoder = jpeg_decoder::Decoder::new(reader);
     decoder.read_info().ok()?;
     let info = decoder.info()?;
     let (width, height) = (f32::from(info.width), f32::from(info.height));
@@ -396,13 +510,30 @@ mod tests {
             .write_image(&pixels, 64, 64, image::ExtendedColorType::Rgb8)
             .unwrap();
 
-        let scaled = decode_jpeg(&data, 8).expect("a JPEG decodes");
+        let scaled = decode_jpeg(data.as_slice(), 8).expect("a JPEG decodes");
         assert!(
             scaled.width() <= 16 && scaled.height() <= 16,
             "{}x{}",
             scaled.width(),
             scaled.height()
         );
+    }
+
+    #[test]
+    fn a_large_png_decodes_at_a_reduced_scale() {
+        let mut source = Pixmap::new(64, 64).unwrap();
+        source.fill(tiny_skia::Color::from_rgba8(200, 40, 40, 255));
+        let data = source.encode_png().unwrap();
+
+        let scaled = decode_png(data.as_slice(), 8).expect("a PNG decodes");
+        assert!(
+            scaled.width() <= 16 && scaled.height() <= 16,
+            "{}x{}",
+            scaled.width(),
+            scaled.height()
+        );
+        let pixel = scaled.pixel(0, 0).unwrap();
+        assert_eq!((pixel.red(), pixel.green(), pixel.blue()), (200, 40, 40));
     }
 
     #[test]
