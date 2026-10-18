@@ -84,6 +84,7 @@ actions = {
 | `wayrun.cache_dir()` | 启动器的缓存目录，否则 nil |
 | `wayrun.icon(name)` | 把主题图标名或 `papirus:…` 规范解析为绝对路径（绝对路径原样通过）；未命中或 `builtin:` 字形为 nil |
 | `wayrun.urlencode(text)` | 按 URL 需要做百分号编码 |
+| `wayrun.file_uri(path)` | 绝对路径对应的 `file://` URI，编码规则与内置行一致；相对路径返回 nil |
 | `wayrun.log(message)` | 以脚本与调用插件的名义写入启动器的 journal |
 | `wayrun.time()` | Unix 秒，用于签名与缓存 TTL |
 | `wayrun.env(name)` | 插件在 `env` 中声明的变量；未设置则为 nil；未声明的名字抛出 |

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::UNIX_EPOCH;
 
+use gio::prelude::FileExt;
 use mlua::{Lua, LuaSerdeExt, Table, Value};
 
 use super::areas;
@@ -57,6 +58,10 @@ pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua:
     sdk.set(
         "urlencode",
         lua.create_function(|_, text: String| Ok(urlencoding::encode(&text).into_owned()))?,
+    )?;
+    sdk.set(
+        "file_uri",
+        lua.create_function(|_, path: String| Ok(file_uri(&path)))?,
     )?;
     sdk.set("time", lua.create_function(|_, ()| Ok(now_seconds()))?)?;
     let env_active = Rc::clone(&shared.active);
@@ -162,6 +167,13 @@ pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua:
     sdk.set("fuzzy", fuzzy::lib(lua)?)?;
     sdk.set("crypto", crypto::lib(lua)?)?;
     Ok(sdk)
+}
+
+/// The `file://` URI for an absolute path, encoded by GLib exactly as a built-in
+/// row's action is; a relative path has no meaning to the launcher.
+pub(super) fn file_uri(path: &str) -> Option<String> {
+    path.starts_with('/')
+        .then(|| gio::File::for_path(path).uri().to_string())
 }
 
 /// Unix seconds, the host clock a signature or a cache TTL needs.
@@ -381,6 +393,19 @@ mod tests {
         );
         assert!(read_path(own.path(), &declared, Some(&script_dir), "/etc/hostname").is_err());
         assert!(read_path(own.path(), &declared, Some(&script_dir), "../escape").is_err());
+    }
+
+    #[test]
+    fn a_file_uri_percent_encodes_an_absolute_path() {
+        assert_eq!(
+            file_uri("/tmp/a b.png").as_deref(),
+            Some("file:///tmp/a%20b.png")
+        );
+        assert_eq!(
+            file_uri("/tmp/中文.txt").as_deref(),
+            Some("file:///tmp/%E4%B8%AD%E6%96%87.txt")
+        );
+        assert_eq!(file_uri("relative.png"), None);
     }
 
     #[test]
