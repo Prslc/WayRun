@@ -12,10 +12,11 @@ pub(super) fn render(path: &str, size: u32) -> Option<Pixmap> {
     if is_svg(path) {
         render_svg(&data, size)
     } else {
-        // PNG is tiny-skia's fast path; the `image` decoders cover the rest of
-        // the common raster formats a file preview can point at.
+        // PNG is tiny-skia's fast path; JPEG scales during decode, and `image`
+        // covers the rest of the common raster formats a preview can point at.
         let source = Pixmap::decode_png(&data)
             .ok()
+            .or_else(|| decode_jpeg(&data, size))
             .or_else(|| decode_image(&data))?;
         let mut target = Pixmap::new(size, size)?;
         resample(source.as_ref(), &mut target);
@@ -23,7 +24,44 @@ pub(super) fn render(path: &str, size: u32) -> Option<Pixmap> {
     }
 }
 
-/// Decode JPEG/WebP/GIF/BMP through `image` and premultiply into tiny-skia's
+/// Decode a JPEG at the smallest DCT scale covering the target box, so a 4K
+/// source never allocates its full buffers; CMYK and 16-bit grey decline.
+fn decode_jpeg(data: &[u8], size: u32) -> Option<Pixmap> {
+    if !data.starts_with(&[0xff, 0xd8]) {
+        return None;
+    }
+    let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(data));
+    decoder.read_info().ok()?;
+    let info = decoder.info()?;
+    let (width, height) = (f32::from(info.width), f32::from(info.height));
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+    let scale = (size as f32 / width).min(size as f32 / height).min(1.0);
+    let requested = |side: f32| (side * scale).ceil().clamp(1.0, 65535.0) as u16;
+    decoder.scale(requested(width), requested(height)).ok()?;
+    let pixels = decoder.decode().ok()?;
+    let info = decoder.info()?;
+    let (width, height) = (u32::from(info.width), u32::from(info.height));
+    let pixel_count = width as usize * height as usize;
+    let mut rgba = Vec::with_capacity(pixel_count * 4);
+    match info.pixel_format {
+        jpeg_decoder::PixelFormat::RGB24 => {
+            for pixel in pixels.as_chunks::<3>().0 {
+                rgba.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
+            }
+        }
+        jpeg_decoder::PixelFormat::L8 => {
+            for &value in &pixels {
+                rgba.extend_from_slice(&[value, value, value, 255]);
+            }
+        }
+        _ => return None,
+    }
+    Pixmap::from_vec(rgba, IntSize::from_wh(width, height)?)
+}
+
+/// Decode WebP/GIF/BMP through `image` and premultiply into tiny-skia's
 /// representation; a GIF and an animated WebP contribute their first frame.
 fn decode_image(data: &[u8]) -> Option<Pixmap> {
     let image = image::load_from_memory(data).ok()?.to_rgba8();
@@ -346,7 +384,29 @@ mod tests {
     }
 
     #[test]
-    fn a_jpeg_decodes_through_the_image_crate() {
+    fn a_large_jpeg_decodes_at_a_reduced_scale() {
+        let mut pixels = Vec::with_capacity(64 * 64 * 3);
+        for y in 0..64u8 {
+            for x in 0..64u8 {
+                pixels.extend_from_slice(&[x * 4, y * 4, 128]);
+            }
+        }
+        let mut data = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new(&mut data)
+            .write_image(&pixels, 64, 64, image::ExtendedColorType::Rgb8)
+            .unwrap();
+
+        let scaled = decode_jpeg(&data, 8).expect("a JPEG decodes");
+        assert!(
+            scaled.width() <= 16 && scaled.height() <= 16,
+            "{}x{}",
+            scaled.width(),
+            scaled.height()
+        );
+    }
+
+    #[test]
+    fn a_jpeg_decodes_through_the_scaled_decoder() {
         let mut data = Vec::new();
         image::codecs::jpeg::JpegEncoder::new(&mut data)
             .write_image(&[220, 40, 40], 1, 1, image::ExtendedColorType::Rgb8)
