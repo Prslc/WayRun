@@ -33,7 +33,7 @@ pub fn run_in_terminal_in(cmd: &str, dir: Option<&Path>) {
     let Some(argv) = terminal_run_argv(std::env::var("TERMINAL").ok().as_deref(), cmd, dir) else {
         return;
     };
-    spawn_argv(&argv, None);
+    spawn_argv(&argv, dir);
 }
 
 /// The terminal argv that runs `cmd`: the emulator, its command separator and
@@ -115,6 +115,12 @@ fn terminal_command_from(terminal: Option<&str>) -> Option<Vec<String>> {
         }
     }
 
+    // The XDG terminal-exec helper knows the user's preference and each
+    // emulator's flags; the table below is only the last resort.
+    if program_on_path("xdg-terminal-exec") {
+        return Some(vec!["xdg-terminal-exec".to_string()]);
+    }
+
     const CANDIDATES: [&str; 8] = [
         "kitty",
         "foot",
@@ -178,6 +184,17 @@ mod tests {
         assert_eq!(
             terminal_command_from(Some("kitty --single-instance")),
             Some(argv(&["kitty", "--single-instance"]))
+        );
+    }
+
+    #[test]
+    fn the_xdg_helper_is_preferred_over_the_candidate_list() {
+        if !program_on_path("xdg-terminal-exec") {
+            return;
+        }
+        assert_eq!(
+            terminal_command_from(None),
+            Some(argv(&["xdg-terminal-exec"]))
         );
     }
 
