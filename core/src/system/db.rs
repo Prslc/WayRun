@@ -47,17 +47,31 @@ fn migrate_legacy_state(new: &Path) {
     if !old.exists() {
         return;
     }
-    let _ = std::fs::rename(&old, new);
+    if !move_file(&old, new) {
+        return;
+    }
     for suffix in ["-wal", "-shm"] {
         let from = PathBuf::from(format!("{}{suffix}", old.display()));
         let to = PathBuf::from(format!("{}{suffix}", new.display()));
         if from.exists() {
-            let _ = std::fs::rename(from, to);
+            let _ = move_file(&from, &to);
         }
     }
     if let Some(parent) = old.parent() {
         let _ = std::fs::remove_dir(parent);
     }
+}
+
+fn move_file(from: &Path, to: &Path) -> bool {
+    if std::fs::rename(from, to).is_ok() {
+        return true;
+    }
+    // `XDG_STATE_HOME` may sit on another filesystem (EXDEV).
+    if std::fs::copy(from, to).is_ok() {
+        let _ = std::fs::remove_file(from);
+        return true;
+    }
+    false
 }
 
 fn open_conn() -> Result<Connection> {

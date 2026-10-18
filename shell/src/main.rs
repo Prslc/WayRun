@@ -83,6 +83,11 @@ fn main() -> std::process::ExitCode {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let resident = std::env::var_os("WAYRUN_RESIDENT").is_some();
 
+    // The IPC listener is also the single-instance guard: take it before the
+    // first Wayland round trip and before any worker starts.
+    let (ipc_tx, ipc_channel) = calloop::channel::channel();
+    ipc::serve(ipc_tx)?;
+
     let conn = Connection::connect_to_env()?;
     let (globals, event_queue) = registry_queue_init::<Shell>(&conn)?;
     let qh = event_queue.handle();
@@ -91,7 +96,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let loop_handle = event_loop.handle();
 
     let (backend_tx, backend_channel) = calloop::channel::channel();
-    let (ipc_tx, ipc_channel) = calloop::channel::channel();
     let (paste_tx, paste_channel) = calloop::channel::channel();
     let (icon_tx, icon_channel) = calloop::channel::channel();
     let (appearance_tx, appearance_channel) = calloop::channel::channel();
@@ -130,9 +134,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Held for the process's life: dropping it stops live config updates.
     let _appearance_watcher = config::watch(appearance_tx);
 
-    // The IPC listener is the single-instance guard: it must be up before the
-    // first Wayland round trip.
-    ipc::serve(ipc_tx)?;
     backend::start(backend_tx);
 
     if !resident {

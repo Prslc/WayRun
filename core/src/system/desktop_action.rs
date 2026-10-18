@@ -21,7 +21,36 @@ fn candidates(id: &str) -> Vec<PathBuf> {
 
 /// The most preferred `.desktop` file for `id`, user overrides included.
 pub fn find(id: &str) -> Option<PathBuf> {
-    candidates(id).into_iter().find(|path| path.is_file())
+    if let Some(path) = candidates(id).into_iter().find(|path| path.is_file()) {
+        return Some(path);
+    }
+    let wanted = if id.ends_with(".desktop") {
+        id.to_owned()
+    } else {
+        format!("{id}.desktop")
+    };
+    xdg::desktop_dirs()
+        .into_iter()
+        .find_map(|root| find_nested(&root, &wanted))
+}
+
+/// A nested entry's id flattens its path (`foo/bar.desktop` -> `foo-bar.desktop`),
+/// so an id no direct candidate serves is matched by walking the root.
+fn find_nested(root: &Path, wanted: &str) -> Option<PathBuf> {
+    for entry in walkdir::WalkDir::new(root).min_depth(1) {
+        let Ok(entry) = entry else { continue };
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("desktop") || !path.is_file() {
+            continue;
+        }
+        let Ok(relative) = path.strip_prefix(root) else {
+            continue;
+        };
+        if relative.to_string_lossy().replace('/', "-") == wanted {
+            return Some(path.to_path_buf());
+        }
+    }
+    None
 }
 
 /// The parsed entry for `id`, so every reader of `Icon=`/`GenericName=`/actions
@@ -164,7 +193,8 @@ impl<'a> Codes<'a> {
             name: entry.name(locales),
             icon: entry
                 .action_entry(action_id, "Icon")
-                .or_else(|| entry.icon()),
+                .or_else(|| entry.icon())
+                .filter(|icon| !icon.trim().is_empty()),
             path: path.display().to_string(),
         }
     }
@@ -284,6 +314,37 @@ Exec=nautilus %i --profile \"100%% sure\"
             "%U names a URI the row does not carry"
         );
         assert_eq!(argv("tab"), ["nautilus", "--tab", "a b;c"]);
+    }
+
+    #[test]
+    fn a_nested_desktop_file_flattens_its_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("wine/Programs/app.desktop");
+        std::fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        std::fs::write(&nested, "[Desktop Entry]\nName=App\nExec=/bin/true\n").unwrap();
+        assert_eq!(
+            find_nested(dir.path(), "wine-Programs-app.desktop"),
+            Some(nested)
+        );
+        assert_eq!(find_nested(dir.path(), "app.desktop"), None);
+    }
+
+    #[test]
+    fn an_empty_icon_is_not_passed_to_an_action() {
+        let content = "[Desktop Entry]\n\
+                       Name=App\n\
+                       Exec=app\n\
+                       Icon=\n\
+                       Actions=go;\n\
+                       [Desktop Action go]\n\
+                       Name=Go\n\
+                       Exec=app %i --x\n";
+        let path = Path::new("/usr/share/applications/app.desktop");
+        let entry = DesktopEntry::from_str(path, content, None::<&[String]>).unwrap();
+        assert_eq!(
+            expand(entry.action_exec("go").unwrap(), &entry, "go", path),
+            ["app", "--x"]
+        );
     }
 
     #[test]

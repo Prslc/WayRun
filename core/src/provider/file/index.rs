@@ -177,6 +177,7 @@ pub fn discard() {
         return;
     };
     let _ = std::fs::remove_file(&path);
+    // Only this process's staging file; another core's is its own business.
     let _ = std::fs::remove_file(crate::system::fs::tmp_path(&path));
 }
 

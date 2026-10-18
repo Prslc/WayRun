@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use mlua::{Lua, LuaSerdeExt, Table, Value};
@@ -212,9 +212,10 @@ fn snapshot_copy(source: &Path, cache: &Path) -> Result<PathBuf> {
     Ok(target)
 }
 
-/// Leave one copy behind for this source (a superseded one and a crashed copy's
-/// tmp); another source's copies are its own business.
+/// Leave one copy behind for this source; a superseded copy is removed, and so
+/// is this process's tmp (another live process's is left until it is stale).
 fn prune(dir: &Path, stem: &str, keep: &Path) {
+    const TMP_GRACE: Duration = Duration::from_secs(3600);
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -222,12 +223,26 @@ fn prune(dir: &Path, stem: &str, keep: &Path) {
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
-        let stale = (name.starts_with(stem) && name.ends_with(".sqlite") && path != keep)
-            || (name.starts_with(stem) && name.ends_with(".tmp"));
-        if stale {
+        let completed = name.starts_with(stem) && name.ends_with(".sqlite") && path != keep;
+        let tmp = name.starts_with(stem) && name.ends_with(".tmp") && {
+            let pid = name
+                .rsplit_once('.')
+                .and_then(|(rest, _)| rest.rsplit_once('.'))
+                .and_then(|(_, pid)| pid.parse::<u32>().ok());
+            pid == Some(std::process::id()) || older_than(&path, TMP_GRACE)
+        };
+        if completed || tmp {
             let _ = std::fs::remove_file(path);
         }
     }
+}
+
+fn older_than(path: &Path, age: Duration) -> bool {
+    std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|elapsed| elapsed > age)
 }
 
 fn hash_path(path: &Path) -> u64 {

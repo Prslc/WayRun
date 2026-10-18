@@ -74,11 +74,12 @@ pub fn write_if_absent(path: &Path, contents: &str) -> std::io::Result<()> {
 /// after it (a `.tmp` a crash left behind) does not spell the rule its own way.
 pub fn tmp_path(path: &Path) -> PathBuf {
     let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
+    tmp.push(format!(".{}.tmp", std::process::id()));
     PathBuf::from(tmp)
 }
 
-/// Write `<path>.tmp`, then rename: a reader only ever sees a whole file.
+/// Write the pid-suffixed staging file, then rename: a reader only ever sees a
+/// whole file, and two cores never share one staging name.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     write_atomic_with(path, |file| file.write_all(bytes))
 }

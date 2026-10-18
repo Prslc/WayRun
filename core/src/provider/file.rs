@@ -208,8 +208,13 @@ fn token_on_path(dir_lower: &str, name_lower: &str, token: &str) -> bool {
 /// The path a path-like query names, before any disk check: `~` and a relative
 /// path resolve under `home`, absolute stays put; `None` without path syntax.
 fn resolve_path_query(query: &str, home: &Path) -> Option<PathBuf> {
-    if query.starts_with('~') {
-        Some(home.join(query.trim_start_matches('~').trim_start_matches('/')))
+    if query == "~" {
+        Some(home.to_path_buf())
+    } else if let Some(rest) = query.strip_prefix("~/") {
+        Some(home.join(rest))
+    } else if query.starts_with('~') {
+        // `~user` is someone else's home, not `$HOME/user`; leave it unresolved.
+        None
     } else if query.starts_with('/') {
         Some(PathBuf::from(query))
     } else if query.contains('/') {
@@ -655,6 +660,8 @@ mod tests {
             resolve_path_query("Project/WayRun", home),
             Some(PathBuf::from("/home/u/Project/WayRun"))
         );
+        // `~user` is not `$HOME/user`
+        assert_eq!(resolve_path_query("~someone/x", home), None);
         // a bare name is not a path query
         assert_eq!(resolve_path_query("wayrun", home), None);
     }

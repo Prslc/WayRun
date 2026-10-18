@@ -37,10 +37,10 @@ pub static VISIBLE: AtomicBool = AtomicBool::new(false);
 /// Both sides give up after this: the daemon so a silent client cannot wedge the
 /// accept thread, the client so a wedged daemon cannot hang the keybind.
 const TIMEOUT: Duration = Duration::from_secs(2);
+const ACCEPT_BACKOFF: Duration = Duration::from_millis(50);
 
-/// `$XDG_RUNTIME_DIR/wayrun.sock`, which is also the single-instance guard: the
-/// daemon binds it before touching Wayland. A missing value is an error, not a
-/// shared `/tmp` path.
+/// `$XDG_RUNTIME_DIR/wayrun.sock`, the single-instance guard, bound before
+/// Wayland; a missing value is an error, not a shared `/tmp` path.
 pub fn socket_path() -> Option<PathBuf> {
     let dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from)?;
     dir.is_absolute().then(|| dir.join("wayrun.sock"))
@@ -71,7 +71,11 @@ pub fn serve(tx: Sender<Command>) -> std::io::Result<()> {
 
     std::thread::spawn(move || {
         for stream in listener.incoming() {
-            let Ok(stream) = stream else { continue };
+            let Ok(stream) = stream else {
+                // A persistent accept error must not spin the CPU.
+                std::thread::sleep(ACCEPT_BACKOFF);
+                continue;
+            };
             let tx = tx.clone();
             std::thread::spawn(move || handle(stream, tx));
         }
@@ -162,7 +166,11 @@ pub fn client(verb: &str) -> std::process::ExitCode {
     }
     print!("{response}");
 
-    std::process::ExitCode::SUCCESS
+    if response.trim_start().starts_with("error") {
+        std::process::ExitCode::FAILURE
+    } else {
+        std::process::ExitCode::SUCCESS
+    }
 }
 
 #[cfg(test)]
