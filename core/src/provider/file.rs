@@ -232,7 +232,7 @@ fn path_rows_in(query: &str, home: &Path) -> Vec<PathHit> {
     let Some(slash) = query.rfind('/') else {
         return Vec::new();
     };
-    let Some(dir) = path::resolve_path_query(&query[..=slash], home) else {
+    let Some(dir) = path::resolve_dir(&query[..=slash], home) else {
         return Vec::new();
     };
     let leaf = query[slash + 1..].to_lowercase();
@@ -441,6 +441,7 @@ mod tests {
         let project = home.path().join("Project");
         std::fs::create_dir_all(project.join("WayRun")).unwrap();
         std::fs::create_dir_all(project.join("Wayland")).unwrap();
+        std::fs::write(project.join("WayRun/inside.txt"), "x").unwrap();
         std::fs::write(project.join("Other.txt"), "x").unwrap();
         std::fs::write(project.join(".hidden"), "x").unwrap();
 
@@ -451,6 +452,11 @@ mod tests {
                 .collect()
         };
         assert_eq!(titles("Project/Way"), ["Wayland/", "WayRun/"]);
+        // the parent's case does not decide whether completion works
+        assert_eq!(titles("project/wayl"), ["Wayland/"]);
+        assert_eq!(titles("PROJECT/way"), ["Wayland/", "WayRun/"]);
+        assert_eq!(titles("project/"), ["Other.txt", "Wayland/", "WayRun/"]);
+        assert_eq!(titles("project/wayrun/"), ["inside.txt"]);
         // a trailing separator lists everything, hidden names only on demand
         assert_eq!(titles("Project/"), ["Other.txt", "Wayland/", "WayRun/"]);
         assert_eq!(titles("Project/."), [".hidden"]);

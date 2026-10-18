@@ -90,6 +90,51 @@ pub(super) fn resolve_path_query(query: &str, home: &Path) -> Option<PathBuf> {
     }
 }
 
+/// The directory a listing query names, each component resolved exactly then by
+/// case-insensitive name; a relative path never climbs out of `home`.
+pub(super) fn resolve_dir(query: &str, home: &Path) -> Option<PathBuf> {
+    let relative = !query.starts_with('/');
+    let (mut base, rest) = if let Some(rest) = query.strip_prefix("~/") {
+        (home.to_path_buf(), rest)
+    } else if let Some(rest) = query.strip_prefix('/') {
+        (PathBuf::from("/"), rest)
+    } else {
+        (home.to_path_buf(), query)
+    };
+
+    for part in rest.split('/').filter(|part| !part.is_empty()) {
+        match part {
+            "." => continue,
+            ".." => {
+                base = base.parent()?.to_path_buf();
+                if relative && !base.starts_with(home) {
+                    return None;
+                }
+                continue;
+            }
+            _ => {}
+        }
+
+        let direct = base.join(part);
+        if direct.is_dir() {
+            base = direct;
+            continue;
+        }
+
+        let lower = part.to_lowercase();
+        let found = std::fs::read_dir(&base)
+            .ok()?
+            .flatten()
+            .find(|entry| entry.file_name().to_string_lossy().to_lowercase() == lower)
+            .map(|entry| entry.path())?;
+        if !found.is_dir() {
+            return None;
+        }
+        base = found;
+    }
+    Some(base)
+}
+
 /// The existing path a query names, canonicalized: an absolute path is taken
 /// wherever it points; `~` and relative resolve under `$HOME`, never climbing out.
 pub(super) fn exact_path(query: &str, home: &Path) -> Option<PathBuf> {
