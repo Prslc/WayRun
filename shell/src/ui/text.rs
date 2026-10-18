@@ -50,8 +50,9 @@ struct Line {
 }
 
 /// Distinct lines kept before the least recently used one is evicted; a show's
-/// live set is tiny and `clear_cache` frees everything on dismiss.
-const LINE_CACHE_MAX: usize = 256;
+/// live set is tiny, and cosmic-text costs ~500 bytes per text character, so
+/// the cap stays small.
+const LINE_CACHE_MAX: usize = 32;
 
 pub struct TextEngine {
     font_system: FontSystem,
