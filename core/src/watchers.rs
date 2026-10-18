@@ -52,9 +52,7 @@ pub fn watch_config() -> Option<RecommendedWatcher> {
 /// Watch `plugins.toml` and rebuild the registry, so resident mode picks up an
 /// edit without a restart; an unchanged file is a no-op.
 pub fn watch_plugins() -> Option<RecommendedWatcher> {
-    let path = crate::system::fs::get_home()
-        .ok()?
-        .join(".config/wayrun/plugins.toml");
+    let path = crate::config::dir()?.join("plugins.toml");
     let handle = tokio::runtime::Handle::current();
 
     watch(&path, move || {

@@ -1,6 +1,7 @@
 # 插件
 
-`~/.config/wayrun/plugins.toml` 是插件注册表。首次运行时自动生成一份带注释的模板，并且会被
+`$XDG_CONFIG_HOME/wayrun/plugins.toml`（默认 `~/.config/wayrun/plugins.toml`）
+是插件注册表。首次运行时自动生成一份带注释的模板，并且会被
 监听，修改后无需重启即可生效。
 
 ## 条目字段

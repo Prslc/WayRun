@@ -1,6 +1,7 @@
 # Plugins
 
-`~/.config/wayrun/plugins.toml` is the plugin registry. It is generated on the
+`$XDG_CONFIG_HOME/wayrun/plugins.toml` (default
+`~/.config/wayrun/plugins.toml`) is the plugin registry. It is generated on the
 first run as a commented template and is watched, so an edit is picked up without
 restarting.
 

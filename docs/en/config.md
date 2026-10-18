@@ -1,6 +1,7 @@
 # Config
 
-`~/.config/wayrun/config.toml` holds WayRun's settings. It is generated on the
+`$XDG_CONFIG_HOME/wayrun/config.toml` (default
+`~/.config/wayrun/config.toml`) holds WayRun's settings. It is generated on the
 first run as a commented template and is watched, so an edit is picked up without
 restarting. Every key is optional: a missing file or key keeps the built-in
 default shown here.

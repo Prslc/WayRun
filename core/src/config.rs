@@ -3,8 +3,8 @@ use std::sync::{Arc, OnceLock, RwLock};
 
 use serde::Deserialize;
 
-/// Core behaviour loaded from `~/.config/wayrun/config.toml`, whose types are
-/// also the file's; every field defaults to the compiled-in constant.
+/// Core behaviour loaded from `$XDG_CONFIG_HOME/wayrun/config.toml`, whose
+/// types are also the file's; every field defaults to the compiled-in constant.
 #[derive(serde::Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
 pub struct Config {
@@ -110,9 +110,10 @@ impl Config {
 
 pub(crate) const DEFAULT_TEMPLATE: &str = include_str!("../default-config.toml");
 
-/// `~/.config/wayrun`, the one config directory the shell and core share.
+/// `$XDG_CONFIG_HOME/wayrun` (or `~/.config/wayrun`), the one config directory
+/// the shell and core share.
 pub fn dir() -> Option<PathBuf> {
-    Some(crate::system::fs::get_home().ok()?.join(".config/wayrun"))
+    Some(dirs::config_dir()?.join("wayrun"))
 }
 
 pub fn path() -> Option<PathBuf> {

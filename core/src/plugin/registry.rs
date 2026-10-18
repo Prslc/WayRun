@@ -368,8 +368,8 @@ async fn resolve_pending_filtered(keyword: Option<&str>, commands: Option<&[Stri
 fn load_or_default() -> Config {
     let mut config: Config = toml::from_str(DEFAULT_CONFIG).expect("invalid default config");
 
-    if let Ok(home) = crate::system::fs::get_home() {
-        let path = home.join(".config/wayrun/plugins.toml");
+    if let Some(dir) = crate::config::dir() {
+        let path = dir.join("plugins.toml");
 
         ensure_default_config(&path);
 

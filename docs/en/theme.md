@@ -1,6 +1,7 @@
 # Theme
 
-How WayRun is coloured, and what `~/.config/wayrun/theme.toml` controls.
+How WayRun is coloured, and what `$XDG_CONFIG_HOME/wayrun/theme.toml` (default
+`~/.config/wayrun/theme.toml`) controls.
 
 There are two layers: the system palette, which comes from DankMaterialShell, and
 the overrides in `theme.toml`. Both are watched, so an edit applies live.
@@ -25,7 +26,7 @@ light/dark or changing the wallpaper is picked up live.
 
 Without DMS the built-in dark palette is used, with `mode = "dark"`.
 
-## `~/.config/wayrun/theme.toml`
+## `$XDG_CONFIG_HOME/wayrun/theme.toml`
 
 Every section and every key is optional. An absent key keeps the default, an
 unparseable file is ignored, and out-of-range values are clamped. The file is

@@ -5,7 +5,7 @@ pub mod usage;
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex, PoisonError};
 
 use crate::system::fs::get_home;
@@ -26,9 +26,38 @@ const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS usage (
     );";
 
 fn db_path() -> Result<PathBuf> {
-    let dir = get_home()?.join(".local/share/wayrun");
-    std::fs::create_dir_all(&dir).context("creating the wayrun data directory")?;
-    Ok(dir.join("state.db"))
+    let dir = dirs::state_dir()
+        .context("no state directory")?
+        .join("wayrun");
+    std::fs::create_dir_all(&dir).context("creating the wayrun state directory")?;
+    let path = dir.join("state.db");
+    migrate_legacy_state(&path);
+    Ok(path)
+}
+
+/// Move the pre-XDG database and its WAL sidecars once, best effort.
+fn migrate_legacy_state(new: &Path) {
+    if new.exists() {
+        return;
+    }
+    let Ok(home) = get_home() else {
+        return;
+    };
+    let old = home.join(".local/share/wayrun/state.db");
+    if !old.exists() {
+        return;
+    }
+    let _ = std::fs::rename(&old, new);
+    for suffix in ["-wal", "-shm"] {
+        let from = PathBuf::from(format!("{}{suffix}", old.display()));
+        let to = PathBuf::from(format!("{}{suffix}", new.display()));
+        if from.exists() {
+            let _ = std::fs::rename(from, to);
+        }
+    }
+    if let Some(parent) = old.parent() {
+        let _ = std::fs::remove_dir(parent);
+    }
 }
 
 fn open_conn() -> Result<Connection> {

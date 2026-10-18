@@ -86,7 +86,7 @@ actions = {
 | `wayrun.env(name)` | 插件在 `env` 中声明的变量；未设置则为 nil；未声明的名字抛出 |
 | `wayrun.which(name)` | 启动器 `$PATH` 上某个可执行文件的路径，否则 nil；与 `run` 行的命令将看到的 PATH 相同 |
 | `wayrun.script_dir()` | 脚本自身所在目录，用于携带图标等文件 |
-| `wayrun.plugin_dir(id)` | 插件可读目录：`~/.config/wayrun/plugins/<id>` |
+| `wayrun.plugin_dir(id)` | 插件可读目录：`$XDG_CONFIG_HOME/wayrun/plugins/<id>` |
 | `wayrun.fs.read(name)` | 读取上述目录中的文件；相对名，缺失返回 nil，越界报错 |
 | `wayrun.toml.decode(text)` | TOML 进，表出 |
 | `wayrun.json.decode(text)` / `wayrun.json.encode(value)` | JSON 进出 |
@@ -114,7 +114,7 @@ actions = {
 
 `os`、`io`、`package`、`load` 与 `print` 均不可达：脚本起不了进程，唯一的写是
 `kv`（键不是路径，库落在插件自己的目录里）。能读的比这宽：`fs.read` 是受范围约束
-的那一个（只收相对路径，限定在 `~/.config/wayrun/plugins/<id>/` 之内），而
+的那一个（只收相对路径，限定在 `$XDG_CONFIG_HOME/wayrun/plugins/<id>/` 之内），而
 `fs.list`、`fs.stat` 与 `sqlite.snapshot` 只能触及插件自己声明的区域（`firefox.lua`
 声明 `~/.mozilla/firefox` 来读 `places.sqlite`），`wayrun.env` 只能读调用中的插件
 自己声明的那些名字，`http` 可访问网络。沙箱约束的是脚本能做什么；能读到什么，由

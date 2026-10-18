@@ -1,6 +1,7 @@
 # 配置
 
-`~/.config/wayrun/config.toml` 保存 WayRun 的设置。首次运行时自动生成一份带注释的模板，
+`$XDG_CONFIG_HOME/wayrun/config.toml`（默认 `~/.config/wayrun/config.toml`）保存
+WayRun 的设置。首次运行时自动生成一份带注释的模板，
 并且会被监听，修改后无需重启即可生效。所有键都是可选的：文件或键缺失即使用此处列出的
 内置默认值。
 

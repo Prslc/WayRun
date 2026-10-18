@@ -91,7 +91,7 @@ A row with no `on_click` is display-only; it can still carry `actions`.
 | `wayrun.env(name)` | a variable the plugin declares in `env`, or nil when unset; an undeclared name raises |
 | `wayrun.which(name)` | an executable's path on the launcher's `$PATH`, or nil; the same PATH a `run` row's command will see |
 | `wayrun.script_dir()` | the script's own directory, for an icon it ships |
-| `wayrun.plugin_dir(id)` | the directory a plugin may read from, `~/.config/wayrun/plugins/<id>` |
+| `wayrun.plugin_dir(id)` | the directory a plugin may read from, `$XDG_CONFIG_HOME/wayrun/plugins/<id>` |
 | `wayrun.fs.read(name)` | a file under those directories; a relative name, nil when absent, an error when the name escapes |
 | `wayrun.toml.decode(text)` | TOML in, a table out |
 | `wayrun.json.decode(text)` / `wayrun.json.encode(value)` | JSON in and out |
@@ -123,7 +123,7 @@ for `pcall` rather than dying as a killed host.
 run programs, and the only write is `kv`, whose keys are not paths and whose
 database lives in the plugin's own directory. Reading is wider: `fs.read` is
 the scoped one (relative names only, confined to
-`~/.config/wayrun/plugins/<id>/`), while `fs.list`, `fs.stat` and
+`$XDG_CONFIG_HOME/wayrun/plugins/<id>/`), while `fs.list`, `fs.stat` and
 `sqlite.snapshot` reach only the areas a plugin declares for itself
 (`firefox.lua` declares `~/.mozilla/firefox` for `places.sqlite`),
 `wayrun.env` reads only the names the calling plugin declares, and `http`

@@ -747,7 +747,7 @@ mod tests {
                     { title = tostring(not pcall(wayrun.fs.read, "/etc/hostname")) },
                     {
                       title = tostring(
-                        (wayrun.plugin_dir("demo") or ""):match("/%.config/wayrun/plugins/demo$") ~= nil
+                        (wayrun.plugin_dir("demo") or ""):match("/wayrun/plugins/demo$") ~= nil
                       ),
                     },
                   }
