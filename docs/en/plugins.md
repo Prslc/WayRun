@@ -87,8 +87,9 @@ is bounded by a short timeout, so a stalled host cannot hang the launcher.
 `resident = true` keeps one host process alive across calls instead — about a
 millisecond per call against the fresh process's several. The host is dropped
 when the launcher dismisses, when it sits idle for two minutes, or when a call
-crashes or stalls; the next call starts a new one. The host must be stateless
-per call either way, but it may cache within its process lifetime.
+crashes or stalls; the next call starts a new one. An edit to the configured
+script is picked up on the next call too. The host must be stateless per call
+either way, but it may cache within its process lifetime.
 
 The identity `icon` and an action's `icon` must be an absolute path: a file the
 host ships itself (`wayrun.script_dir()` locates the script's own directory) or

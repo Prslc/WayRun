@@ -665,11 +665,13 @@ mod tests {
         )
         .unwrap();
         // `wayrun.import` is bound by the sandbox, after the environment exists.
+        let imports = Rc::new(RefCell::new(Vec::new()));
         crate::lua::sandbox::script_env(
             &lua,
             &table,
             "/test/script.lua",
             Log::new("/test/script.lua", active),
+            &imports,
         )
         .unwrap();
         let mut names = BTreeSet::new();

@@ -1,14 +1,26 @@
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use mlua::{Lua, Table, Value};
 
 use super::areas;
 use super::sdk::script_dir;
 
+/// The files a script imported, so a resident host can reload when one changes.
+pub(super) type Imports = Rc<RefCell<Vec<PathBuf>>>;
+
 /// `wayrun.import(name)`: load a module from the script's own directory, in the
 /// same sandbox `_ENV`, once; a nil return caches as `true`, as `require` does.
-pub(super) fn bind(lua: &Lua, wayrun: &Table, env: &Table, script: &str) -> mlua::Result<()> {
+pub(super) fn bind(
+    lua: &Lua,
+    wayrun: &Table,
+    env: &Table,
+    script: &str,
+    imports: &Imports,
+) -> mlua::Result<()> {
     let root = script_dir(script);
+    let imports = Rc::clone(imports);
     let env_key = lua.create_registry_value(env.clone())?;
     let cache_key = lua.create_registry_value(lua.create_table()?)?;
     let loading_key = lua.create_registry_value(lua.create_table()?)?;
@@ -21,6 +33,14 @@ pub(super) fn bind(lua: &Lua, wayrun: &Table, env: &Table, script: &str) -> mlua
                 ));
             };
             let file = module_path(root, &name)?;
+            // Recorded before the read, so a module that fails to load is
+            // watched for the fix too.
+            {
+                let mut seen = imports.borrow_mut();
+                if !seen.contains(&file) {
+                    seen.push(file.clone());
+                }
+            }
             let key = file.to_string_lossy().to_string();
 
             let cache: Table = lua.registry_value(&cache_key)?;
@@ -94,7 +114,8 @@ mod tests {
         let wayrun = lua.create_table().unwrap();
         let active = Rc::new(RefCell::new(None));
         let log = Log::new(script.to_str().unwrap(), active);
-        script_env(&lua, &wayrun, script.to_str().unwrap(), log).unwrap();
+        let imports = Rc::new(RefCell::new(Vec::new()));
+        script_env(&lua, &wayrun, script.to_str().unwrap(), log, &imports).unwrap();
         (lua, wayrun)
     }
 

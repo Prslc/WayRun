@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
@@ -15,6 +15,8 @@ const IDLE: Duration = Duration::from_secs(120);
 /// ticket, so a queued call a later one overtook is skipped instead of stacking.
 struct Slot {
     ticket: AtomicU64,
+    /// A watched file changed: the next call drops the process that loaded it.
+    stale: AtomicBool,
     host: tokio::sync::Mutex<Option<Host>>,
 }
 
@@ -67,6 +69,9 @@ pub(super) async fn call_stream(
     tokio::spawn(async move {
         let mut tx = tx;
         let mut guard = owned.host.lock().await;
+        if owned.stale.swap(false, Ordering::SeqCst) {
+            *guard = None;
+        }
         if owned.ticket.load(Ordering::SeqCst) != ticket || tx.is_closed() {
             let _ = tx.send(None);
             return;
@@ -229,6 +234,7 @@ fn slot_for(command: &str) -> Arc<Slot> {
     Arc::clone(slots.entry(command.to_string()).or_insert_with(|| {
         Arc::new(Slot {
             ticket: AtomicU64::new(0),
+            stale: AtomicBool::new(false),
             host: tokio::sync::Mutex::new(None),
         })
     }))
@@ -250,6 +256,18 @@ fn ensure_reaper() {
 /// the session kept warm goes with it.
 pub(crate) fn reap_all() {
     reap(Duration::ZERO, None);
+}
+
+/// Drop `command`'s host now; one busy with a call is marked so its next call
+/// starts from the new script instead.
+pub(crate) fn reap_command(command: &str) {
+    {
+        let slots = SLOTS.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(slot) = slots.get(command) {
+            slot.stale.store(true, Ordering::SeqCst);
+        }
+    }
+    reap(Duration::ZERO, Some(command));
 }
 
 /// Kill the hosts idle past `idle` and forget the slots whose host is gone;
@@ -350,6 +368,20 @@ mod tests {
         assert!(call(&command, &request(), limit).await.is_none());
         assert!(call(&command, &request(), limit).await.is_none());
         assert_eq!(starts(&counter), 2, "the stalled host was replaced");
+    }
+
+    #[tokio::test]
+    async fn a_reaped_command_starts_a_fresh_host() {
+        let _serial = SERIAL.lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let counter = dir.path().join("starts");
+        let command = echo_host(&dir, &counter);
+        assert!(call(&command, &request(), LIMIT).await.is_some());
+        assert_eq!(starts(&counter), 1);
+
+        reap_command(&command);
+        assert!(call(&command, &request(), LIMIT).await.is_some());
+        assert_eq!(starts(&counter), 2, "the reaped host was replaced");
     }
 
     #[tokio::test]

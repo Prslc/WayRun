@@ -123,6 +123,11 @@ pub async fn refresh_hosts() {
         *REGISTRY.write().await = build_entries(&config);
         stale
     };
+    // A changed script is reloaded by a fresh process, not the one that already
+    // loaded it; discovery below must see the new code too.
+    for command in &stale {
+        crate::provider::resident::reap_command(command);
+    }
     resolve_pending_filtered(None, Some(&stale)).await;
 }
 

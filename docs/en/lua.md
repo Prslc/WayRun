@@ -191,6 +191,10 @@ of the same canonical path return the cached value. A nil return is cached as
 a symlink that resolves outside the script's directory is refused. A circular
 import raises rather than recursing.
 
+A resident host watches every file the script imported too: an edit to one
+reloads the sandbox before the next request, and a failed reload keeps the last
+good version serving until the next change.
+
 ## Localisation
 
 `wayrun.locale()` answers the launcher's resolved locale, the same stem its own

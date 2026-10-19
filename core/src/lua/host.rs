@@ -1,7 +1,9 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::UNIX_EPOCH;
 
 use anyhow::{Context, Result};
 use mlua::{Function, Lua, LuaOptions, LuaSerdeExt, StdLib, Table, Value};
@@ -11,7 +13,7 @@ use crate::wire::ResultItem;
 
 use super::manifest::{Plugin, read_plugins};
 use super::sandbox::script_env;
-use super::{areas, kv, log::Log, sdk, warn};
+use super::{kv, log::Log, module, sdk, warn};
 
 /// `wayrun --lua-host <script.lua>`: answer the external-host JSON-RPC
 /// contract from one Lua script, with the VM living in a process of its own.
@@ -21,7 +23,7 @@ pub fn run(script: &str) -> Result<()> {
     }
     let source =
         std::fs::read_to_string(script).with_context(|| format!("reading lua script {script}"))?;
-    let host = Host::new(script, strip_shebang(&source))
+    let mut host = Host::new(script, strip_shebang(&source))
         .with_context(|| format!("loading lua script {script}"))?;
     host.serve()
 }
@@ -38,6 +40,79 @@ fn strip_shebang(source: &str) -> &str {
 /// Where the host writes its replies: stdout in `serve`, a capture in tests.
 type Sink = Rc<RefCell<Box<dyn Write>>>;
 
+/// Evaluate `source` in a fresh VM and register the plugin table's scopes.
+fn load(
+    script: &str,
+    source: &str,
+    shared: &sdk::Shared,
+    imports: &module::Imports,
+    log: &Log,
+) -> mlua::Result<(Lua, Vec<Plugin>)> {
+    let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::default())?;
+    let wayrun = sdk::build(&lua, script, shared, log.clone())?;
+    let env = script_env(&lua, &wayrun, script, log.clone(), imports)?;
+    let declared: Table = lua
+        .load(source)
+        .set_name(script)
+        .set_environment(env)
+        .eval()?;
+    let plugins = read_plugins(&declared, script)?;
+    fill_scopes(shared, &plugins);
+    Ok((lua, plugins))
+}
+
+/// The declared ids are known only after evaluation; the kv paths, the readable
+/// env names and the read areas fill here.
+fn fill_scopes(shared: &sdk::Shared, plugins: &[Plugin]) {
+    let mut paths = HashMap::new();
+    let mut envs = HashMap::new();
+    let mut execs = HashMap::new();
+    let mut areas = HashMap::new();
+    for plugin in plugins {
+        envs.insert(plugin.id.clone(), plugin.env.clone());
+        execs.insert(plugin.id.clone(), plugin.exec.clone());
+        areas.insert(plugin.id.clone(), plugin.read.clone());
+        if let Some(dir) = sdk::plugin_dir(&plugin.id) {
+            paths.insert(plugin.id.clone(), dir.join("kv.db"));
+        }
+    }
+    *shared.kv_paths.borrow_mut() = paths;
+    *shared.env_scope.borrow_mut() = envs;
+    *shared.exec_scope.borrow_mut() = execs;
+    *shared.read_areas.borrow_mut() = areas;
+}
+
+/// A watched file's `(mtime_ns, size)`; `None` when it is missing.
+type Stamp = Option<(i64, u64)>;
+
+/// The script plus the files it imported, with the stamps they had at load.
+fn watch_stamps(script: &str, imports: &module::Imports) -> Vec<(PathBuf, Stamp)> {
+    let mut files = vec![PathBuf::from(script)];
+    for file in imports.borrow().iter() {
+        if !files.contains(file) {
+            files.push(file.clone());
+        }
+    }
+    files
+        .into_iter()
+        .map(|path| {
+            let stamp = file_stamp(&path);
+            (path, stamp)
+        })
+        .collect()
+}
+
+fn file_stamp(path: &Path) -> Stamp {
+    let meta = std::fs::metadata(path).ok()?;
+    let mtime = meta
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_nanos() as i64;
+    Some((mtime, meta.len()))
+}
+
 struct Host {
     lua: Lua,
     script: String,
@@ -45,6 +120,9 @@ struct Host {
     active: kv::Active,
     log: Log,
     out: Sink,
+    shared: sdk::Shared,
+    imports: module::Imports,
+    stamps: RefCell<Vec<(PathBuf, Stamp)>>,
 }
 
 impl Host {
@@ -56,49 +134,18 @@ impl Host {
     fn with_sink(script: &str, source: &str, out: Sink) -> Result<Self> {
         // mlua's error carries no Send bound, so it converts here, once.
         let active: kv::Active = Rc::new(RefCell::new(None));
-        let kv_paths: kv::Paths = Rc::new(RefCell::new(HashMap::new()));
-        let env_scope: sdk::EnvScope = Rc::new(RefCell::new(HashMap::new()));
-        let exec_scope: sdk::ExecScope = Rc::new(RefCell::new(HashMap::new()));
-        let read_areas: areas::Areas = Rc::new(RefCell::new(HashMap::new()));
         let log = Log::new(script, Rc::clone(&active));
         let shared = sdk::Shared {
             active: Rc::clone(&active),
-            kv_paths: Rc::clone(&kv_paths),
-            env_scope: Rc::clone(&env_scope),
-            exec_scope: Rc::clone(&exec_scope),
-            read_areas: Rc::clone(&read_areas),
+            kv_paths: Rc::new(RefCell::new(HashMap::new())),
+            env_scope: Rc::new(RefCell::new(HashMap::new())),
+            exec_scope: Rc::new(RefCell::new(HashMap::new())),
+            read_areas: Rc::new(RefCell::new(HashMap::new())),
         };
-        let load = || -> mlua::Result<(Lua, Vec<Plugin>)> {
-            let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::default())?;
-            let wayrun = sdk::build(&lua, script, &shared, log.clone())?;
-            let env = script_env(&lua, &wayrun, script, log.clone())?;
-            let declared: Table = lua
-                .load(source)
-                .set_name(script)
-                .set_environment(env)
-                .eval()?;
-            let plugins = read_plugins(&declared, script)?;
-            Ok((lua, plugins))
-        };
-        let (lua, plugins) = load().map_err(|error| anyhow::anyhow!("{error}"))?;
-        // The declared ids are known only now; the kv paths, the readable env
-        // names and the read areas fill here.
-        let mut paths = HashMap::new();
-        let mut envs = HashMap::new();
-        let mut execs = HashMap::new();
-        let mut areas = HashMap::new();
-        for plugin in &plugins {
-            envs.insert(plugin.id.clone(), plugin.env.clone());
-            execs.insert(plugin.id.clone(), plugin.exec.clone());
-            areas.insert(plugin.id.clone(), plugin.read.clone());
-            if let Some(dir) = sdk::plugin_dir(&plugin.id) {
-                paths.insert(plugin.id.clone(), dir.join("kv.db"));
-            }
-        }
-        *kv_paths.borrow_mut() = paths;
-        *env_scope.borrow_mut() = envs;
-        *exec_scope.borrow_mut() = execs;
-        *read_areas.borrow_mut() = areas;
+        let imports: module::Imports = Rc::new(RefCell::new(Vec::new()));
+        let (lua, plugins) = load(script, source, &shared, &imports, &log)
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        let stamps = RefCell::new(watch_stamps(script, &imports));
         Ok(Self {
             lua,
             script: script.to_string(),
@@ -106,16 +153,75 @@ impl Host {
             active,
             log,
             out,
+            shared,
+            imports,
+            stamps,
         })
     }
 
-    fn serve(&self) -> Result<()> {
+    /// Reload the script and its imports when a watched file changed; a failed
+    /// reload keeps the last good VM serving until the next change.
+    fn refresh(&mut self) -> bool {
+        if !self.stale() {
+            return false;
+        }
+        let source = match std::fs::read_to_string(&self.script) {
+            Ok(source) => source,
+            Err(error) => {
+                warn(&self.script, &format!("reload failed: {error}"));
+                *self.stamps.borrow_mut() = watch_stamps(&self.script, &self.imports);
+                return false;
+            }
+        };
+        self.imports.borrow_mut().clear();
+        match load(
+            &self.script,
+            strip_shebang(&source),
+            &self.shared,
+            &self.imports,
+            &self.log,
+        ) {
+            Ok((lua, plugins)) => {
+                self.lua = lua;
+                self.plugins = plugins;
+                *self.stamps.borrow_mut() = watch_stamps(&self.script, &self.imports);
+                true
+            }
+            Err(error) => {
+                warn(&self.script, &format!("reload failed: {error}"));
+                *self.stamps.borrow_mut() = watch_stamps(&self.script, &self.imports);
+                false
+            }
+        }
+    }
+
+    fn stale(&self) -> bool {
+        self.stamps
+            .borrow()
+            .iter()
+            .any(|(path, stamp)| file_stamp(path) != *stamp)
+    }
+
+    /// Imports can also run lazily inside a search; a file first seen there
+    /// joins the watch list with the stamp it had when it loaded.
+    fn track_imports(&self) {
+        let imports = self.imports.borrow();
+        let mut stamps = self.stamps.borrow_mut();
+        for file in imports.iter() {
+            if !stamps.iter().any(|(path, _)| path == file) {
+                stamps.push((file.clone(), file_stamp(file)));
+            }
+        }
+    }
+
+    fn serve(&mut self) -> Result<()> {
         let stdin = std::io::stdin();
         for line in stdin.lock().lines() {
             let line = line?;
             if line.trim().is_empty() {
                 continue;
             }
+            self.refresh();
             let request: serde_json::Value = match serde_json::from_str(&line) {
                 Ok(request) => request,
                 Err(error) => {
@@ -228,6 +334,7 @@ impl Host {
             .map_err(|error| (-32000, format!("{method} failed: {error}")))?;
         args.push_back(emit);
         let returned = function.call(args);
+        self.track_imports();
         if let Some(active) = active {
             active.set(false);
         }
@@ -353,6 +460,76 @@ mod tests {
         let out: Sink = Rc::new(RefCell::new(Box::new(Capture(Rc::clone(&buffer)))));
         let host = Host::with_sink("/test/script.lua", source, out).unwrap();
         (host, buffer)
+    }
+
+    /// A script on disk, so a reload re-reads the real file.
+    fn file_host(dir: &tempfile::TempDir, source: &str) -> (Host, Rc<RefCell<Vec<u8>>>) {
+        let path = dir.path().join("main.lua");
+        std::fs::write(&path, source).unwrap();
+        std::fs::write(dir.path().join("util.lua"), "return { value = 'one' }").unwrap();
+        let buffer = Rc::new(RefCell::new(Vec::new()));
+        let out: Sink = Rc::new(RefCell::new(Box::new(Capture(Rc::clone(&buffer)))));
+        let host = Host::with_sink(path.to_str().unwrap(), source, out).unwrap();
+        (host, buffer)
+    }
+
+    const IMPORTING_SCRIPT: &str = r#"
+        local util = wayrun.import("util")
+        return { { id = "demo", search = function()
+            return { { title = util.value } }
+        end } }
+    "#;
+
+    /// The same import made lazily, inside the search rather than at load.
+    const LAZY_IMPORT_SCRIPT: &str = r#"
+        return { { id = "demo", search = function()
+            return { { title = wayrun.import("util").value } }
+        end } }
+    "#;
+
+    #[test]
+    fn an_edited_import_reloads_before_the_next_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut host, _buffer) = file_host(&dir, LAZY_IMPORT_SCRIPT);
+        assert_eq!(search(&host, "demo", "x")[0]["title"], "one");
+        assert!(!host.refresh(), "an unchanged script is not reloaded");
+
+        std::fs::write(dir.path().join("util.lua"), "return { value = 'two!' }").unwrap();
+        assert!(host.refresh(), "the imported file changed");
+        assert_eq!(search(&host, "demo", "x")[0]["title"], "two!");
+    }
+
+    #[test]
+    fn a_failed_reload_keeps_the_last_good_vm() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut host, _buffer) = file_host(&dir, IMPORTING_SCRIPT);
+        assert_eq!(search(&host, "demo", "x")[0]["title"], "one");
+
+        std::fs::write(dir.path().join("util.lua"), "this is not lua").unwrap();
+        assert!(!host.refresh(), "the reload failed");
+        assert_eq!(
+            search(&host, "demo", "x")[0]["title"],
+            "one",
+            "the last good VM still answers"
+        );
+
+        std::fs::write(dir.path().join("util.lua"), "return { value = 'three' }").unwrap();
+        assert!(host.refresh(), "a later fix is picked up");
+        assert_eq!(search(&host, "demo", "x")[0]["title"], "three");
+    }
+
+    #[test]
+    fn an_edited_script_reloads_the_same_way() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut host, _buffer) = file_host(&dir, IMPORTING_SCRIPT);
+        let rewritten = r#"
+            return { { id = "demo", search = function()
+                return { { title = "rewritten" } }
+            end } }
+        "#;
+        std::fs::write(dir.path().join("main.lua"), rewritten).unwrap();
+        assert!(host.refresh(), "the script itself changed");
+        assert_eq!(search(&host, "demo", "x")[0]["title"], "rewritten");
     }
 
     #[test]
