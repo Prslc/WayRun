@@ -34,9 +34,9 @@ A row is a plain table in the shape [jsonrpc.md](jsonrpc.md#result-items)
 documents — `title`, `summary`, `on_click`, `icon`, `icon_shape`, `preview` and
 `actions` — so no builder is needed:
 `on_click = { type = "open", uri = "https://example.com" }`.
-A `preview = { type = "image", path = "/absolute/file.png" }` opens the split
-view beside the list for the selected row; PNG, SVG, JPEG, WebP, GIF and BMP
-decode in this version. `preview = { type = "text", text = "…" }` puts a
+A `preview = { type = "image", path = "/absolute/file.png" }` (or an `https://`
+URL the core caches) opens the split view beside the list for the selected row;
+PNG, SVG, JPEG, WebP, GIF and BMP decode in this version. `preview = { type = "text", text = "…" }` puts a
 wrapped plain-text excerpt in the same column.
 
 ## The plugin table
@@ -223,10 +223,11 @@ A host in another language reads the same value from `$WAYRUN_LOCALE`.
   return nothing when the query is not yours.
 - Rows keep the order the script returns; there is no relevance channel.
 - Icons follow the rule in [plugins.md](plugins.md#external-hosts): a file the
-  script ships, or a theme icon `wayrun.icon(name)` resolved. A remote image is
-  the script's job too: fetch the bytes with `wayrun.http.get`, write them with
-  `wayrun.fs.write` into `wayrun.plugin_cache_dir(id)`, and return that
-  directory joined with the file name; use `wayrun.fs.delete` to evict.
+  script ships, a theme icon `wayrun.icon(name)` resolved, or a remote image as
+  an `https://` URL: the core fetches and caches it in the background. The same
+  URL works as an image preview's `path`; set `icon_shape = "circle"` for an
+  avatar. Use `wayrun.plugin_cache_dir(id)` for other downloaded data, and
+  `wayrun.fs.delete` to evict it.
 
 ## Registering
 

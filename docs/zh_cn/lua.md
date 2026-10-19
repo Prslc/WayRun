@@ -32,8 +32,9 @@ return {
 行就是 [jsonrpc.md](jsonrpc.md#结果项) 记录的普通表，字段有 `title`、`summary`、
 `on_click`、`icon`、`icon_shape`、`preview`、`actions`，不需要构造器。例如
 `on_click = { type = "open", uri = "https://example.com" }`。
-`preview = { type = "image", path = "/absolute/file.png" }` 会在选中行旁边打开分栏
-预览；当前版本解码 PNG、SVG、JPEG、WebP、GIF 与 BMP。
+`preview = { type = "image", path = "/absolute/file.png" }`（或由 core 缓存的
+`https://` URL）会在选中行旁边打开分栏预览；当前版本解码 PNG、SVG、JPEG、WebP、
+GIF 与 BMP。
 `preview = { type = "text", text = "…" }` 在同一列显示按宽度换行的纯文本摘要。
 
 ## 插件表
@@ -200,11 +201,11 @@ local strings = wayrun.json.decode(text or "{}")
   所有计分型行之后，只填补剩余槽位。默认链会给没有关键词的主机一个很短的期限，
   超时就跳过本次；因此 `search` 要足够轻，查询不相关时尽快返回空。
 - 行序即脚本返回的顺序；没有相关度通道。
-- 图标遵循 [plugins.md](plugins.md#外部主机) 的规则：脚本自带的文件，或
-  `wayrun.icon(name)` 解析出的主题图标。网络图片也由脚本自己处理：用
-  `wayrun.http.get` 取回字节，用 `wayrun.fs.write` 写进
-  `wayrun.plugin_cache_dir(id)`，再把该目录与文件名拼成绝对路径作为 `icon`
-  返回；用 `wayrun.fs.delete` 清理旧缓存。
+- 图标遵循 [plugins.md](plugins.md#外部主机) 的规则：脚本自带的文件、
+  `wayrun.icon(name)` 解析出的主题图标，或 `https://` URL 形式的远程图片——core 会在
+  后台抓取并缓存。同一个 URL 也可以作为图片预览的 `path`；头像加
+  `icon_shape = "circle"`。其他下载数据用 `wayrun.plugin_cache_dir(id)` 缓存，
+  用 `wayrun.fs.delete` 清理。
 
 ## 注册
 

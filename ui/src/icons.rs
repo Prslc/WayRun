@@ -27,6 +27,14 @@ pub enum IconKey {
     },
 }
 
+impl IconKey {
+    fn path(&self) -> &str {
+        match self {
+            IconKey::Plain { path, .. } | IconKey::Tinted { path, .. } => path,
+        }
+    }
+}
+
 /// One icon draw: the file, the box it fits and how it lands.
 pub struct IconDraw<'a> {
     pub path: &'a str,
@@ -157,7 +165,16 @@ impl IconCache {
         }
     }
 
-    /// Draw the icon tinted to `color` when it is a monochrome silhouette; a
+    /// Drop one path's decoded entries and queued request, so a file that just
+    /// appeared is loaded on the next frame.
+    pub fn forget(&mut self, path: &str) {
+        self.entries.remove(path);
+        self.tinted.remove(path);
+        self.aspects.remove(path);
+        self.pending.retain(|key| key.path() != path);
+    }
+
+    /// Draw `path` tinted to `color` when it is a monochrome silhouette; a
     /// coloured icon is left unchanged. The panel's dark glyphs need this.
     pub fn draw_tinted(&mut self, target: &mut Pixmap, draw: IconDraw<'_>, color: [u8; 3]) {
         let IconDraw {
@@ -511,6 +528,29 @@ mod tests {
         assert_eq!(target.pixel(17, 17).unwrap().alpha(), 255);
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_late_icon_forgets_the_cached_miss() {
+        let path = "/nonexistent/icon.png";
+        let (mut cache, queued) = test_cache();
+        let mut target = Pixmap::new(30, 30).unwrap();
+
+        cache.draw(&mut target, plain(path, 0.0, 0.0, 30));
+        let (generation, key) = queued.try_recv().expect("the frame asks the worker");
+        cache.insert(generation, key, None);
+        cache.draw(&mut target, plain(path, 0.0, 0.0, 30));
+        assert!(
+            queued.try_recv().is_err(),
+            "a cached miss is not asked for again"
+        );
+
+        cache.forget(path);
+        cache.draw(&mut target, plain(path, 0.0, 0.0, 30));
+        assert!(
+            queued.try_recv().is_ok(),
+            "the file that just appeared is asked for"
+        );
     }
 
     #[test]

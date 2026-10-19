@@ -34,6 +34,7 @@ The core also pushes JSON-RPC notifications (no `id`):
 |--------|--------|---------|
 | `theme` | theme colors | the resolved theme, on connect and on every palette change |
 | `results` | array of result items | a search payload |
+| `image_ready` | `{"path": "…"}` | a background image fetch landed; the UI reloads that path |
 
 `search` sent **without** an `id` is streaming: the core aborts any pending
 search, then answers with a `results` notification. Sent **with** an `id` it
@@ -148,16 +149,16 @@ only when set:
 | `title` | string | primary label (app name, command, file name, …) |
 | `summary` | string \| null | secondary line (command, path, description, …) |
 | `on_click` | [`Action`](#actions) \| null | action bound to Enter |
-| `icon` | string \| null | the icon spec, an absolute path or a `builtin:` glyph; see [Icon specs](#icon-specs) |
+| `icon` | string \| null | the icon spec, an absolute path or a `builtin:` glyph; a host's result may be an `https://` URL the core caches; see [Icon specs](#icon-specs) |
 | `icon_shape` | string | optional; `"circle"` clips the icon box to a circle, absent draws the file as it is |
-| `preview` | object | optional split-view payload, `{"type":"image","path":"/abs/file.png"}` or `{"type":"text","text":"…"}` |
+| `preview` | object | optional split-view payload, `{"type":"image","path":"/abs/file.png"}` or `{"type":"text","text":"…"}`; a host's image path may be an `https://` URL |
 | `actions` | array | optional secondary commands for the `Shift+Enter` action panel |
 
 A `preview` is tagged by `type` like an `Action`: `image` carries an absolute
-path (PNG, SVG, JPEG, WebP, GIF or BMP) and is shown in the right column for the
+path or, from a host, an `https://` URL the core fetches into its image cache
+(PNG, SVG, JPEG, WebP, GIF or BMP), and is shown in the right column for the
 selected row; `text` carries plain UTF-8, wrapped by the launcher and capped at
-64 KiB. A host's preview path follows its icon rule: a file it ships, not a
-theme name or a `builtin:` glyph.
+64 KiB. A theme name or a `builtin:` glyph is not a preview.
 
 An `actions` entry is
 `{"title": string, "action": Action, "icon"?: string}`, with the same icon-spec
@@ -179,12 +180,14 @@ exempt: its value is the copied text, not a target to re-open.
 
 ### Icon specs
 
-Every `icon` is an absolute path, or a `builtin:<name>` glyph the launcher
-draws from its compiled set. **External plugin hosts** (a `plugins.toml` entry
-with `command`) return an icon file the host ships itself — in any result-item
-`icon` field (`search` results and `top` default views alike), in an action's
-`icon`, and in the `list_plugins` identity `icon`. A `builtin:` glyph, a theme
-icon name or a `papirus:` spec counts as no icon.
+Every `icon` the shell receives is an absolute path, or a `builtin:<name>` glyph
+the launcher draws from its compiled set. **External plugin hosts** (a
+`plugins.toml` entry with `command`) may return a result's own `icon` as an
+`https://` URL: the core fetches it in the background into
+`$XDG_CACHE_HOME/wayrun/icons` and hands the shell the cached path. A preview's
+image `path` may be an `https://` URL handled the same way. The identity `icon`,
+an action's `icon`, and a preview's local path remain files the host ships. A
+`builtin:` glyph, a theme icon name or a `papirus:` spec counts as no icon.
 
 A row icon that is missing or symbolic falls back to the plugin's identity icon;
 when that is missing too, the bundled placeholder is drawn.

@@ -38,6 +38,20 @@ pub fn results_notification(items: &[ResultItem]) -> Notification<&[ResultItem]>
     }
 }
 
+#[derive(serde::Serialize)]
+pub struct ImageReady<'a> {
+    pub path: &'a str,
+}
+
+/// A background image fetch landed; the shell drops its cached miss for `path`.
+pub fn image_ready_notification(path: &str) -> Notification<ImageReady<'_>> {
+    Notification {
+        jsonrpc: "2.0",
+        method: "image_ready",
+        params: ImageReady { path },
+    }
+}
+
 /// Drain sentinel: the writer flushes and returns. The watchers hold sender
 /// clones for the process lifetime, so the read loop must send it explicitly.
 pub(super) const DRAIN: &str = "\0";

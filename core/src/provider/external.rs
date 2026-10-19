@@ -257,7 +257,9 @@ fn parse_result_items(
         // A preview is a file the host ships or plain text; the same icon rule
         // validates the path, and the text cannot grow the wire without bound.
         if let Some(Preview::Image { path }) = &item.preview {
-            item.preview = host_icon_spec(path).map(|path| Preview::Image { path });
+            item.preview = crate::system::icon::remote_preview(path)
+                .or_else(|| host_icon_spec(path))
+                .map(|path| Preview::Image { path });
         }
         if let Some(Preview::Text { text }) = &mut item.preview {
             const MAX: usize = 64 * 1024;
@@ -331,7 +333,9 @@ fn resolve_command(command: &str) -> Option<PathBuf> {
 }
 
 fn resolve_item_icon(icon: &str, fallback: Option<String>) -> Option<String> {
-    host_icon_spec(icon).or(fallback)
+    crate::system::icon::remote_icon(icon)
+        .or_else(|| host_icon_spec(icon))
+        .or(fallback)
 }
 #[cfg(test)]
 mod tests {
@@ -507,10 +511,11 @@ mod tests {
     }
 
     #[test]
-    fn a_hosts_preview_must_be_an_absolute_path() {
+    fn a_hosts_preview_is_an_absolute_path_or_https_url() {
         let response = serde_json::json!({
             "result": [
                 {"title": "ok", "preview": {"type": "image", "path": "/tmp/a.png"}},
+                {"title": "url", "preview": {"type": "image", "path": "https://example.com/a.png"}},
                 {"title": "theme", "preview": {"type": "image", "path": "theme:icon"}},
                 {"title": "relative", "preview": {"type": "image", "path": "a.png"}}
             ]
@@ -522,8 +527,26 @@ mod tests {
                 path: "/tmp/a.png".to_string()
             })
         );
-        assert_eq!(items[1].preview, None);
+        assert!(matches!(
+            &items[1].preview,
+            Some(Preview::Image { path }) if path.contains("/icons/") && path.ends_with(".png")
+        ));
         assert_eq!(items[2].preview, None);
+        assert_eq!(items[3].preview, None);
+    }
+
+    #[test]
+    fn a_hosts_row_icon_may_be_an_https_url() {
+        let response = serde_json::json!({
+            "result": [{"title": "url", "icon": "https://example.com/a.png"}]
+        });
+        let items = parse_result_items(response, "p", "/opt/identity.svg").unwrap();
+        assert!(
+            items[0]
+                .icon
+                .as_deref()
+                .is_some_and(|path| path.contains("/icons/") && path.ends_with(".png"))
+        );
     }
 
     #[test]

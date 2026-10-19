@@ -32,6 +32,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 |------|------|------|
 | `theme` | 主题颜色 | 解析后的主题；连接时发一次，调色板变化时再发 |
 | `results` | 结果项数组 | 一次搜索的结果 |
+| `image_ready` | `{"path": "…"}` | 后台图片抓取完成；UI 重新加载该路径 |
 
 `search` 不带 `id` 时走流式：后端先中止上一个搜索，再推送 `results` 通知；带 `id`
 时同步返回数组，方便一次性客户端直接取回结果。
@@ -131,15 +132,15 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 | `title` | string | 主标签（应用名、命令、文件名……） |
 | `summary` | string \| null | 副行（命令、路径、描述……） |
 | `on_click` | [`Action`](#动作) \| null | Enter 绑定的动作 |
-| `icon` | string \| null | 图标规范：绝对路径或 `builtin:` 字形；见 [图标规范](#图标规范) |
+| `icon` | string \| null | 图标规范：绝对路径或 `builtin:` 字形；外部主机的结果行也可以是 `https://` URL，由后端抓取缓存；见 [图标规范](#图标规范) |
 | `icon_shape` | string | 可选；`"circle"` 把图标框裁成圆形，缺省按文件原样绘制 |
-| `preview` | object | 可选的分栏预览载荷：`{"type":"image","path":"/abs/file.png"}` 或 `{"type":"text","text":"…"}` |
+| `preview` | object | 可选的分栏预览载荷：`{"type":"image","path":"/abs/file.png"}` 或 `{"type":"text","text":"…"}`；外部主机的 image 路径也可以是 `https://` URL |
 | `actions` | array | 可选，`Shift+Enter` 动作面板的次级命令 |
 
-`preview` 与 `Action` 一样用 `type` 标记：`image` 携带绝对路径（PNG、SVG、JPEG、
-WebP、GIF 或 BMP），显示在选中行的右侧列；`text` 携带纯 UTF-8 文本，由启动器换行
-并裁切，上限 64 KiB。外部主机的预览路径遵循其图标规则：它自己准备的文件，而不是
-主题名或 `builtin:` 字形。
+`preview` 与 `Action` 一样用 `type` 标记：`image` 携带绝对路径，或外部主机的
+`https://` URL（由后端抓取到图片缓存，支持 PNG、SVG、JPEG、WebP、GIF、BMP），
+显示在选中行的右侧列；`text` 携带纯 UTF-8 文本，由启动器换行并裁切，上限
+64 KiB。主题名或 `builtin:` 字形不是预览。
 
 `actions` 元素为 `{"title": string, "action": Action, "icon"?: string}`，
 `icon` 与结果行的 `icon` 采用同样的规范解析。动作还可以带 `id`（稳定的动作类型）、
@@ -157,11 +158,12 @@ WebP、GIF 或 BMP），显示在选中行的右侧列；`text` 携带纯 UTF-8 
 
 ### 图标规范
 
-每个 `icon` 都是绝对路径，或是启动器从内置字形集中绘制的 `builtin:<name>` 字形。
-`http(s)://` URL 不是图标规范，启动器不会下载网络图片。**外部插件主机**
-（`plugins.toml` 中带 `command` 的条目）返回它**自己准备**的图标文件：结果项 `icon`
-字段（`search` 结果与 `top` 默认视图皆然）、动作的 `icon`，以及 `list_plugins`
-身份 `icon` 都如此。`builtin:` 字形、主题图标名与 `papirus:` 规范一律视为无图标。
+shell 收到的每个 `icon` 都是绝对路径，或是启动器从内置字形集中绘制的
+`builtin:<name>` 字形。**外部插件主机**（`plugins.toml` 中带 `command` 的条目）
+可以把结果行自身的 `icon` 写成 `https://` URL：后端在后台抓取到
+`$XDG_CACHE_HOME/wayrun/icons`，再把缓存路径交给 shell。预览的 image `path` 同样
+可以是 `https://` URL。插件的身份 `icon`、动作的 `icon` 与预览的本地路径仍是主机
+自带的文件。`builtin:` 字形、主题图标名与 `papirus:` 规范一律视为无图标。
 
 结果行图标缺失或无法解析时，回退到插件的身份图标；身份图标也没有时，绘制内置占位
 图标。

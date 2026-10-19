@@ -1,5 +1,6 @@
 mod mime;
 mod papirus;
+mod remote;
 mod theme;
 
 use std::collections::HashMap;
@@ -14,6 +15,9 @@ use self::papirus::find_papirus;
 use self::theme::{find_pixmap_icon, find_theme_icon};
 
 pub use self::mime::content_type_icon;
+pub(crate) use self::remote::{
+    icon as remote_icon, preview as remote_preview, start as start_remote,
+};
 pub use self::theme::warn_if_no_icon_theme;
 
 /// Distinct specs kept before the map is dropped whole; an app's icon name can

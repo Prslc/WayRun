@@ -11,6 +11,8 @@ use wayrun_core::wire::{Action, ResultItem, ThemeConfig};
 pub enum BackendEvent {
     Theme(ThemeConfig),
     Results(Vec<ResultItem>),
+    /// A background image fetch wrote its file; the cached miss must be dropped.
+    ImageReady(String),
     /// The core's stdout closed: nothing can be searched or launched anymore.
     CoreExited,
 }
@@ -135,6 +137,13 @@ fn drain(mut stdin: ChildStdin, receiver: std::sync::mpsc::Receiver<String>) {
 enum Notification {
     Theme(ThemeConfig),
     Results(Vec<ResultItem>),
+    #[serde(rename = "image_ready")]
+    ImageReady(ImageReady),
+}
+
+#[derive(serde::Deserialize)]
+struct ImageReady {
+    path: String,
 }
 
 /// Parse one JSON-RPC 2.0 line into the event the shell renders; a line it does
@@ -144,6 +153,7 @@ fn parse(line: &str) -> Option<BackendEvent> {
     Some(match notification {
         Notification::Theme(config) => BackendEvent::Theme(config),
         Notification::Results(items) => BackendEvent::Results(items),
+        Notification::ImageReady(ready) => BackendEvent::ImageReady(ready.path),
     })
 }
 
@@ -162,6 +172,14 @@ mod tests {
         match results {
             BackendEvent::Results(items) => assert_eq!(items[0].title, "a"),
             other => panic!("expected results, got {other:?}"),
+        }
+
+        let ready =
+            parse(r#"{"jsonrpc":"2.0","method":"image_ready","params":{"path":"/tmp/a.png"}}"#)
+                .unwrap();
+        match ready {
+            BackendEvent::ImageReady(path) => assert_eq!(path, "/tmp/a.png"),
+            other => panic!("expected image_ready, got {other:?}"),
         }
     }
 

@@ -339,6 +339,10 @@ impl Shell {
                     }
                 }
             }
+            BackendEvent::ImageReady(path) => {
+                self.icons.forget(&path);
+                self.redraw();
+            }
             BackendEvent::CoreExited => {
                 eprintln!("wayrun: the core exited");
                 std::process::exit(1);

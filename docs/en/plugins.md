@@ -89,19 +89,19 @@ when the launcher dismisses, when it sits idle for two minutes, or when a call
 crashes or stalls; the next call starts a new one. The host must be stateless
 per call either way, but it may cache within its process lifetime.
 
-Both the identity `icon` and each result `icon` must be an absolute path — a
-file the host ships itself (`wayrun.script_dir()` locates the script's own
-directory) or a theme icon the Lua SDK's `wayrun.icon()` resolved; the same
-holds for an action's `icon`. A `builtin:` glyph, or a theme name or `papirus:`
-spec left unresolved, counts as no icon. A result whose own icon is missing
-falls back to the plugin's identity icon, and the built-in placeholder answers
-when that is missing too. A row may set `icon_shape = "circle"` to clip its icon
-box, as an avatar needs.
+The identity `icon` and an action's `icon` must be an absolute path: a file the
+host ships itself (`wayrun.script_dir()` locates the script's own directory) or
+a theme icon the Lua SDK's `wayrun.icon()` resolved. A result's own `icon` is an
+absolute path too, or an `https://` URL: the core fetches it in the background
+into its icon cache and hands the shell a local path, so the row draws at once
+and fills in when the image lands. A `builtin:` glyph, or a theme name or
+`papirus:` spec left unresolved, counts as no icon. A result whose own icon is
+missing falls back to the plugin's identity icon, and the built-in placeholder
+answers when that is missing too. A row may set `icon_shape = "circle"` to clip
+its icon box, as an avatar needs.
 
-The launcher never fetches a remote image, and an `http(s)://` URL is not an
-icon spec. A plugin that shows one (an avatar, a favicon) fetches it itself,
-caches it under a directory it owns, and passes the cached file's absolute
-path; refreshing that cache is the plugin's job too.
+A plugin that needs other network data (an API cache, a non-image file) still
+fetches and caches it itself; result icons and preview images are the core's.
 
 A host inherits the launcher's resolved locale as `WAYRUN_LOCALE`, the stem its
 own tables use (`en`, `zh_cn`, …); it owns its catalog and fallback, and the

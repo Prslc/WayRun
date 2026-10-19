@@ -9,12 +9,20 @@ use crate::protocol;
 use crate::rpc::{self, Search};
 use crate::watchers;
 
-/// Serve the JSON-RPC protocol until stdin closes. The transport belongs to
-/// `protocol`, the method table to `rpc`; this owns the session that drives them:
-/// the writer, the watchers, the search worker and the read loop.
+/// Serve the JSON-RPC protocol until stdin closes. `protocol` owns the transport,
+/// `rpc` the method table; this owns the writer, watchers, search worker and loop.
 pub async fn serve() -> Result<()> {
     let (tx, rx) = mpsc::channel::<String>(32);
     let writer = protocol::spawn_writer(rx);
+    let notify = {
+        let tx = tx.clone();
+        move |path: &str| {
+            if let Ok(line) = serde_json::to_string(&protocol::image_ready_notification(path)) {
+                let _ = tx.blocking_send(line);
+            }
+        }
+    };
+    crate::system::icon::start_remote(notify);
 
     protocol::emit(&tx, &protocol::theme_notification()).await;
 
