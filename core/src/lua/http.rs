@@ -392,7 +392,7 @@ fn with_params(
     let Some(params) = params else {
         return Ok((url, headers));
     };
-    let mut separator = if url.contains('?') { '&' } else { '?' };
+    let mut query = Vec::new();
     for pair in params.pairs::<String, Value>() {
         let (name, value) = pair?;
         if name == "headers" {
@@ -410,6 +410,13 @@ fn with_params(
                 )));
             }
         };
+        query.push((name, value));
+    }
+    // A Lua table's iteration order is unspecified; sorting keeps the URL (and
+    // so the ttl cache key) stable across processes.
+    query.sort();
+    let mut separator = if url.contains('?') { '&' } else { '?' };
+    for (name, value) in query {
         url.push(separator);
         separator = '&';
         url.push_str(&urlencoding::encode(&name));
@@ -847,6 +854,17 @@ mod tests {
         assert_eq!(timeout_for(Some(50)), Duration::from_millis(100));
         assert_eq!(timeout_for(Some(3_000)), Duration::from_millis(3_000));
         assert_eq!(timeout_for(Some(60_000)), ceiling);
+    }
+
+    #[test]
+    fn query_parameters_are_sorted() {
+        let lua = Lua::new();
+        let params: Table = lua
+            .load(r#"return { b = 2, a = 1, c = "x y" }"#)
+            .eval()
+            .unwrap();
+        let (url, _) = with_params("https://x/a".to_string(), Some(params)).unwrap();
+        assert_eq!(url, "https://x/a?a=1&b=2&c=x%20y");
     }
 
     #[test]
