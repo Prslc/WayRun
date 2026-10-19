@@ -114,7 +114,7 @@ layerrule = blur, WayRun
 | --- | --- | --- | --- | --- |
 | `width` | float | `730.0` | > 0 | 卡片宽度（逻辑像素）；输出更窄时按屏宽收缩。 |
 | `radius` | float | `16.0` | ≥ 0 | 卡片圆角；`0` 即直角，内层圆角随之收缩。 |
-| `top_ratio` | float | `0.28` | 0–1 | 卡片顶部占输出高度的比例。 |
+| `top_ratio` | float | `0.20` | 0–1 | 卡片顶部占输出高度的比例。 |
 | `align` | string | `center` | `left`/`center`/`right` | 在输出上的水平锚点。 |
 | `max_rows` | int | `5` | 1–8 | 可见结果行数。 |
 | `panel_header` | float | `28.0` | ≥ 0 | 动作面板中动作上方的标题栏高度。 |

@@ -21,7 +21,7 @@
 [layout]
 # width = 730.0              # card width in pixels; a narrower output shrinks it
 # radius = 16.0              # card corner radius; 0 is square corners
-# top_ratio = 0.28           # the card's top edge, as a fraction of the output height
+# top_ratio = 0.20           # the card's top edge, as a fraction of the output height
 # align = "center"           # horizontal anchor: left / center / right
 # max_rows = 5               # visible result rows
 # panel_header = 28.0        # action panel header band height

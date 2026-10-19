@@ -314,7 +314,7 @@ mod tests {
         assert!(config.reduced);
         // untouched defaults survive
         assert_eq!(config.font.size, 14.0);
-        assert_eq!(config.layout.top_ratio, 0.28);
+        assert_eq!(config.layout.top_ratio, 0.20);
     }
 
     #[test]

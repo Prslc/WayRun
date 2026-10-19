@@ -53,7 +53,7 @@ impl Default for Layout {
     fn default() -> Self {
         Self {
             width: 730.0,
-            top_ratio: 0.28,
+            top_ratio: 0.20,
             align: Align::Center,
             radius: 16.0,
             max_rows: 5,
@@ -517,7 +517,7 @@ mod tests {
         let center = Layout::default();
         let width = center.card_w(surface);
         assert_eq!(center.card_x(surface), ((1920.0 - width) / 2.0).round());
-        assert_eq!(center.card_top(surface), (1080.0_f32 * 0.28).round());
+        assert_eq!(center.card_top(surface), (1080.0_f32 * 0.20).round());
 
         let left = Layout {
             align: Align::Left,
