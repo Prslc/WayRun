@@ -117,8 +117,9 @@ impl Client {
         } else {
             options.ttl.filter(|ttl| *ttl > 0)
         };
+        let key = cache_key(&url, &options.headers);
         if ttl.is_some()
-            && let Some(cached) = self.cached(&url)
+            && let Some(cached) = self.cached(&key)
         {
             return reply(lua, &cached);
         }
@@ -126,7 +127,7 @@ impl Client {
         if let Some(ttl) = ttl
             && (200..300).contains(&response.status)
         {
-            self.store(&url, &response, ttl);
+            self.store(&key, &response, ttl);
         }
         reply(lua, &response)
     }
@@ -187,16 +188,11 @@ impl Client {
         })
     }
 
-    /// The stored reply for `url`, or `None`; an unreadable entry reads as a
+    /// The stored reply under `key`, or `None`; an unreadable entry reads as a
     /// miss, and the next store overwrites it.
-    fn cached(&self, url: &str) -> Option<Response> {
+    fn cached(&self, key: &str) -> Option<Response> {
         let (id, path) = self.database()?;
-        let key = cache_key(url);
-        let text = match self
-            .stores
-            .borrow_mut()
-            .get(&id, &path, &key, now_seconds())
-        {
+        let text = match self.stores.borrow_mut().get(&id, &path, key, now_seconds()) {
             Ok(Some(text)) => text,
             Ok(None) => return None,
             Err(error) => {
@@ -212,9 +208,9 @@ impl Client {
         })
     }
 
-    /// Caches a 2xx reply for `ttl` seconds under its URL; the cache is a
+    /// Caches a 2xx reply for `ttl` seconds under `key`; the cache is a
     /// convenience, so a failure is logged and the reply still answers.
-    fn store(&self, url: &str, response: &Response, ttl: u64) {
+    fn store(&self, key: &str, response: &Response, ttl: u64) {
         let Some((id, path)) = self.database() else {
             return;
         };
@@ -229,12 +225,11 @@ impl Client {
         let Ok(text) = serde_json::to_string(&cached) else {
             return;
         };
-        let key = cache_key(url);
         let expires_at = now_seconds() + ttl as i64;
         match self
             .stores
             .borrow_mut()
-            .set(&id, &path, &key, &text, Some(expires_at))
+            .set(&id, &path, key, &text, Some(expires_at))
         {
             Ok(()) => {}
             Err(error) => warn(&self.script, &format!("http cache write {key}: {error:#}")),
@@ -264,8 +259,22 @@ fn reply(lua: &Lua, response: &Response) -> mlua::Result<Table> {
     Ok(table)
 }
 
-fn cache_key(url: &str) -> String {
-    format!("http:{url}")
+/// The cache key: the URL and the request headers, name-normalized and sorted,
+/// so an authenticated or language-specific reply never answers another request.
+fn cache_key(url: &str, headers: &[(String, String)]) -> String {
+    let mut pairs: Vec<(String, &str)> = headers
+        .iter()
+        .map(|(name, value)| (name.to_ascii_lowercase(), value.as_str()))
+        .collect();
+    pairs.sort();
+    let mut key = format!("http:{url}");
+    for (name, value) in pairs {
+        key.push('\n');
+        key.push_str(&name);
+        key.push_str(": ");
+        key.push_str(value);
+    }
+    key
 }
 
 /// The deadline: two seconds by default, held inside the host call's own
@@ -742,5 +751,30 @@ mod tests {
         assert_eq!(timeout_for(Some(50)), Duration::from_millis(100));
         assert_eq!(timeout_for(Some(3_000)), Duration::from_millis(3_000));
         assert_eq!(timeout_for(Some(60_000)), ceiling);
+    }
+
+    #[test]
+    fn the_cache_key_separates_requests_by_header() {
+        let plain = cache_key("https://x/a", &[]);
+        let auth = cache_key(
+            "https://x/a",
+            &[("Authorization".to_string(), "Bearer t".to_string())],
+        );
+        assert_ne!(plain, auth);
+        assert_ne!(
+            cache_key("https://x/a", &[("Accept".into(), "json".into())]),
+            cache_key("https://x/a", &[("Accept".into(), "text".into())]),
+        );
+        // header order and name case do not split one request into two entries
+        assert_eq!(
+            cache_key(
+                "https://x/a",
+                &[("Accept".into(), "json".into()), ("X-A".into(), "1".into())]
+            ),
+            cache_key(
+                "https://x/a",
+                &[("x-a".into(), "1".into()), ("accept".into(), "json".into())]
+            ),
+        );
     }
 }
