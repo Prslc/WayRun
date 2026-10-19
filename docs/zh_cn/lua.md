@@ -152,6 +152,43 @@ printf '{"jsonrpc":"2.0","method":"search","params":{"plugin":"<id>","text":"…
 `require` 的习惯缓存为 true。名字必须是相对路径，不能用 `..` 爬出脚本目录，解析到
 目录外的 symlink 也会被拒绝；循环 import 直接报错而不是递归。
 
+## 本地化
+
+`wayrun.locale()` 返回启动器解析后的 locale，也就是它自己词表使用的 stem，如 `en`、
+`zh_cn`；脚本加载时就可读，所以插件表的 `name` 与 `description` 也能本地化。启动器已把
+所有 `zh_*` 变体折叠为 `zh_cn`；其他语言以归一化形式出现（如 `fr_fr`）。该值在启动时
+读取一次，因此切换语言和启动器本身一样需要重启。
+
+插件自己的词表与回退由插件负责；启动器不会翻译插件文本。把文案放在按 locale 索引的
+表里，并回退到你必定附带的那一种：
+
+```lua
+local CATALOGS = {
+  en = { description = "Search GitHub repositories", copy_url = "Copy HTML URL" },
+  zh_cn = { description = "搜索 GitHub 仓库", copy_url = "复制 HTML 链接" },
+}
+
+local fallback = CATALOGS.en
+local strings = CATALOGS[wayrun.locale()] or fallback
+local function t(key)
+  return strings[key] or fallback[key]
+end
+```
+
+翻译插件自己写的文案——身份名称与描述、行标题与摘要、动作标题、空状态与错误提示——
+不要翻译数据：仓库名、文件名、命令、URI 与剪贴板文本都不是翻译对象。词表较大时，
+把每种语言一个 JSON 文件放在脚本旁边，用 `wayrun.fs.read` 读入再交给
+`wayrun.json.decode`：
+
+```lua
+local dir = wayrun.script_dir() .. "/locales/"
+local text = wayrun.fs.read(dir .. wayrun.locale() .. ".json")
+  or wayrun.fs.read(dir .. "en.json")
+local strings = wayrun.json.decode(text or "{}")
+```
+
+其他语言的 host 从 `$WAYRUN_LOCALE` 读取同一个值。
+
 ## 限制
 
 - Lua 插件可以用 `keyword = ""` 加入默认链。它的行是 listed 而不是 scored，因此排在
@@ -159,7 +196,9 @@ printf '{"jsonrpc":"2.0","method":"search","params":{"plugin":"<id>","text":"…
   超时就跳过本次，因此 `search` 要便宜，查询不相关时尽快返回空。
 - 行序即脚本返回的顺序；没有相关度通道。
 - 图标遵循 [plugins.md](plugins.md#外部主机) 的规则：脚本自带的文件，或
-  `wayrun.icon(name)` 解析出的主题图标。
+  `wayrun.icon(name)` 解析出的主题图标。网络图片也由脚本自己处理：用
+  `wayrun.http.get` 取回字节，用 `wayrun.fs.write` 写进 `wayrun.plugin_dir(id)`，
+  再把该目录与文件名拼成绝对路径作为 `icon` 返回；缓存与刷新由脚本负责。
 
 ## 注册
 

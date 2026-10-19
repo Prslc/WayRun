@@ -170,6 +170,47 @@ of the same canonical path return the cached value. A nil return is cached as
 a symlink that resolves outside the script's directory is refused. A circular
 import raises rather than recursing.
 
+## Localisation
+
+`wayrun.locale()` answers the launcher's resolved locale, the same stem its own
+tables use, such as `en` or `zh_cn`, and it is available while the script loads,
+so the plugin table's `name` and `description` can be localised too. Every `zh_*`
+variant has already been folded into `zh_cn`; any other language arrives
+normalised (`fr_fr`). The value is read once at startup, so changing it needs the
+same restart the launcher does.
+
+The plugin owns its catalogue and its fallback; the launcher never translates
+plugin text. Keep the strings in a table keyed by locale and fall back to the one
+you always ship:
+
+```lua
+local CATALOGS = {
+  en = { description = "Search GitHub repositories", copy_url = "Copy HTML URL" },
+  zh_cn = { description = "搜索 GitHub 仓库", copy_url = "复制 HTML 链接" },
+}
+
+local fallback = CATALOGS.en
+local strings = CATALOGS[wayrun.locale()] or fallback
+local function t(key)
+  return strings[key] or fallback[key]
+end
+```
+
+Translate the prose the plugin authors — identity name and description, row
+titles and summaries, action titles, empty and error messages — and leave data
+alone: repository names, file names, commands, URIs and clipboard text are not
+translations. For a larger catalogue, put one JSON file per locale beside the
+script and read it with `wayrun.fs.read` into `wayrun.json.decode`:
+
+```lua
+local dir = wayrun.script_dir() .. "/locales/"
+local text = wayrun.fs.read(dir .. wayrun.locale() .. ".json")
+  or wayrun.fs.read(dir .. "en.json")
+local strings = wayrun.json.decode(text or "{}")
+```
+
+A host in another language reads the same value from `$WAYRUN_LOCALE`.
+
 ## Limits
 
 - A Lua plugin may join the default chain with `keyword = ""`. Its rows are
@@ -179,7 +220,10 @@ import raises rather than recursing.
   return nothing when the query is not yours.
 - Rows keep the order the script returns; there is no relevance channel.
 - Icons follow the rule in [plugins.md](plugins.md#external-hosts): a file the
-  script ships, or a theme icon `wayrun.icon(name)` resolved.
+  script ships, or a theme icon `wayrun.icon(name)` resolved. A remote image is
+  the script's job too: fetch the bytes with `wayrun.http.get`, write them with
+  `wayrun.fs.write` into `wayrun.plugin_dir(id)`, and return that directory
+  joined with the file name; cache and refresh it yourself.
 
 ## Registering
 

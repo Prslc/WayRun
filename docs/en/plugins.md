@@ -98,9 +98,15 @@ falls back to the plugin's identity icon, and the built-in placeholder answers
 when that is missing too. A row may set `icon_shape = "circle"` to clip its icon
 box, as an avatar needs.
 
+The launcher never fetches a remote image, and an `http(s)://` URL is not an
+icon spec. A plugin that shows one (an avatar, a favicon) fetches it itself,
+caches it under a directory it owns, and passes the cached file's absolute
+path; refreshing that cache is the plugin's job too.
+
 A host inherits the launcher's resolved locale as `WAYRUN_LOCALE`, the stem its
 own tables use (`en`, `zh_cn`, …); it owns its catalog and fallback, and the
-launcher never translates plugin text.
+launcher never translates plugin text. [lua.md](lua.md#localisation) has the Lua
+pattern.
 
 Every plugin names the API version it targets — a host in its `list_plugins`
 identity, a Lua script in its plugin table — and the launcher logs a mismatch
