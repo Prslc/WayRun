@@ -71,6 +71,9 @@ function wayrun.log(message) end
 ---@return integer
 function wayrun.time() end
 
+---@return string
+function wayrun.locale() end
+
 ---@param name string
 ---@return string?
 function wayrun.env(name) end

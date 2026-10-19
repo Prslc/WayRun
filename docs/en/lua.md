@@ -99,6 +99,7 @@ A row with no `on_click` is display-only; it can still carry `actions`.
 | `wayrun.file_uri(path)` | the `file://` URI for an absolute path, encoded like a built-in row's; nil for a relative one |
 | `wayrun.log(message)` | writes to the launcher's journal under the script's and calling plugin's name |
 | `wayrun.time()` | Unix seconds, for signatures and cache TTLs |
+| `wayrun.locale()` | the launcher's resolved locale, the stem its own tables use (`en`, `zh_cn`, …) |
 | `wayrun.env(name)` | a variable the plugin declares in `env`, or nil when unset; an undeclared name raises |
 | `wayrun.which(name)` | an executable's path on the launcher's `$PATH`, or nil; the same PATH a `run` row's command will see |
 | `wayrun.exec(program, args?)` | runs a declared `PATH` program with argv (no shell) in `$HOME` under a 1.5s deadline; answers `{code, stdout, stderr}`, capped at 64 KiB/8 KiB; an undeclared program or a timeout raises |

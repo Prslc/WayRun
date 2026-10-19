@@ -91,6 +91,7 @@ actions = {
 | `wayrun.file_uri(path)` | 绝对路径对应的 `file://` URI，编码规则与内置行一致；相对路径返回 nil |
 | `wayrun.log(message)` | 以脚本与调用插件的名义写入启动器的 journal |
 | `wayrun.time()` | Unix 秒，用于签名与缓存 TTL |
+| `wayrun.locale()` | 启动器解析后的 locale，即它自己词表使用的 stem（`en`、`zh_cn`…） |
 | `wayrun.env(name)` | 插件在 `env` 中声明的变量；未设置则为 nil；未声明的名字抛出 |
 | `wayrun.which(name)` | 启动器 `$PATH` 上某个可执行文件的路径，否则 nil；与 `run` 行的命令将看到的 PATH 相同 |
 | `wayrun.exec(program, args?)` | 以 argv（不过 shell）在 `$HOME` 下运行插件声明过的 `PATH` 程序，1.5 秒超时；返回 `{code, stdout, stderr}`，输出上限 64 KiB / 8 KiB；未声明或超时会 raise |

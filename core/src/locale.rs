@@ -17,6 +17,10 @@ pub fn init() {
         // glib first reads the variable when its first locale lookup runs later.
         unsafe { std::env::set_var("LANGUAGE", &tag) };
     }
+    if std::env::var("WAYRUN_LOCALE").ok().as_deref() != Some(locale.as_str()) {
+        // SAFETY: `init` runs before any other thread exists, like the pin above.
+        unsafe { std::env::set_var("WAYRUN_LOCALE", &locale) };
+    }
     let _ = AMBIENT_LANGUAGE.set(ambient);
 }
 

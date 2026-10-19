@@ -51,6 +51,7 @@ fn scoped_command(scope: bool, program: &str, args: &[String]) -> process::Comma
         Some(language) => command.env("LANGUAGE", language),
         None => command.env_remove("LANGUAGE"),
     };
+    command.env_remove("WAYRUN_LOCALE");
     restore_signals(&mut command);
     command
 }
@@ -174,6 +175,7 @@ pub(crate) fn launch_context() -> gio::AppLaunchContext {
         Some(language) => context.setenv("LANGUAGE", language),
         None => context.unsetenv("LANGUAGE"),
     }
+    context.unsetenv("WAYRUN_LOCALE");
     context
 }
 

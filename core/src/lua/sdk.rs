@@ -85,6 +85,10 @@ pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua:
         lua.create_function(|_, path: String| Ok(file_uri(&path)))?,
     )?;
     sdk.set("time", lua.create_function(|_, ()| Ok(now_seconds()))?)?;
+    sdk.set(
+        "locale",
+        lua.create_function(|_, ()| Ok(rust_i18n::locale()))?,
+    )?;
     let env_active = Rc::clone(&shared.active);
     let env_scope = Rc::clone(&shared.env_scope);
     sdk.set(
