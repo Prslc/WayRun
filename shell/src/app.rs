@@ -74,8 +74,8 @@ pub struct State {
     pub preedit_active: bool,
     pub caret_visible: bool,
     pub caret_at: Instant,
-    /// When the latest non-empty search was sent; the footer says "searching"
-    /// once it has been pending past `SEARCH_LOADING_DELAY`.
+    /// When the pending wait began; keystrokes inside one wait do not move it,
+    /// and the footer says "searching" once it passes `SEARCH_LOADING_DELAY`.
     pub search_started: Option<Instant>,
     pub dismiss_at: Option<Instant>,
 }
@@ -171,6 +171,16 @@ impl State {
                 None => layout.content_h(self.rows.len()),
             },
         }
+    }
+
+    /// Note a sent search: the first of a wait starts the loading clock, and a
+    /// later keystroke leaves it alone. Returns whether the clock started.
+    pub fn search_sent(&mut self, now: Instant) -> bool {
+        if self.search_started.is_some() {
+            return false;
+        }
+        self.search_started = Some(now);
+        true
     }
 
     pub fn card_height(&self) -> f32 {

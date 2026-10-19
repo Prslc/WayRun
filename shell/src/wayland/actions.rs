@@ -23,8 +23,7 @@ impl Shell {
             // No query is no result set: the list clears in place.
             self.app.apply_results(Vec::new(), now);
             self.redraw();
-        } else {
-            self.app.search_started = Some(now);
+        } else if self.app.search_sent(now) {
             let _ = self.loop_handle.insert_source(
                 Timer::from_duration(app::SEARCH_LOADING_DELAY),
                 move |_, _, state: &mut Shell| {

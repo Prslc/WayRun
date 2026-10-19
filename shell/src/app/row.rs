@@ -153,6 +153,18 @@ mod tests {
     }
 
     #[test]
+    fn a_second_keystroke_keeps_the_loading_clock() {
+        let mut state = state();
+        let now = Instant::now();
+        assert!(state.search_sent(now));
+        assert!(!state.search_sent(now + std::time::Duration::from_millis(100)));
+        assert_eq!(state.search_started, Some(now));
+
+        state.apply_results(Vec::new(), now + std::time::Duration::from_millis(200));
+        assert!(state.search_sent(now + std::time::Duration::from_millis(300)));
+    }
+
+    #[test]
     fn the_result_dedupe_matches_the_payload_it_was_built_from() {
         let mut state = state();
         let items = vec![
