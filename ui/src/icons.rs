@@ -5,7 +5,8 @@ mod render;
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
 
-use tiny_skia::{Pixmap, PixmapPaint, Transform};
+use tiny_skia::{FillRule, Mask, PathBuilder, Pixmap, PixmapPaint, Transform};
+use wayrun_core::wire::IconShape;
 
 use self::render::{intrinsic_size, render, render_glyph};
 
@@ -16,22 +17,34 @@ pub enum IconKey {
     Plain {
         path: String,
         size: u32,
+        shape: IconShape,
     },
     Tinted {
         path: String,
         size: u32,
         color: [u8; 3],
+        shape: IconShape,
     },
 }
 
+/// One icon draw: the file, the box it fits and how it lands.
+pub struct IconDraw<'a> {
+    pub path: &'a str,
+    pub x: f32,
+    pub y: f32,
+    pub size: u32,
+    pub opacity: f32,
+    pub shape: IconShape,
+}
+
 pub struct IconCache {
-    /// path → (box size → premultiplied RGBA). The key is a `String` so a
-    /// per-frame lookup borrows a `&str`; `None` marks an unreadable file.
-    entries: HashMap<String, HashMap<u32, Option<Pixmap>>>,
+    /// path → (box size and shape → premultiplied RGBA). The key is a `String`
+    /// so a per-frame lookup borrows a `&str`; `None` marks an unreadable file.
+    entries: HashMap<String, HashMap<(u32, IconShape), Option<Pixmap>>>,
     /// The same bitmap recoloured to the theme foreground, keyed by colour too,
     /// so a live theme change does not show the old tint.
     #[allow(clippy::type_complexity)] // two levels, so a lookup borrows the path
-    tinted: HashMap<String, HashMap<(u32, [u8; 3]), Option<Pixmap>>>,
+    tinted: HashMap<String, HashMap<(u32, [u8; 3], IconShape), Option<Pixmap>>>,
     /// Keys asked for but not yet delivered, so a frame never queues a decode
     /// the worker is already on.
     pending: HashSet<IconKey>,
@@ -86,30 +99,32 @@ impl IconCache {
 
     /// Ask the worker for `path`, unless it is cached or already asked for; a
     /// payload that arrives while the launcher is hidden lands before it shows.
-    pub fn warm(&mut self, path: &str, size: u32) {
+    pub fn warm(&mut self, path: &str, size: u32, shape: IconShape) {
         if self
             .entries
             .get(path)
-            .is_none_or(|by_size| !by_size.contains_key(&size))
+            .is_none_or(|by_key| !by_key.contains_key(&(size, shape)))
         {
             self.request(IconKey::Plain {
                 path: path.to_string(),
                 size,
+                shape,
             });
         }
     }
 
     /// Like [`IconCache::warm`], for a glyph drawn through [`IconCache::draw_tinted`].
-    pub fn warm_tinted(&mut self, path: &str, size: u32, color: [u8; 3]) {
+    pub fn warm_tinted(&mut self, path: &str, size: u32, color: [u8; 3], shape: IconShape) {
         if self
             .tinted
             .get(path)
-            .is_none_or(|by_color| !by_color.contains_key(&(size, color)))
+            .is_none_or(|by_key| !by_key.contains_key(&(size, color, shape)))
         {
             self.request(IconKey::Tinted {
                 path: path.to_string(),
                 size,
                 color,
+                shape,
             });
         }
     }
@@ -122,54 +137,59 @@ impl IconCache {
         }
         self.pending.remove(&key);
         match key {
-            IconKey::Plain { path, size } => {
-                self.entries.entry(path).or_default().insert(size, icon);
+            IconKey::Plain { path, size, shape } => {
+                self.entries
+                    .entry(path)
+                    .or_default()
+                    .insert((size, shape), icon);
             }
-            IconKey::Tinted { path, size, color } => {
+            IconKey::Tinted {
+                path,
+                size,
+                color,
+                shape,
+            } => {
                 self.tinted
                     .entry(path)
                     .or_default()
-                    .insert((size, color), icon);
+                    .insert((size, color, shape), icon);
             }
         }
     }
 
-    /// Draw `path` tinted to `color` when it is a monochrome silhouette; a
+    /// Draw the icon tinted to `color` when it is a monochrome silhouette; a
     /// coloured icon is left unchanged. The panel's dark glyphs need this.
-    pub fn draw_tinted(
-        &mut self,
-        target: &mut Pixmap,
-        path: &str,
-        pos: (f32, f32),
-        size: u32,
-        opacity: f32,
-        color: [u8; 3],
-    ) {
-        let key = (size, color);
+    pub fn draw_tinted(&mut self, target: &mut Pixmap, draw: IconDraw<'_>, color: [u8; 3]) {
+        let IconDraw {
+            path,
+            x,
+            y,
+            size,
+            opacity,
+            shape,
+        } = draw;
+        let key = (size, color, shape);
         if self
             .tinted
             .get(path)
-            .is_none_or(|by_color| !by_color.contains_key(&key))
+            .is_none_or(|by_key| !by_key.contains_key(&key))
         {
             self.request(IconKey::Tinted {
                 path: path.to_string(),
                 size,
                 color,
+                shape,
             });
             return;
         }
         // the key is known here, so a `None` inside is a cached unreadable file
-        let Some(Some(icon)) = self
-            .tinted
-            .get(path)
-            .and_then(|by_color| by_color.get(&key))
-        else {
+        let Some(Some(icon)) = self.tinted.get(path).and_then(|by_key| by_key.get(&key)) else {
             return;
         };
 
         target.draw_pixmap(
-            pos.0.round() as i32,
-            pos.1.round() as i32,
+            x.round() as i32,
+            y.round() as i32,
             icon.as_ref(),
             &PixmapPaint {
                 opacity: opacity.clamp(0.0, 1.0),
@@ -180,26 +200,27 @@ impl IconCache {
         );
     }
 
-    /// Draw the icon contained in a `size`×`size` box at `(x, y)`, at `opacity`.
-    /// A missing file is asked for, never rasterised here: no frame decodes.
-    pub fn draw(
-        &mut self,
-        target: &mut Pixmap,
-        path: &str,
-        x: f32,
-        y: f32,
-        size: u32,
-        opacity: f32,
-    ) {
+    /// Draw the icon contained in a `size`×`size` box at its position, at
+    /// `opacity`. A missing file is asked for, never rasterised here.
+    pub fn draw(&mut self, target: &mut Pixmap, draw: IconDraw<'_>) {
+        let IconDraw {
+            path,
+            x,
+            y,
+            size,
+            opacity,
+            shape,
+        } = draw;
         // `get` borrows the path as `&str`, so a cache hit allocates nothing.
         if self
             .entries
             .get(path)
-            .is_none_or(|by_size| !by_size.contains_key(&size))
+            .is_none_or(|by_key| !by_key.contains_key(&(size, shape)))
         {
             self.request(IconKey::Plain {
                 path: path.to_string(),
                 size,
+                shape,
             });
             return;
         }
@@ -207,7 +228,7 @@ impl IconCache {
         let Some(Some(icon)) = self
             .entries
             .get(path)
-            .and_then(|by_size| by_size.get(&size))
+            .and_then(|by_key| by_key.get(&(size, shape)))
         else {
             return;
         };
@@ -242,16 +263,45 @@ where
     let (jobs, queue) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         while let Ok((generation, key)) = queue.recv() {
-            let icon = match &key {
-                IconKey::Plain { path, size } => render(path, *size),
-                IconKey::Tinted { path, size, color } => render_glyph(path, *size, *color),
+            let shape = match &key {
+                IconKey::Plain { shape, .. } | IconKey::Tinted { shape, .. } => *shape,
             };
+            let icon = match &key {
+                IconKey::Plain { path, size, .. } => render(path, *size),
+                IconKey::Tinted {
+                    path, size, color, ..
+                } => render_glyph(path, *size, *color),
+            }
+            .map(|mut icon| {
+                clip(&mut icon, shape);
+                icon
+            });
             if !done((generation, key, icon)) {
                 break;
             }
         }
     });
     jobs
+}
+
+/// Clip a decoded icon to its box shape; the mask runs on the decode thread, so
+/// a frame never scans pixels.
+fn clip(icon: &mut Pixmap, shape: IconShape) {
+    match shape {
+        IconShape::Square => return,
+        IconShape::Circle => {}
+    }
+    let width = icon.width() as f32;
+    let height = icon.height() as f32;
+    let Some(path) = PathBuilder::from_circle(width / 2.0, height / 2.0, width.min(height) / 2.0)
+    else {
+        return;
+    };
+    let Some(mut mask) = Mask::new(icon.width(), icon.height()) else {
+        return;
+    };
+    mask.fill_path(&path, FillRule::Winding, true, Transform::identity());
+    icon.apply_mask(&mask);
 }
 
 #[cfg(test)]
@@ -275,11 +325,24 @@ mod tests {
         (IconCache::new(jobs), queued)
     }
 
+    /// A plain draw at full opacity: what a settled frame asks for.
+    fn plain(path: &str, x: f32, y: f32, size: u32) -> IconDraw<'_> {
+        IconDraw {
+            path,
+            x,
+            y,
+            size,
+            opacity: 1.0,
+            shape: IconShape::Square,
+        }
+    }
+
     /// Store what the worker would deliver for a plain icon.
     fn deliver(cache: &mut IconCache, path: &str, size: u32) {
         let key = IconKey::Plain {
             path: path.to_string(),
             size,
+            shape: IconShape::Square,
         };
         let generation = cache.generation;
         cache.insert(generation, key, render(path, size));
@@ -291,6 +354,7 @@ mod tests {
             path: path.to_string(),
             size,
             color,
+            shape: IconShape::Square,
         };
         let generation = cache.generation;
         cache.insert(generation, key, render_glyph(path, size, color));
@@ -303,7 +367,7 @@ mod tests {
         let mut target = Pixmap::new(34, 34).unwrap();
 
         deliver(&mut cache, path.to_str().unwrap(), 30);
-        cache.draw(&mut target, path.to_str().unwrap(), 2.0, 2.0, 30, 1.0);
+        cache.draw(&mut target, plain(path.to_str().unwrap(), 2.0, 2.0, 30));
 
         let centre = target.pixel(17, 17).unwrap();
         assert_eq!(centre.alpha(), 255, "the square is drawn");
@@ -322,6 +386,19 @@ mod tests {
     }
 
     #[test]
+    fn a_circle_icon_clips_the_box_corners() {
+        let path = red_png("wayrun-icon-circle.png");
+        let mut icon = render(path.to_str().unwrap(), 30).unwrap();
+        clip(&mut icon, IconShape::Circle);
+
+        assert_eq!(icon.pixel(15, 15).unwrap().alpha(), 255, "the centre stays");
+        assert_eq!(icon.pixel(0, 0).unwrap().alpha(), 0, "a corner is clipped");
+        assert!(icon.pixel(15, 2).unwrap().alpha() > 0, "the top edge stays");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn an_svg_icon_is_rendered_without_the_text_feature() {
         // `resvg` is built without `text`/`system-fonts`; path-only SVGs, which
         // is what every theme and plugin icon is, must still render.
@@ -332,7 +409,7 @@ mod tests {
         let (mut cache, _queued) = test_cache();
         let mut target = Pixmap::new(34, 34).unwrap();
         deliver(&mut cache, path.to_str().unwrap(), 30);
-        cache.draw(&mut target, path.to_str().unwrap(), 2.0, 2.0, 30, 1.0);
+        cache.draw(&mut target, plain(path.to_str().unwrap(), 2.0, 2.0, 30));
 
         let centre = target.pixel(17, 17).unwrap();
         assert_eq!(centre.alpha(), 255, "the square is drawn");
@@ -353,10 +430,7 @@ mod tests {
         deliver_tinted(&mut cache, path.to_str().unwrap(), 30, [241, 223, 218]);
         cache.draw_tinted(
             &mut target,
-            path.to_str().unwrap(),
-            (2.0, 2.0),
-            30,
-            1.0,
+            plain(path.to_str().unwrap(), 2.0, 2.0, 30),
             [241, 223, 218],
         );
 
@@ -380,10 +454,7 @@ mod tests {
         deliver_tinted(&mut cache, path.to_str().unwrap(), 30, [241, 223, 218]);
         cache.draw_tinted(
             &mut target,
-            path.to_str().unwrap(),
-            (2.0, 2.0),
-            30,
-            1.0,
+            plain(path.to_str().unwrap(), 2.0, 2.0, 30),
             [241, 223, 218],
         );
 
@@ -401,7 +472,7 @@ mod tests {
         let mut target = Pixmap::new(30, 30).unwrap();
         deliver(&mut cache, "/nonexistent/icon.png", 30);
 
-        cache.draw(&mut target, "/nonexistent/icon.png", 0.0, 0.0, 30, 1.0);
+        cache.draw(&mut target, plain("/nonexistent/icon.png", 0.0, 0.0, 30));
         assert!(target.pixels().iter().all(|p| p.alpha() == 0));
         assert!(
             queued.try_recv().is_err(),
@@ -416,7 +487,7 @@ mod tests {
         let (mut cache, queued) = test_cache();
         let mut target = Pixmap::new(34, 34).unwrap();
 
-        cache.draw(&mut target, &path, 2.0, 2.0, 30, 1.0);
+        cache.draw(&mut target, plain(&path, 2.0, 2.0, 30));
         assert!(
             target.pixels().iter().all(|p| p.alpha() == 0),
             "nothing yet"
@@ -426,16 +497,17 @@ mod tests {
             key,
             IconKey::Plain {
                 path: path.clone(),
-                size: 30
+                size: 30,
+                shape: IconShape::Square,
             }
         );
 
         // the same miss must not queue the decode twice
-        cache.draw(&mut target, &path, 2.0, 2.0, 30, 1.0);
+        cache.draw(&mut target, plain(&path, 2.0, 2.0, 30));
         assert!(queued.try_recv().is_err());
 
         cache.insert(generation, key, render(&path, 30));
-        cache.draw(&mut target, &path, 2.0, 2.0, 30, 1.0);
+        cache.draw(&mut target, plain(&path, 2.0, 2.0, 30));
         assert_eq!(target.pixel(17, 17).unwrap().alpha(), 255);
 
         let _ = std::fs::remove_file(&path);
@@ -448,12 +520,12 @@ mod tests {
         let (mut cache, queued) = test_cache();
         let mut target = Pixmap::new(34, 34).unwrap();
 
-        cache.draw(&mut target, &path, 2.0, 2.0, 30, 1.0);
+        cache.draw(&mut target, plain(&path, 2.0, 2.0, 30));
         let (generation, key) = queued.try_recv().unwrap();
         cache.clear();
         cache.insert(generation, key, render(&path, 30));
 
-        cache.draw(&mut target, &path, 2.0, 2.0, 30, 1.0);
+        cache.draw(&mut target, plain(&path, 2.0, 2.0, 30));
         assert!(
             target.pixels().iter().all(|p| p.alpha() == 0),
             "a dismissed show's icon stays out"
@@ -471,7 +543,7 @@ mod tests {
             let path = format!("builtin:{name}");
             let mut target = Pixmap::new(64, 64).unwrap();
             deliver(&mut cache, &path, 64);
-            cache.draw(&mut target, &path, 0.0, 0.0, 64, 1.0);
+            cache.draw(&mut target, plain(&path, 0.0, 0.0, 64));
             assert!(
                 target.pixels().iter().any(|p| p.alpha() > 0),
                 "{path} rendered empty"

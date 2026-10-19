@@ -95,7 +95,8 @@ directory) or a theme icon the Lua SDK's `wayrun.icon()` resolved; the same
 holds for an action's `icon`. A `builtin:` glyph, or a theme name or `papirus:`
 spec left unresolved, counts as no icon. A result whose own icon is missing
 falls back to the plugin's identity icon, and the built-in placeholder answers
-when that is missing too.
+when that is missing too. A row may set `icon_shape = "circle"` to clip its icon
+box, as an avatar needs.
 
 Every plugin names the API version it targets — a host in its `list_plugins`
 identity, a Lua script in its plugin table — and the launcher logs a mismatch

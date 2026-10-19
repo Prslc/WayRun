@@ -2,9 +2,10 @@ use std::rc::Rc;
 
 use cosmic_text::Weight;
 use tiny_skia::Pixmap;
+use wayrun_core::wire::IconShape;
 
 use crate::geom::PreviewKind;
-use crate::icons::IconCache;
+use crate::icons::{IconCache, IconDraw};
 use crate::text::{LINE_HEIGHT, Shaped, TextEngine};
 use crate::view::{Frame, PreviewView};
 
@@ -104,11 +105,14 @@ fn draw_image(
     let size = (square * canvas.scale).round().max(1.0) as u32;
     icons.draw(
         pixmap,
-        path,
-        canvas.px(square_x),
-        canvas.px(square_y),
-        size,
-        frame.opacity,
+        IconDraw {
+            path,
+            x: canvas.px(square_x),
+            y: canvas.px(square_y),
+            size,
+            opacity: frame.opacity,
+            shape: IconShape::Square,
+        },
     );
 }
 

@@ -127,6 +127,7 @@ fn do_search(expr: &str) -> Vec<ResultItem> {
                 summary: Some(expr.to_string()),
                 on_click: None,
                 icon: resolve("builtin:calculator"),
+                icon_shape: None,
                 actions: Vec::new(),
                 preview: None,
             }]

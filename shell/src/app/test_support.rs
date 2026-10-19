@@ -19,6 +19,7 @@ pub(super) fn item(
         summary: summary.map(str::to_string),
         on_click,
         icon: icon.map(str::to_string),
+        icon_shape: None,
         preview: None,
         actions: Vec::new(),
     }

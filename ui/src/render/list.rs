@@ -50,6 +50,7 @@ pub(super) fn draw_list(
             hovered: list.hovered == Some(index),
             icon: row.icon.as_deref(),
             icon_tint: None,
+            icon_shape: row.icon_shape.unwrap_or_default(),
             title: &row.title,
             bold: true,
             summary: row.summary.as_deref(),

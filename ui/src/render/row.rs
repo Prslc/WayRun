@@ -1,8 +1,9 @@
 use cosmic_text::Weight;
 use tiny_skia::Pixmap;
+use wayrun_core::wire::IconShape;
 
 use crate::geom;
-use crate::icons::IconCache;
+use crate::icons::{IconCache, IconDraw};
 use crate::text::TextEngine;
 use crate::view::Frame;
 
@@ -46,6 +47,7 @@ pub(super) struct RowBody<'a> {
     pub hovered: bool,
     pub icon: Option<&'a str>,
     pub icon_tint: Option<[u8; 3]>,
+    pub icon_shape: IconShape,
     pub title: &'a str,
     pub bold: bool,
     pub summary: Option<&'a str>,
@@ -77,15 +79,17 @@ pub(super) fn draw_row(
             canvas.px(rect.center_y() - font.icon() / 2.0),
         );
         let size = (font.icon() * canvas.scale).round() as u32;
+        let draw = IconDraw {
+            path,
+            x: pos.0,
+            y: pos.1,
+            size,
+            opacity: frame.opacity * body.alpha,
+            shape: body.icon_shape,
+        };
         match body.icon_tint {
-            Some(color) => {
-                let opacity = frame.opacity * body.alpha;
-                icons.draw_tinted(pixmap, path, pos, size, opacity, color);
-            }
-            None => {
-                let opacity = frame.opacity * body.alpha;
-                icons.draw(pixmap, path, pos.0, pos.1, size, opacity);
-            }
+            Some(color) => icons.draw_tinted(pixmap, draw, color),
+            None => icons.draw(pixmap, draw),
         }
     }
 

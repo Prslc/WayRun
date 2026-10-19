@@ -204,6 +204,7 @@ fn identity_card(meta: &Meta, summary: String) -> ResultItem {
         summary: Some(summary),
         on_click: None,
         icon: find_icon_spec(&meta.icon).or_else(|| Some(String::new())),
+        icon_shape: None,
         preview: None,
         actions: Vec::new(),
     }
@@ -257,6 +258,7 @@ mod tests {
                 cmd: command.to_string(),
             }),
             icon: None,
+            icon_shape: None,
             preview: None,
             actions: Vec::new(),
         }

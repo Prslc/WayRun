@@ -1,5 +1,6 @@
 use cosmic_text::Weight;
 use tiny_skia::Pixmap;
+use wayrun_core::wire::IconShape;
 
 use crate::geom;
 use crate::icons::IconCache;
@@ -67,6 +68,7 @@ pub(super) fn draw_actions(
             hovered: panel.hovered == Some(index),
             icon: action.icon.as_deref(),
             icon_tint: Some(theme.fg),
+            icon_shape: IconShape::Square,
             title: &action.title,
             bold: false,
             summary: None,

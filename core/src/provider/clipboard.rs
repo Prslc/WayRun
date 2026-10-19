@@ -82,6 +82,7 @@ impl Entry {
                 cmd: format!("cliphist decode {} | wl-copy", self.id),
             }),
             icon: icon.clone(),
+            icon_shape: None,
             preview: None,
             actions: Vec::new(),
         }

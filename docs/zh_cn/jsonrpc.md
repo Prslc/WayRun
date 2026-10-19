@@ -122,8 +122,8 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 ## 结果项
 
 `search` 与主机的 `top` 返回结果项数组。每个结果项是含以下键的对象——`title`、`summary`、
-`on_click` 与 `icon` **始终都在**（缺省的可选字段为 `null`，而非省略）；`preview` 与
-`actions` 仅在设置时出现：
+`on_click` 与 `icon` **始终都在**（缺省的可选字段为 `null`，而非省略）；`preview`、
+`actions` 与 `icon_shape` 仅在设置时出现：
 
 | 键 | 类型 | 含义 |
 |-----|------|------|
@@ -131,6 +131,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 | `summary` | string \| null | 副行（命令、路径、描述……） |
 | `on_click` | [`Action`](#动作) \| null | Enter 绑定的动作 |
 | `icon` | string \| null | 图标规范：绝对路径或 `builtin:` 字形；见 [图标规范](#图标规范) |
+| `icon_shape` | string | 可选；`"circle"` 把图标框裁成圆形，缺省按文件原样绘制 |
 | `preview` | object | 可选的分栏预览载荷：`{"type":"image","path":"/abs/file.png"}` 或 `{"type":"text","text":"…"}` |
 | `actions` | array | 可选，`Shift+Enter` 二级菜单的次级命令 |
 

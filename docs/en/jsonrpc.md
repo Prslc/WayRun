@@ -140,7 +140,8 @@ identity and its rows.
 
 `search`, and a host's `top`, return an array of items. Every item is an object
 with these keys — `title`, `summary`, `on_click` and `icon` are always present
-(`null` for an absent optional field); `preview` and `actions` only when set:
+(`null` for an absent optional field); `preview`, `actions` and `icon_shape`
+only when set:
 
 | Key | Type | Meaning |
 |-----|------|---------|
@@ -148,6 +149,7 @@ with these keys — `title`, `summary`, `on_click` and `icon` are always present
 | `summary` | string \| null | secondary line (command, path, description, …) |
 | `on_click` | [`Action`](#actions) \| null | action bound to Enter |
 | `icon` | string \| null | the icon spec, an absolute path or a `builtin:` glyph; see [Icon specs](#icon-specs) |
+| `icon_shape` | string | optional; `"circle"` clips the icon box to a circle, absent draws the file as it is |
 | `preview` | object | optional split-view payload, `{"type":"image","path":"/abs/file.png"}` or `{"type":"text","text":"…"}` |
 | `actions` | array | optional secondary commands for the `Shift+Enter` action panel |
 

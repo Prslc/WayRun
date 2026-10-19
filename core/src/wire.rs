@@ -77,12 +77,25 @@ pub enum Preview {
     Text { text: String },
 }
 
+/// The shape an icon box is clipped to; absent draws the icon as it is.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum IconShape {
+    #[default]
+    Square,
+    Circle,
+}
+
+/// One result row, shared by the core, the shell and the UI.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ResultItem {
     pub title: String,
     pub summary: Option<String>,
     pub on_click: Option<Action>,
     pub icon: Option<String>,
+    /// Clip the icon box to this shape; absent draws the file as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_shape: Option<IconShape>,
     /// An optional split-view payload for the selected row.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview: Option<Preview>,
@@ -134,3 +147,40 @@ pub const BUILTIN_GLYPHS: &[&str] = &[
 
 /// The spec a missing icon falls back to; its name is in [`BUILTIN_GLYPHS`].
 pub const BUILTIN_FALLBACK: &str = "builtin:app";
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn a_row_omits_an_unset_icon_shape() {
+        let row = ResultItem {
+            title: "x".into(),
+            summary: None,
+            on_click: None,
+            icon: None,
+            icon_shape: None,
+            preview: None,
+            actions: Vec::new(),
+        };
+        let value = serde_json::to_value(&row).unwrap();
+        assert!(value.get("icon_shape").is_none());
+    }
+
+    #[test]
+    fn a_circle_icon_shape_round_trips() {
+        let row: ResultItem = serde_json::from_value(json!({
+            "title": "x",
+            "summary": null,
+            "on_click": null,
+            "icon": "/a.png",
+            "icon_shape": "circle",
+        }))
+        .unwrap();
+        assert_eq!(row.icon_shape, Some(IconShape::Circle));
+        let value = serde_json::to_value(&row).unwrap();
+        assert_eq!(value["icon_shape"], "circle");
+    }
+}

@@ -34,6 +34,7 @@ use crate::app::{self, State as Launcher};
 use crate::session::backend::BackendEvent;
 use crate::session::ipc;
 use crate::wayland::ime::Pending;
+use wayrun_core::wire::IconShape;
 use wayrun_ui::config::{AppearanceConfig, Mode};
 use wayrun_ui::icons::{IconCache, IconKey};
 use wayrun_ui::text::TextEngine;
@@ -327,11 +328,13 @@ impl Shell {
                     // Each warm mirrors how the frame draws it: the row icon
                     // plain, the action glyphs tinted to their theme colour.
                     if let Some(path) = &row.icon {
-                        self.icons.warm(path, icon_size);
+                        self.icons
+                            .warm(path, icon_size, row.icon_shape.unwrap_or_default());
                     }
                     for action in &row.actions {
                         if let Some(path) = &action.icon {
-                            self.icons.warm_tinted(path, icon_size, fg);
+                            self.icons
+                                .warm_tinted(path, icon_size, fg, IconShape::Square);
                         }
                     }
                 }
