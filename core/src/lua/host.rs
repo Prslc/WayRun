@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::rc::Rc;
@@ -35,16 +35,25 @@ fn strip_shebang(source: &str) -> &str {
     }
 }
 
+/// Where the host writes its replies: stdout in `serve`, a capture in tests.
+type Sink = Rc<RefCell<Box<dyn Write>>>;
+
 struct Host {
     lua: Lua,
     script: String,
     plugins: Vec<Plugin>,
     active: kv::Active,
     log: Log,
+    out: Sink,
 }
 
 impl Host {
     fn new(script: &str, source: &str) -> Result<Self> {
+        let out: Sink = Rc::new(RefCell::new(Box::new(std::io::stdout())));
+        Self::with_sink(script, source, out)
+    }
+
+    fn with_sink(script: &str, source: &str, out: Sink) -> Result<Self> {
         // mlua's error carries no Send bound, so it converts here, once.
         let active: kv::Active = Rc::new(RefCell::new(None));
         let kv_paths: kv::Paths = Rc::new(RefCell::new(HashMap::new()));
@@ -96,12 +105,12 @@ impl Host {
             plugins,
             active,
             log,
+            out,
         })
     }
 
     fn serve(&self) -> Result<()> {
         let stdin = std::io::stdin();
-        let mut out = std::io::stdout();
         for line in stdin.lock().lines() {
             let line = line?;
             if line.trim().is_empty() {
@@ -111,7 +120,7 @@ impl Host {
                 Ok(request) => request,
                 Err(error) => {
                     respond_error(
-                        &mut out,
+                        &mut *self.out.borrow_mut(),
                         &json!(null),
                         -32700,
                         &format!("parse error: {error}"),
@@ -120,9 +129,11 @@ impl Host {
                 }
             };
             let id = request.get("id").cloned().unwrap_or(json!(null));
-            match self.dispatch(&request) {
-                Ok(result) => respond(&mut out, &id, result)?,
-                Err((code, message)) => respond_error(&mut out, &id, code, &message)?,
+            let outcome = self.dispatch(&request);
+            let mut out = self.out.borrow_mut();
+            match outcome {
+                Ok(result) => respond(&mut *out, &id, result)?,
+                Err((code, message)) => respond_error(&mut *out, &id, code, &message)?,
             }
         }
         Ok(())
@@ -133,6 +144,11 @@ impl Host {
         request: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, (i64, String)> {
         let params = request.get("params");
+        let id = request.get("id").cloned().unwrap_or(json!(null));
+        let stream = params
+            .and_then(|params| params.get("stream"))
+            .and_then(|stream| stream.as_bool())
+            .unwrap_or(false);
         match request.get("method").and_then(|method| method.as_str()) {
             Some("list_plugins") => Ok(json!(
                 self.plugins
@@ -152,11 +168,19 @@ impl Host {
                     .and_then(|params| params.get("text"))
                     .and_then(|text| text.as_str())
                     .unwrap_or("");
-                self.call(plugin, "search", plugin.search.as_ref(), text)
+                let emit = if stream {
+                    Some(
+                        self.emitter(plugin, &id)
+                            .map_err(|error| (-32000, error.to_string()))?,
+                    )
+                } else {
+                    None
+                };
+                self.call(plugin, "search", plugin.search.as_ref(), text, emit)
             }
             Some("top") => {
                 let plugin = self.plugin(params)?;
-                self.call(plugin, "top", plugin.top.as_ref(), ())
+                self.call(plugin, "top", plugin.top.as_ref(), (), None)
             }
             Some(other) => Err((-32601, format!("unknown method {other:?}"))),
             None => Err((-32600, "missing method".to_string())),
@@ -185,6 +209,7 @@ impl Host {
         method: &str,
         function: Option<&Function>,
         arg: A,
+        emit: Option<(Function, Rc<Cell<bool>>)>,
     ) -> std::result::Result<serde_json::Value, (i64, String)> {
         let Some(function) = function else {
             return Err((
@@ -194,52 +219,97 @@ impl Host {
         };
         *self.active.borrow_mut() = Some(plugin.id.clone());
         self.log.reset();
-        let returned: Value = function.call(arg).map_err(|error| {
+        let (emit, active) = match emit {
+            Some((emit, active)) => (Value::Function(emit), Some(active)),
+            None => (Value::Nil, None),
+        };
+        let mut args = arg
+            .into_lua_multi(&self.lua)
+            .map_err(|error| (-32000, format!("{method} failed: {error}")))?;
+        args.push_back(emit);
+        let returned = function.call(args);
+        if let Some(active) = active {
+            active.set(false);
+        }
+        let returned: Value = returned.map_err(|error| {
             warn(
                 &self.script,
                 &format!("plugin {} {method}: {error}", plugin.id),
             );
             (-32000, format!("{method} failed: {error}"))
         })?;
-        Ok(self.rows_json(plugin, returned))
+        Ok(rows_json(&self.lua, &self.script, &plugin.id, returned))
     }
 
-    /// A returned table as the wire shape: every row is deserialized into the
-    /// core's own [`ResultItem`], and one bad row is dropped, never the answer.
-    fn rows_json(&self, plugin: &Plugin, returned: Value) -> serde_json::Value {
-        let table = match returned {
-            Value::Nil => return json!([]),
-            Value::Table(table) => table,
-            other => {
-                warn(
-                    &self.script,
-                    &format!(
-                        "plugin {} returned {other:?}, not a table of rows",
-                        plugin.id
-                    ),
-                );
-                return json!([]);
+    /// The `emit` a streaming search receives: one `partial` line per call, with
+    /// the request's own id. The flag stops a saved function after its search.
+    fn emitter(
+        &self,
+        plugin: &Plugin,
+        id: &serde_json::Value,
+    ) -> mlua::Result<(Function, Rc<Cell<bool>>)> {
+        let out = Rc::clone(&self.out);
+        let script = self.script.clone();
+        let plugin = plugin.id.clone();
+        let id = id.clone();
+        let active = Rc::new(Cell::new(true));
+        let alive = Rc::clone(&active);
+        let emit = self.lua.create_function(move |lua, rows: Value| {
+            if !alive.get() {
+                return Err(mlua::Error::RuntimeError(
+                    "emit outside the search that received it".to_string(),
+                ));
             }
-        };
-        let mut rows = Vec::new();
-        for value in table.sequence_values::<Value>() {
-            let Ok(value) = value else { continue };
-            match self.lua.from_value::<ResultItem>(value) {
-                Ok(item) => {
-                    rows.push(serde_json::to_value(item).unwrap_or(serde_json::Value::Null))
-                }
-                Err(error) => warn(
-                    &self.script,
-                    &format!("plugin {} dropped a row: {error}", plugin.id),
-                ),
-            }
-        }
-        json!(rows)
+            let rows = rows_json(lua, &script, &plugin, rows);
+            respond_partial(&mut *out.borrow_mut(), &id, rows)
+                .map_err(|error| mlua::Error::RuntimeError(format!("partial: {error}")))
+        })?;
+        Ok((emit, active))
     }
+}
+
+/// A returned table as the wire shape: every row is deserialized into the
+/// core's own [`ResultItem`], and one bad row is dropped, never the answer.
+fn rows_json(lua: &Lua, script: &str, plugin: &str, returned: Value) -> serde_json::Value {
+    let table = match returned {
+        Value::Nil => return json!([]),
+        Value::Table(table) => table,
+        other => {
+            warn(
+                script,
+                &format!("plugin {plugin} returned {other:?}, not a table of rows"),
+            );
+            return json!([]);
+        }
+    };
+    let mut rows = Vec::new();
+    for value in table.sequence_values::<Value>() {
+        let Ok(value) = value else { continue };
+        match lua.from_value::<ResultItem>(value) {
+            Ok(item) => rows.push(serde_json::to_value(item).unwrap_or(serde_json::Value::Null)),
+            Err(error) => warn(script, &format!("plugin {plugin} dropped a row: {error}")),
+        }
+    }
+    json!(rows)
 }
 
 fn respond(out: &mut impl Write, id: &serde_json::Value, result: serde_json::Value) -> Result<()> {
     let line = json!({ "jsonrpc": "2.0", "result": result, "id": id });
+    writeln!(out, "{line}")?;
+    out.flush()?;
+    Ok(())
+}
+
+fn respond_partial(
+    out: &mut impl Write,
+    id: &serde_json::Value,
+    rows: serde_json::Value,
+) -> Result<()> {
+    let line = json!({
+        "jsonrpc": "2.0",
+        "method": "partial",
+        "params": { "id": id, "rows": rows },
+    });
     writeln!(out, "{line}")?;
     out.flush()?;
     Ok(())
@@ -263,6 +333,105 @@ mod tests {
 
     fn host(source: &str) -> Host {
         Host::new("/test/script.lua", source).unwrap()
+    }
+
+    struct Capture(Rc<RefCell<Vec<u8>>>);
+
+    impl Write for Capture {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.borrow_mut().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn host_with_sink(source: &str) -> (Host, Rc<RefCell<Vec<u8>>>) {
+        let buffer = Rc::new(RefCell::new(Vec::new()));
+        let out: Sink = Rc::new(RefCell::new(Box::new(Capture(Rc::clone(&buffer)))));
+        let host = Host::with_sink("/test/script.lua", source, out).unwrap();
+        (host, buffer)
+    }
+
+    #[test]
+    fn a_streaming_search_emits_partial_rows() {
+        let (host, buffer) = host_with_sink(
+            r#"
+            return { { id = "demo", search = function(text, emit)
+                assert(type(emit) == "function", "a streaming search has no emit")
+                emit({ { title = "first" }, { title = 5 } })
+                return { { title = "final" } }
+            end } }
+            "#,
+        );
+        let rows = host
+            .dispatch(&json!({
+                "method": "search",
+                "params": { "plugin": "demo", "text": "x", "stream": true },
+                "id": 17,
+            }))
+            .unwrap();
+        assert_eq!(rows[0]["title"], "final");
+
+        let out = String::from_utf8(buffer.borrow().clone()).unwrap();
+        let lines: Vec<serde_json::Value> = out
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["method"], "partial");
+        assert_eq!(lines[0]["params"]["id"], 17);
+        // one bad row is dropped, never the partial
+        assert_eq!(lines[0]["params"]["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(lines[0]["params"]["rows"][0]["title"], "first");
+    }
+
+    #[test]
+    fn a_plain_search_gets_no_emitter() {
+        let (host, buffer) = host_with_sink(
+            r#"
+            return { { id = "demo", search = function(text, emit)
+                return { { title = tostring(emit) } }
+            end } }
+            "#,
+        );
+        let rows = host
+            .dispatch(&json!({
+                "method": "search",
+                "params": { "plugin": "demo", "text": "x" },
+                "id": 1,
+            }))
+            .unwrap();
+        assert_eq!(rows[0]["title"], "nil");
+        assert!(buffer.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_saved_emitter_stops_after_its_search() {
+        let (host, _buffer) = host_with_sink(
+            r#"
+            local saved
+            return { { id = "demo", search = function(text, emit)
+                if text == "save" then
+                    saved = emit
+                    return {}
+                end
+                saved({ { title = "late" } })
+                return {}
+            end } }
+            "#,
+        );
+        let request = |text: &str| {
+            json!({
+                "method": "search",
+                "params": { "plugin": "demo", "text": text, "stream": true },
+                "id": 1,
+            })
+        };
+        assert!(host.dispatch(&request("save")).is_ok());
+        assert!(host.dispatch(&request("later")).is_err());
     }
 
     fn call(
