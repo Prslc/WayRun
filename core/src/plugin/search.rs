@@ -14,6 +14,7 @@ use rust_i18n::t;
 /// Run a search and surface its action panel: every row is decorated with its
 /// secondary commands.
 pub async fn dispatch(input: &str) -> Vec<ResultItem> {
+    crate::system::icon::remote_supersede();
     let items = search(input).await;
     decorate(items).await
 }

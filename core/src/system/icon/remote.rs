@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -13,6 +13,7 @@ const PREVIEW_MAX: u64 = 20 * 1024 * 1024;
 const CACHE_BYTES: u64 = 128 * 1024 * 1024;
 const CACHE_FILES: usize = 1024;
 const QUEUE: usize = 64;
+const WORKERS: usize = 4;
 const PRUNE_EVERY: usize = 32;
 const TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -22,13 +23,21 @@ struct Job {
     max_bytes: u64,
 }
 
+#[derive(Default)]
+struct State {
+    wanted: HashSet<String>,
+    in_flight: HashSet<String>,
+    failed: HashMap<String, Instant>,
+}
+
 type Notifier = Arc<dyn Fn(&str) + Send + Sync>;
 
 static STARTED: AtomicBool = AtomicBool::new(false);
+static PRUNED: AtomicBool = AtomicBool::new(false);
+static WRITTEN: AtomicUsize = AtomicUsize::new(0);
 static JOBS: OnceLock<std::sync::mpsc::SyncSender<Job>> = OnceLock::new();
 static NOTIFIER: OnceLock<Notifier> = OnceLock::new();
-static IN_FLIGHT: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Default::default);
-static FAILED: LazyLock<Mutex<HashMap<String, Instant>>> = LazyLock::new(Default::default);
+static STATE: LazyLock<Mutex<State>> = LazyLock::new(Default::default);
 
 /// Start the background fetcher; idempotent, as the core starts once per process.
 pub(crate) fn start(notify: impl Fn(&str) + Send + Sync + 'static) {
@@ -39,7 +48,16 @@ pub(crate) fn start(notify: impl Fn(&str) + Send + Sync + 'static) {
     let _ = JOBS.set(jobs);
     let notifier: Notifier = Arc::new(notify);
     let _ = NOTIFIER.set(notifier);
-    std::thread::spawn(move || worker(queue));
+    let queue = Arc::new(Mutex::new(queue));
+    for _ in 0..WORKERS {
+        let queue = Arc::clone(&queue);
+        std::thread::spawn(move || worker(queue));
+    }
+}
+
+/// Invalidate queued fetches: only rows the newest search asked for still load.
+pub(crate) fn supersede() {
+    STATE.lock().expect("icon queue").wanted.clear();
 }
 
 /// A host's result icon: an `https://` URL becomes a stable local cache path and
@@ -75,57 +93,71 @@ fn should_fetch(path: &Path) -> bool {
 }
 
 fn enqueue(url: &str, path: PathBuf, max_bytes: u64) {
-    if FAILED
-        .lock()
-        .expect("icon failures")
-        .get(url)
-        .is_some_and(|at| at.elapsed() < FAIL_TTL)
-    {
+    let Some(jobs) = JOBS.get() else {
         return;
-    }
+    };
     {
-        let mut in_flight = IN_FLIGHT.lock().expect("icon queue");
-        if !in_flight.insert(url.to_string()) {
+        let mut state = STATE.lock().expect("icon queue");
+        if state
+            .failed
+            .get(url)
+            .is_some_and(|at| at.elapsed() < FAIL_TTL)
+        {
+            return;
+        }
+        state.wanted.insert(url.to_string());
+        if !state.in_flight.insert(url.to_string()) {
             return;
         }
     }
-    let Some(jobs) = JOBS.get() else {
-        IN_FLIGHT.lock().expect("icon queue").remove(url);
-        return;
-    };
     let job = Job {
         url: url.to_string(),
         path,
         max_bytes,
     };
     if jobs.try_send(job).is_err() {
-        IN_FLIGHT.lock().expect("icon queue").remove(url);
+        STATE.lock().expect("icon queue").in_flight.remove(url);
     }
 }
 
-fn worker(queue: std::sync::mpsc::Receiver<Job>) {
-    prune();
+fn worker(queue: Arc<Mutex<std::sync::mpsc::Receiver<Job>>>) {
+    if !PRUNED.swap(true, Ordering::Relaxed) {
+        prune();
+    }
     let agent = agent();
-    let mut written = 0usize;
-    while let Ok(job) = queue.recv() {
+    loop {
+        let job = {
+            let queue = queue.lock().expect("icon queue");
+            queue.recv()
+        };
+        let Ok(job) = job else {
+            return;
+        };
+        {
+            let mut state = STATE.lock().expect("icon queue");
+            if !state.wanted.contains(&job.url) {
+                state.in_flight.remove(&job.url);
+                continue;
+            }
+        }
         let result = fetch(&agent, &job.url, &job.path, job.max_bytes);
-        IN_FLIGHT.lock().expect("icon queue").remove(&job.url);
+        let mut state = STATE.lock().expect("icon queue");
+        state.in_flight.remove(&job.url);
         match result {
             Ok(()) => {
+                drop(state);
                 if let Some(notify) = NOTIFIER.get() {
                     notify(&job.path.display().to_string());
                 }
-                written += 1;
-                if written.is_multiple_of(PRUNE_EVERY) {
+                if (WRITTEN.fetch_add(1, Ordering::Relaxed) + 1).is_multiple_of(PRUNE_EVERY) {
                     prune();
                 }
             }
             Err(()) => {
-                let mut failed = FAILED.lock().expect("icon failures");
-                if failed.len() >= 4096 {
-                    failed.clear();
+                if state.failed.len() >= 4096 {
+                    state.failed.clear();
                 }
-                failed.insert(job.url, Instant::now());
+                state.failed.insert(job.url, Instant::now());
             }
         }
     }
@@ -234,6 +266,9 @@ fn prune() {
     let mut files: Vec<(PathBuf, u64, SystemTime)> = entries
         .flatten()
         .filter_map(|entry| {
+            if entry.path().extension().is_some_and(|ext| ext == "tmp") {
+                return None;
+            }
             let meta = entry.metadata().ok()?;
             meta.is_file()
                 .then_some((entry.path(), meta.len(), meta.modified().ok()?))

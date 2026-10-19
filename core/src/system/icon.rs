@@ -17,6 +17,7 @@ use self::theme::{find_pixmap_icon, find_theme_icon};
 pub use self::mime::content_type_icon;
 pub(crate) use self::remote::{
     icon as remote_icon, preview as remote_preview, start as start_remote,
+    supersede as remote_supersede,
 };
 pub use self::theme::warn_if_no_icon_theme;
 

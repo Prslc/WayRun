@@ -273,6 +273,7 @@ impl Search {
     /// Drop the pending request, so a payload still in flight is not emitted.
     pub fn cancel(&self) {
         self.request.send_replace(None);
+        crate::system::icon::remote_supersede();
     }
 }
 
