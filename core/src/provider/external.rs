@@ -118,18 +118,17 @@ impl Plugin for External {
         full: &'a str,
         emit: Option<Emit>,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<ResultItem>>> + Send + 'a>> {
-        // A resident host answers one line per call; its reader streams in a
-        // later step, so it keeps the single answer for now.
-        if self.resident || emit.is_none() {
+        if emit.is_none() {
             return self.search(query, full);
         }
         let command = self.command.clone();
         let plugin = self.meta.id.to_string();
         let query = query.to_string();
         let icon = self.meta.icon.to_string();
-        Box::pin(
-            async move { query_external_streaming(&command, &plugin, &query, &icon, emit).await },
-        )
+        let resident = self.resident;
+        Box::pin(async move {
+            query_external_streaming(&command, resident, &plugin, &query, &icon, emit).await
+        })
     }
 
     fn default_view(
@@ -159,6 +158,23 @@ async fn host_call(
         super::resident::call(command, request, limit).await
     } else {
         rpc_call_within(command, request, limit).await
+    }
+}
+
+/// A call that forwards the host's `partial` notifications as they arrive; a
+/// resident host's reader task runs the callback, a forked host's reader too.
+async fn host_call_streaming(
+    command: &str,
+    resident: bool,
+    request: &serde_json::Value,
+    limit: std::time::Duration,
+    partial: impl FnMut(serde_json::Value) + Send + 'static,
+) -> Option<serde_json::Value> {
+    if resident {
+        super::resident::call_stream(command, request, limit, partial).await
+    } else {
+        let mut partial = partial;
+        rpc_call_streaming(command, request, limit, &mut partial).await
     }
 }
 
@@ -369,9 +385,10 @@ async fn query_external(
     Ok(parse_result_items(response, plugin, icon).unwrap_or_default())
 }
 
-/// A forked host's search with its `partial` notifications forwarded as rows.
+/// A host's search with its `partial` notifications forwarded as rows.
 async fn query_external_streaming(
     command: &str,
+    resident: bool,
     plugin: &str,
     text: &str,
     icon: &str,
@@ -387,27 +404,41 @@ async fn query_external_streaming(
         "params": { "plugin": plugin, "text": text, "stream": true },
         "id": next_id(),
     });
-    let mut last: Option<Vec<ResultItem>> = None;
-    let mut partial = |value: serde_json::Value| {
-        let Some(rows) = value
-            .get("params")
-            .and_then(|params| params.get("rows"))
-            .and_then(serde_json::Value::as_array)
-            .cloned()
-        else {
-            return;
-        };
-        let rows = parse_rows(rows, plugin, icon);
-        if let Some(emit) = &emit {
-            // Partial rows are best-effort; the final payload is the answer.
-            let _ = emit.try_send(rows.clone());
+    let last = std::sync::Arc::new(std::sync::Mutex::new(None::<Vec<ResultItem>>));
+    let partial = {
+        let last = std::sync::Arc::clone(&last);
+        let plugin = plugin.to_string();
+        let icon = icon.to_string();
+        move |value: serde_json::Value| {
+            let Some(rows) = value
+                .get("params")
+                .and_then(|params| params.get("rows"))
+                .and_then(serde_json::Value::as_array)
+                .cloned()
+            else {
+                return;
+            };
+            let rows = parse_rows(rows, &plugin, &icon);
+            if let Some(emit) = &emit {
+                // Partial rows are best-effort; the final payload is the answer.
+                let _ = emit.try_send(rows.clone());
+            }
+            *last.lock().unwrap_or_else(|error| error.into_inner()) = Some(rows);
         }
-        last = Some(rows);
     };
-    let Some(response) = rpc_call_streaming(command, &request, HOST_TIMEOUT, &mut partial).await
+    let Some(response) =
+        host_call_streaming(command, resident, &request, HOST_TIMEOUT, partial).await
     else {
+        let last = last
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
         return Ok(last.unwrap_or_default());
     };
+    let last = last
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .take();
     if let Some(row) = host_error(&response) {
         return Ok(vec![row]);
     }
@@ -761,7 +792,7 @@ printf '%s\n' '{"jsonrpc":"2.0","result":[{"title":"final"}],"id":1}'
 "#,
         );
         let (tx, mut rx) = tokio::sync::mpsc::channel(8);
-        let rows = query_external_streaming(&command, "demo", "x", "", Some(tx))
+        let rows = query_external_streaming(&command, false, "demo", "x", "", Some(tx))
             .await
             .unwrap();
         assert_eq!(rows.len(), 1);
@@ -782,7 +813,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"partial","params":{"id":1,"rows":[{"ti
 "#,
         );
         let (tx, mut rx) = tokio::sync::mpsc::channel(8);
-        let rows = query_external_streaming(&command, "demo", "x", "", Some(tx))
+        let rows = query_external_streaming(&command, false, "demo", "x", "", Some(tx))
             .await
             .unwrap();
         assert_eq!(rows[0].title, "kept");
