@@ -236,6 +236,6 @@ register it like any host — a single executable token, with the fields in
 For editor completion, point LuaLS's `Lua.workspace.library` at
 [`lua/wayrun.lua`](../../lua/wayrun.lua); it declares the same `wayrun` table.
 
-[firefox.lua](https://github.com/Prslc/WayRun-Plugins/blob/main/example/lua/firefox.lua)
-and [web.lua](https://github.com/Prslc/WayRun-Plugins/blob/main/example/lua/web.lua)
+[firefox.lua](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/firefox.lua)
+and [web.lua](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/web.lua)
 are complete worked examples, reading `places.sqlite` and the web respectively.

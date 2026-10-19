@@ -14,13 +14,14 @@
 
 </div>
 
-一款 Wayland 原生的 Linux 应用启动器与快速搜索工具。在悬浮窗口中输入关键词，即可搜索
-已安装应用与文件，并进行即时数学计算。
+一款 Wayland 原生的 Linux 应用启动器与快速搜索工具。在悬浮窗口中输入关键词，即可
+搜索已安装应用与文件，并进行即时数学计算。
 
 ## 概述
 
 整个项目只产出一个 Rust 可执行文件 `wayrun`：启动器本体，以及它通过 `--core` 使用的
-后端。覆盖层完全用软件光栅化进共享内存缓冲，因此不涉及 GPU 栈，也不依赖任何 GUI 工具包。
+后端。覆盖层完全用软件光栅化进共享内存缓冲，因此不涉及 GPU 栈，也不依赖任何 GUI
+工具包。
 
 ## 演示
 
@@ -30,17 +31,17 @@
 
 ## 功能特性
 
-- **应用启动** — 模糊搜索已安装应用，按桌面自身的方式启动，并逐行显示 Flatpak 应用与
+- **应用启动**：模糊搜索已安装应用，按桌面自身的方式启动，并逐行显示 Flatpak 应用与
   主题图标。
-- **快速搜索** — 文件与路径、剪贴板历史、`$PATH` 命令、打开的窗口、系统命令，
-  以及即时计算。
-- **二级菜单** — `Shift+Enter` 打开按类型区分的动作菜单（定位文件、运行
-  Desktop Action、复制链接）。
-- **可主题化** — 跟随 DankMaterialShell 的 Material You 调色板，并可用
-  `theme.toml` 覆盖配色、模糊、布局、字体与动效。
-- **可扩展** — 二进制内置 8 个插件；其余一切通过有文档的 JSON-RPC 契约作为外部主机
-  接入：可以用 Python（自带框架）写，也可以就是一个 Lua 脚本、由启动器本体运行。
-  `resident` 主机跨调用保温，每次调用约 1 毫秒。
+- **快速搜索**：文件与路径、剪贴板历史、`$PATH` 命令、打开的窗口、系统命令，以及
+  即时计算。
+- **动作面板**：`Shift+Enter` 打开按类型区分的动作面板（定位文件、运行 Desktop
+  Action、复制链接）。
+- **可主题化**：跟随 DankMaterialShell 的 Material You 调色板，并可用 `theme.toml`
+  覆盖配色、模糊、布局、字体与动效。
+- **可扩展**：二进制内置 8 个插件，其余都通过有文档的 JSON-RPC 契约作为外部主机接入。
+  可以用 Python（自带框架）写，也可以就是一个由启动器本体运行的 Lua 脚本。`resident`
+  主机会跨调用保留进程，每次调用约 1 毫秒。
 
 ## 环境要求
 
@@ -49,12 +50,12 @@
   Wayland 会话，以及基于 Mir 的合成器；GNOME/Mutter 未实现该协议，无法显示覆盖层。
 - Rust 工具链与常见系统库（GLib、SQLite、xkbcommon、fontconfig 等）；
   `cargo build --release` 会构建全部内容。
-- 覆盖中日文输入的字体（如 Source Han Sans）。
+- 覆盖中日韩（CJK）输入的字体（如 Source Han Sans）。
 
 ## 功能依赖
 
-覆盖层本身，以及内置的应用、文件与计算搜索，只需一个支持上述协议的合成器。其余
-功能各自还依赖一个可选组件；缺少时，对应前缀只会返回空结果，而不会报错。更多插件
+覆盖层本身，以及内置的应用、文件与计算搜索，只需要一个支持上述协议的合成器。其余
+功能各自还依赖一个可选组件；缺少时，对应前缀只返回空结果，不会报错。更多插件
 （Firefox 书签与历史、网页建议等）从
 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区安装：
 
@@ -72,12 +73,11 @@
 
 ## 插件
 
-上表所列的内置插件都编在二进制里。之外的一切都是"主机"：一个讲 JSON-RPC 子集的
-可执行文件，在 `plugins.toml` 注册，逐次 fork 或以 `resident = true` 保温。
+上表的内置插件都编在二进制里；除此之外的一切都是“主机”：一个使用 JSON-RPC 子集的
+可执行文件，在 `plugins.toml` 注册，每次调用新起进程，或用 `resident = true` 常驻。
 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区提供 Python 框架、
-示例（`firefox.lua`、`web.lua` 等）以及可复制的模板。Lua 插件就是
-一个脚本文件——由启动器二进制本体运行，无需安装解释器；见[插件](plugins.md)与
-[Lua 插件](lua.md)。
+示例（`firefox.lua`、`web.lua` 等）以及可复制的模板。Lua 插件就是一个脚本文件，由
+启动器二进制本体运行，无需安装解释器；见 [插件](plugins.md) 与 [Lua 插件](lua.md)。
 
 ## 快速开始
 
@@ -98,14 +98,14 @@ niri 与 Hyprland 的示例见[常驻模式](resident.md)：
 wayrun
 ```
 
-启动器以全屏覆盖方式打开，带调暗背景与居中卡片。默认的按热键拉起流程下，
-`Esc`/点击卡片外会退出；常驻模式下热键切换窗口，关闭改为隐藏。
+启动器以全屏覆盖打开，带调暗背景与居中卡片。默认的热键拉起方式下，`Esc` 或点击卡片
+外会退出；常驻模式下热键切换窗口，关闭改为隐藏。
 
 ## 合成器后端
 
 覆盖层与合成器无关；只有窗口搜索（`w`）需要按合成器单独编译，由 cargo feature 选择
 后端：`compositor-niri`（默认）与 `compositor-hyprland`（实验性）。只编译你要用的
-那一个；一个后端都不编译时，启动器照常运行，只是 `w` 没有结果。
+那一个；如果一个后端也不编译，启动器照常运行，只是 `w` 没有结果。
 
 ```bash
 cargo build --release                                            # niri
@@ -115,7 +115,7 @@ cargo build --release -p wayrun-shell --no-default-features      # 不做窗口�
 
 ## 性能
 
-常驻 core 的 warm 查询经 JSON-RPC 管道返回，含结果载荷，耗时 0.2–2 ms：
+常驻 core 的 warm（预热后）查询经 JSON-RPC 管道返回，含结果载荷，耗时 0.2–2 ms：
 
 | 查询 | 行数 | P50 | P95 |
 |---|---|---|---|
@@ -126,9 +126,9 @@ cargo build --release -p wayrun-shell --no-default-features      # 不做窗口�
 
 冷启动时首个 `ping` 回复为 10.0 ms，冷启动下的首次应用搜索为 24 ms。
 
-面板 warm 拉起（进程第一次之后的每次 show）首帧提交为 4.4 ms（P95 5.3 ms），
-进程第一次 show 约 10 ms。首帧是全透明的（入场从 alpha 0 开始），
-第一帧可见还要再等一个刷新周期；240 ms 淡入是刻意动画。
+面板 warm 拉起（进程第一次之后的每次显示）首帧提交为 4.4 ms（P95 5.3 ms），进程
+第一次显示约 10 ms。首帧是全透明的（入场从 alpha 0 开始），真正可见还要再等一个
+刷新周期；240 ms 的淡入是设计中的动画。
 
 <details>
 <summary>完整表格、冷启动与测量方法</summary>
@@ -172,37 +172,37 @@ warm 稳态（每次丢弃 3 轮 + 测量 30 轮，乱序）：
 | show | 10.1 ms | 4.4 ms | 5.3 ms |
 
 测量于 2026-10-18：AMD Ryzen 5 5500U（6c/12t，`performance` 调频）、Arch Linux、
-niri 26.04、release 构建。warm 行为对同一个常驻 `--core` 的同步 `search` 调用；
-cold 行每次启动全新进程，用 GNU time 计时；面板行测的是常驻实例 `toggle` 到
-首帧 commit（`WAYRUN_TIMING`）。读取真实 `$HOME`，42 MB 的文件索引
-覆盖 11.1 万个目录、74.2 万个文件。
-`ping` 是测量程序自身的往返下限；clipboard 与 window 行命中 500 ms 的 burst 缓存。
+niri 26.04、release 构建。warm 行是对同一个常驻 `--core` 的同步 `search` 调用；
+cold 行每次启动全新进程，用 GNU time 计时；面板行测的是常驻实例从 `toggle` 到首帧
+提交（`WAYRUN_TIMING`）。测试读取真实 `$HOME`，42 MB 的文件索引覆盖 11.1 万个目录、
+74.2 万个文件。`ping` 是测量程序自身的往返下限；clipboard 与 window 行命中 500 ms
+的短时缓存。
 
 </details>
 
 ## 文档
 
-- [使用说明](usage.md) —— 前缀、按键与剪贴板。
-- [常驻模式](resident.md) —— systemd 单元与控制命令。
-- [主题](theme.md) —— 系统调色板与 `theme.toml`（配色、模糊、布局、字体、动效）。
-- [配置](config.md) —— `config.toml`（搜索引擎、字体族）。
-- [插件](plugins.md) —— `plugins.toml`、内置插件与外部 JSON-RPC 主机。
-- [Lua 插件](lua.md) —— 由启动器自身承载的一个脚本：`wayrun` 表、沙箱与注册。
-- [JSON-RPC 2.0](jsonrpc.md) —— 通信协议与结果项 schema。
+- [使用说明](usage.md)：前缀、按键与剪贴板。
+- [常驻模式](resident.md)：systemd 单元与控制命令。
+- [主题](theme.md)：系统调色板与 `theme.toml`（配色、模糊、布局、字体、动效）。
+- [配置](config.md)：`config.toml`（界面语言、字体族）。
+- [插件](plugins.md)：`plugins.toml`、内置插件与外部 JSON-RPC 主机。
+- [Lua 插件](lua.md)：由启动器自身承载的一个脚本：`wayrun` 表、沙箱与注册。
+- [JSON-RPC 2.0](jsonrpc.md)：通信协议与结果项 schema。
 
 ## 致谢
 
-- **[Wox](https://github.com/wox-launcher/wox)** —— 本启动器的灵感来源。
-- **[tiny-skia](https://github.com/RazrFalcon/tiny-skia)** —— 覆盖层的软件光栅化。
-- **[cosmic-text](https://github.com/pop-os/cosmic-text)** —— 覆盖层的文本整形。
-- **[smithay-client-toolkit](https://github.com/Smithay/client-toolkit)** —— Wayland layer-shell 客户端管线。
+- **[Wox](https://github.com/wox-launcher/wox)**：本启动器的灵感来源。
+- **[tiny-skia](https://github.com/RazrFalcon/tiny-skia)**：覆盖层的软件光栅化。
+- **[cosmic-text](https://github.com/pop-os/cosmic-text)**：覆盖层的文本整形。
+- **[smithay-client-toolkit](https://github.com/Smithay/client-toolkit)**：Wayland layer-shell 客户端管线。
 
 ## 许可证
 
 WayRun 采用双许可证，可任选其一：
 
-- **MIT** —— [LICENSE-MIT](../../LICENSE-MIT)
-- **Apache-2.0** —— [LICENSE-APACHE](../../LICENSE-APACHE)
+- **MIT**：[LICENSE-MIT](../../LICENSE-MIT)
+- **Apache-2.0**：[LICENSE-APACHE](../../LICENSE-APACHE)
 
-内置 UI 字形为 Google Material Symbols，采用 Apache License 2.0；
-署名与许可证全文见 [ui/assets/icons/NOTICE](../../ui/assets/icons/NOTICE)。
+内置 UI 字形为 Google Material Symbols，采用 Apache License 2.0；署名与许可证全文见
+[ui/assets/icons/NOTICE](../../ui/assets/icons/NOTICE)。
