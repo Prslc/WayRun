@@ -2,6 +2,7 @@ use serde_json::{Value, json};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
+use crate::plugin::Emit;
 use crate::protocol;
 use crate::wire::{Action, ResultItem};
 
@@ -110,7 +111,7 @@ pub async fn handle(
             match search_text(params) {
                 Ok(text) if !text.is_empty() => {
                     if has_id {
-                        let results = crate::plugin::dispatch(&text).await;
+                        let results = crate::plugin::dispatch(&text, None).await;
                         respond_ok(tx, id, &results).await;
                     } else {
                         search.request(&text);
@@ -241,8 +242,8 @@ impl Search {
     /// Start the session's worker; it exits when the returned `Search` drops.
     pub fn spawn(tx: mpsc::Sender<String>) -> Self {
         let (request, rx) = watch::channel(None::<String>);
-        tokio::spawn(run_worker(rx, tx, |query| async move {
-            crate::plugin::dispatch(&query).await
+        tokio::spawn(run_worker(rx, tx, |query, emit| async move {
+            crate::plugin::dispatch(&query, emit).await
         }));
         Self { request }
     }
@@ -266,7 +267,7 @@ async fn run_worker<F, Fut>(
     tx: mpsc::Sender<String>,
     dispatch: F,
 ) where
-    F: Fn(String) -> Fut + Send + Sync + 'static,
+    F: Fn(String, Option<Emit>) -> Fut + Send + Sync + 'static,
     Fut: std::future::Future<Output = Vec<ResultItem>> + Send + 'static,
 {
     let dispatch = std::sync::Arc::new(dispatch);
@@ -274,34 +275,56 @@ async fn run_worker<F, Fut>(
         let Some(mut query) = rx.borrow_and_update().clone() else {
             continue;
         };
-        loop {
+        'next: loop {
             // Each query gets its own task: a panicking provider must not
             // silence the worker that answers every later search.
+            let (partial_tx, mut partial_rx) = mpsc::channel(8);
             let dispatch = std::sync::Arc::clone(&dispatch);
             let mut task = tokio::spawn({
                 let query = query.clone();
-                async move { dispatch(query).await }
+                async move { dispatch(query, Some(partial_tx)).await }
             });
-            tokio::select! {
-                joined = &mut task => {
-                    let Ok(results) = joined else { break };
-                    // A newer request, or a cancel, supersedes this payload.
-                    if !rx.has_changed().unwrap_or(true) {
-                        protocol::emit(&tx, &protocol::results_notification(&results)).await;
+            loop {
+                tokio::select! {
+                    joined = &mut task => {
+                        let Ok(results) = joined else { break 'next };
+                        // A newer request, or a cancel, supersedes this payload;
+                        // nothing from it may land after the change.
+                        if !rx.has_changed().unwrap_or(true) {
+                            // A payload emitted just before the task ended still shows.
+                            while let Ok(rows) = partial_rx.try_recv() {
+                                protocol::emit(
+                                    &tx,
+                                    &protocol::results_partial_notification(&rows),
+                                )
+                                .await;
+                            }
+                            protocol::emit(&tx, &protocol::results_notification(&results)).await;
+                        }
+                        break 'next;
                     }
-                    break;
-                }
-                changed = rx.changed() => {
-                    // The stale dispatch must not keep spending a host's time;
-                    // aborting drops a forked host along with its future.
-                    task.abort();
-                    if changed.is_err() {
-                        return;
+                    Some(rows) = partial_rx.recv() => {
+                        if !rx.has_changed().unwrap_or(true) {
+                            protocol::emit(
+                                &tx,
+                                &protocol::results_partial_notification(&rows),
+                            )
+                            .await;
+                        }
                     }
-                    let Some(next) = rx.borrow_and_update().clone() else {
+                    changed = rx.changed() => {
+                        // The stale dispatch must not keep spending a host's time;
+                        // aborting drops a forked host along with its future.
+                        task.abort();
+                        if changed.is_err() {
+                            return;
+                        }
+                        let Some(next) = rx.borrow_and_update().clone() else {
+                            break 'next;
+                        };
+                        query = next;
                         break;
-                    };
-                    query = next;
+                    }
                 }
             }
         }
@@ -377,6 +400,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_partial_payload_streams_before_the_final_one() {
+        let (tx, mut out) = mpsc::channel::<String>(8);
+        let (request, rx) = watch::channel(None::<String>);
+        let dispatch = |_query: String, emit: Option<Emit>| async move {
+            if let Some(emit) = emit {
+                let rows: Vec<ResultItem> =
+                    serde_json::from_value(json!([{ "title": "first" }])).unwrap();
+                let _ = emit.try_send(rows);
+            }
+            vec![serde_json::from_value(json!({ "title": "final" })).unwrap()]
+        };
+        tokio::spawn(run_worker(rx, tx, dispatch));
+        request.send_replace(Some("x".to_string()));
+
+        let first = tokio::time::timeout(std::time::Duration::from_secs(1), out.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let second = tokio::time::timeout(std::time::Duration::from_secs(1), out.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(first.contains("results_partial"), "{first}");
+        assert!(second.contains("results"), "{second}");
+    }
+
+    #[tokio::test]
     async fn a_superseded_search_aborts_its_dispatch() {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
@@ -386,7 +436,7 @@ mod tests {
         let (request, rx) = watch::channel(None::<String>);
         let dispatch = {
             let finished = Arc::clone(&finished);
-            move |query: String| {
+            move |query: String, _emit| {
                 let finished = Arc::clone(&finished);
                 async move {
                     if query == "slow" {

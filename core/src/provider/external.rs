@@ -1,15 +1,23 @@
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::Result;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
-use crate::plugin::{Meta, Plugin};
+use crate::plugin::{Emit, Meta, Plugin};
 use crate::system::icon::host_icon_spec;
 use crate::wire::{Preview, ResultItem};
 use rust_i18n::t;
+
+/// The id of the next host request; partial notifications carry it back.
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+
+fn next_id() -> u64 {
+    NEXT_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 /// Identity of one plugin as described by an external host's `list_plugins`.
 /// The host owns its own name/icon/ready hint; the core just relays them.
@@ -104,6 +112,26 @@ impl Plugin for External {
         Box::pin(async move { query_external(&command, resident, &plugin, &query, &icon).await })
     }
 
+    fn search_streaming<'a>(
+        &'a self,
+        query: &'a str,
+        full: &'a str,
+        emit: Option<Emit>,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<ResultItem>>> + Send + 'a>> {
+        // A resident host answers one line per call; its reader streams in a
+        // later step, so it keeps the single answer for now.
+        if self.resident || emit.is_none() {
+            return self.search(query, full);
+        }
+        let command = self.command.clone();
+        let plugin = self.meta.id.to_string();
+        let query = query.to_string();
+        let icon = self.meta.icon.to_string();
+        Box::pin(
+            async move { query_external_streaming(&command, &plugin, &query, &icon, emit).await },
+        )
+    }
+
     fn default_view(
         &self,
     ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<ResultItem>>>> + Send + '_>> {
@@ -134,59 +162,88 @@ async fn host_call(
     }
 }
 
-/// One fork-per-call round trip: spawn, write, close stdin, reap, return the
-/// first parseable response line; `None` on a missing or stalled host.
+/// One fork-per-call round trip with no partial sink.
 async fn rpc_call_within(
     command: &str,
     request: &serde_json::Value,
     limit: std::time::Duration,
 ) -> Option<serde_json::Value> {
+    rpc_call_streaming(command, request, limit, &mut |_| {}).await
+}
+
+/// One fork-per-call round trip: write the request, close stdin, then read the
+/// host's lines; an id-less line is a partial, the first with an id the reply.
+async fn rpc_call_streaming(
+    command: &str,
+    request: &serde_json::Value,
+    limit: std::time::Duration,
+    partial: &mut impl FnMut(serde_json::Value),
+) -> Option<serde_json::Value> {
     let mut req_str = serde_json::to_string(request).ok()?;
     req_str.push('\n');
 
-    let mut child = Command::new(command)
-        // The deadline drops `wait_with_output`'s future; without this the host
-        // would keep running (and keep holding whatever it is stuck on).
-        .kill_on_drop(true)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::inherit())
-        .spawn()
-        .ok()?; // command not found -> no host
+    let mut tries = 0;
+    let mut child = loop {
+        // The deadline drops the exchange; without this the host would keep
+        // running (and keep holding whatever it is stuck on).
+        let spawned = Command::new(command)
+            .kill_on_drop(true)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::inherit())
+            .spawn();
+        match spawned {
+            Ok(child) => break child,
+            // Another thread's fork held a just-written script open until it
+            // exec'd; a brief retry outlasts that window.
+            Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 3 => {
+                tries += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+            }
+            Err(_) => return None, // command not found -> no host
+        }
+    };
+
+    let stdout = child.stdout.take()?;
+    let mut lines = tokio::io::BufReader::new(stdout).lines();
 
     // The whole exchange is bounded: a host that never reads stdin cannot block
-    // the write past the deadline.
+    // the write past the deadline, and draining stdout lets it exit.
     let exchange = async {
         if let Some(mut stdin) = child.stdin.take() {
             stdin.write_all(req_str.as_bytes()).await?;
             drop(stdin); // close stdin so the host sees EOF (one-shot)
         }
-        // `wait_with_output` drains stdout/stderr and reaps the child in one step;
-        // reading stdout then `wait()` separately can double-poll the join handle.
-        child.wait_with_output().await
+        let mut reply = None;
+        while let Ok(Some(line)) = lines.next_line().await {
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            if value.get("id").is_some() {
+                reply.get_or_insert(value);
+                continue;
+            }
+            partial(value);
+        }
+        let _ = child.wait().await;
+        Ok::<_, std::io::Error>(reply)
     };
 
-    let output = match tokio::time::timeout(limit, exchange).await {
-        Ok(Ok(output)) => output,
+    match tokio::time::timeout(limit, exchange).await {
+        Ok(Ok(reply)) => reply,
         Ok(Err(err)) => {
             // The core has no logging crate; stderr reaches the unit's journal.
             eprintln!("wayrun-core: external host {command} failed: {err}");
-            return None;
+            None
         }
         Err(_) => {
             eprintln!(
                 "wayrun-core: external host {command} overran {}ms and was killed",
                 limit.as_millis()
             );
-            return None;
+            None
         }
-    };
-
-    let out = std::str::from_utf8(&output.stdout).unwrap_or_default();
-    out.lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .find_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+    }
 }
 
 /// Ask the host who it serves. Empty when the host is missing, stalled or not
@@ -195,7 +252,7 @@ pub async fn discover(command: &str, resident: bool) -> Vec<HostMeta> {
     let request = serde_json::json!({
         "jsonrpc": "2.0",
         "method": "list_plugins",
-        "id": 1,
+        "id": next_id(),
     });
     let Some(response) = host_call(command, resident, &request, HOST_TIMEOUT).await else {
         eprintln!(
@@ -245,6 +302,12 @@ fn parse_result_items(
         serde_json::Value::Array(items) => items,
         _ => return None,
     };
+    Some(parse_rows(items, plugin, icon))
+}
+
+/// One payload's rows with their icons, previews and actions resolved; a row
+/// that does not deserialize is dropped, never the payload.
+fn parse_rows(items: Vec<serde_json::Value>, plugin: &str, icon: &str) -> Vec<ResultItem> {
     let mut parsed: Vec<ResultItem> = items
         .into_iter()
         .filter_map(|item| serde_json::from_value(item).ok())
@@ -277,7 +340,7 @@ fn parse_result_items(
             action.plugin = Some(owner.clone());
         }
     }
-    Some(parsed)
+    parsed
 }
 
 async fn query_external(
@@ -295,7 +358,7 @@ async fn query_external(
         "jsonrpc": "2.0",
         "method": "search",
         "params": { "plugin": plugin, "text": text },
-        "id": 1,
+        "id": next_id(),
     });
     let Some(response) = host_call(command, resident, &request, HOST_TIMEOUT).await else {
         return Ok(Vec::new());
@@ -304,6 +367,53 @@ async fn query_external(
         return Ok(vec![row]);
     }
     Ok(parse_result_items(response, plugin, icon).unwrap_or_default())
+}
+
+/// A forked host's search with its `partial` notifications forwarded as rows.
+async fn query_external_streaming(
+    command: &str,
+    plugin: &str,
+    text: &str,
+    icon: &str,
+    emit: Option<Emit>,
+) -> Result<Vec<ResultItem>> {
+    if text.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "search",
+        "params": { "plugin": plugin, "text": text, "stream": true },
+        "id": next_id(),
+    });
+    let mut last: Option<Vec<ResultItem>> = None;
+    let mut partial = |value: serde_json::Value| {
+        let Some(rows) = value
+            .get("params")
+            .and_then(|params| params.get("rows"))
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+        else {
+            return;
+        };
+        let rows = parse_rows(rows, plugin, icon);
+        if let Some(emit) = &emit {
+            // Partial rows are best-effort; the final payload is the answer.
+            let _ = emit.try_send(rows.clone());
+        }
+        last = Some(rows);
+    };
+    let Some(response) = rpc_call_streaming(command, &request, HOST_TIMEOUT, &mut partial).await
+    else {
+        return Ok(last.unwrap_or_default());
+    };
+    if let Some(row) = host_error(&response) {
+        return Ok(vec![row]);
+    }
+    Ok(parse_result_items(response, plugin, icon)
+        .or(last)
+        .unwrap_or_default())
 }
 
 /// A host's `search` error becomes one display-only row, so a plugin that raises
@@ -338,7 +448,7 @@ async fn query_default(
         "jsonrpc": "2.0",
         "method": "top",
         "params": { "plugin": plugin },
-        "id": 1,
+        "id": next_id(),
     });
     let Some(response) = host_call(command, resident, &request, HOST_TIMEOUT).await else {
         return Ok(None);
@@ -627,5 +737,55 @@ mod tests {
             "gave up on the deadline, not on the host: {:?}",
             started.elapsed()
         );
+    }
+
+    fn streaming_host(dir: &tempfile::TempDir, name: &str, body: &str) -> String {
+        let path = dir.path().join(name);
+        std::fs::write(&path, body).unwrap();
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+        std::fs::set_permissions(&path, perms).unwrap();
+        path.display().to_string()
+    }
+
+    #[tokio::test]
+    async fn a_streaming_host_answers_with_its_partials() {
+        let dir = tempfile::tempdir().unwrap();
+        let command = streaming_host(
+            &dir,
+            "stream.sh",
+            r#"#!/bin/sh
+read line
+printf '%s\n' '{"jsonrpc":"2.0","method":"partial","params":{"id":1,"rows":[{"title":"first"}]}}'
+printf '%s\n' '{"jsonrpc":"2.0","result":[{"title":"final"}],"id":1}'
+"#,
+        );
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let rows = query_external_streaming(&command, "demo", "x", "", Some(tx))
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].title, "final");
+        let partial = rx.try_recv().expect("the partial was forwarded");
+        assert_eq!(partial[0].title, "first");
+    }
+
+    #[tokio::test]
+    async fn a_host_that_dies_after_its_partial_keeps_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let command = streaming_host(
+            &dir,
+            "half.sh",
+            r#"#!/bin/sh
+read line
+printf '%s\n' '{"jsonrpc":"2.0","method":"partial","params":{"id":1,"rows":[{"title":"kept"}]}}'
+"#,
+        );
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let rows = query_external_streaming(&command, "demo", "x", "", Some(tx))
+            .await
+            .unwrap();
+        assert_eq!(rows[0].title, "kept");
+        assert!(rx.try_recv().is_ok());
     }
 }

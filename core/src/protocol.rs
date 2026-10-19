@@ -38,6 +38,16 @@ pub fn results_notification(items: &[ResultItem]) -> Notification<&[ResultItem]>
     }
 }
 
+/// A streaming search's intermediate payload: the shell shows the rows but
+/// keeps the search pending until the final `results` arrives.
+pub fn results_partial_notification(items: &[ResultItem]) -> Notification<&[ResultItem]> {
+    Notification {
+        jsonrpc: "2.0",
+        method: "results_partial",
+        params: items,
+    }
+}
+
 #[derive(serde::Serialize)]
 pub struct ImageReady<'a> {
     pub path: &'a str,

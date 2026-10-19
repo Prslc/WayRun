@@ -28,6 +28,9 @@ pub struct Meta {
     pub ready: String,
 }
 
+/// A partial payload from a streaming host, already parsed into rows.
+pub type Emit = tokio::sync::mpsc::Sender<Vec<ResultItem>>;
+
 pub trait Plugin: Send + Sync {
     fn meta(&self) -> &Meta;
     fn search(
@@ -35,6 +38,17 @@ pub trait Plugin: Send + Sync {
         query: &str,
         full: &str,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<ResultItem>>> + Send + '_>>;
+
+    /// A search that may report partial payloads while it runs; a provider that
+    /// cannot stream ignores the emitter and answers once.
+    fn search_streaming<'a>(
+        &'a self,
+        query: &'a str,
+        full: &'a str,
+        _emit: Option<Emit>,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<ResultItem>>> + Send + 'a>> {
+        self.search(query, full)
+    }
 
     /// A search that reports how each row matched, for a caller that merges
     /// several providers; the default numbers [`Plugin::search`]'s rows as listed.

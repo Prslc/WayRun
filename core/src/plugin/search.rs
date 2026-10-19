@@ -13,13 +13,13 @@ use rust_i18n::t;
 
 /// Run a search and surface its action panel: every row is decorated with its
 /// secondary commands.
-pub async fn dispatch(input: &str) -> Vec<ResultItem> {
+pub async fn dispatch(input: &str, emit: Option<super::Emit>) -> Vec<ResultItem> {
     crate::system::icon::remote_supersede();
-    let items = search(input).await;
+    let items = search(input, emit).await;
     decorate(items).await
 }
 
-async fn search(input: &str) -> Vec<ResultItem> {
+async fn search(input: &str, emit: Option<super::Emit>) -> Vec<ResultItem> {
     ensure_loaded().await;
     // A search that names a keyword only wakes that plugin's host; `?` lists
     // every name, so it resolves them all. A plain query wakes none.
@@ -77,7 +77,10 @@ async fn search(input: &str) -> Vec<ResultItem> {
         }
 
         for entry in reg.iter().filter(|e| e.keyword == keyword) {
-            if let Ok(results) = entry.plugin.search(query, input).await
+            if let Ok(results) = entry
+                .plugin
+                .search_streaming(query, input, emit.clone())
+                .await
                 && !results.is_empty()
             {
                 return fill_icons(&entry.plugin.meta().icon, results);
