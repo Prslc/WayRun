@@ -1,4 +1,5 @@
 mod builtin;
+mod raster;
 mod render;
 
 use std::collections::{HashMap, HashSet};
