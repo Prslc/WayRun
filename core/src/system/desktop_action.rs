@@ -77,9 +77,8 @@ pub fn entry(id: &str, locales: Option<&[String]>) -> Option<DesktopEntry> {
     DesktopEntry::from_path(&path, locales).ok()
 }
 
-/// The locale list every `.desktop` read localises through, from
-/// `g_get_language_names()`; `.encoding` variants are dropped so `zh_CN` matches.
-/// One list for the whole core, so a row and the `%c` it launches with agree.
+/// The locale list every `.desktop` read uses, from `g_get_language_names()`;
+/// `.encoding` variants are dropped so `zh_CN` matches; rows and their `%c` agree.
 pub fn locales() -> Vec<String> {
     locales_from(gio::glib::language_names().into_iter().map(Into::into))
 }
