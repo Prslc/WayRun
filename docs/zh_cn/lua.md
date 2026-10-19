@@ -98,12 +98,14 @@ actions = {
 | `wayrun.script_dir()` | 脚本自身所在目录，用于携带图标等文件 |
 | `wayrun.import(name)` | 在同一个沙箱里加载 `<script_dir>/<name>.lua` 并缓存其值；返回 nil 时缓存为 true；循环或越界 import 会报错 |
 | `wayrun.plugin_dir(id)` | 插件可读目录：`$XDG_CONFIG_HOME/wayrun/plugins/<id>` |
-| `wayrun.fs.read(name)` | 读取文件：相对名在插件目录下，绝对/`~/` 路径须在声明区域或脚本目录内；缺失返回 nil，越界报错 |
+| `wayrun.plugin_cache_dir(id)` | 插件可写缓存目录：`$XDG_CACHE_HOME/wayrun/plugins/<id>` |
+| `wayrun.fs.read(name)` | 读取文件：相对名在插件目录下，绝对/`~/` 路径须在声明区域、插件目录、缓存目录或脚本目录内；缺失返回 nil，越界报错 |
 | `wayrun.toml.decode(text)` | TOML 进，表出 |
 | `wayrun.json.decode(text)` / `wayrun.json.encode(value)` | JSON 进出 |
 | `wayrun.fs.list(dir)` | 上述位置中某目录下按名称排序的条目名，否则 nil |
 | `wayrun.fs.stat(path)` | 上述位置中路径的 `{ mtime_ns, size }`，否则 nil |
-| `wayrun.fs.write(path, data)` | 把字符串写入插件目录（自动创建父目录）；成功返回 true；`kv.db` 及其兄弟文件为 `kv` 保留 |
+| `wayrun.fs.write(path, data)` | 把字符串写入插件目录或缓存目录（自动创建父目录）；成功返回 true；`kv.db` 及其兄弟文件为 `kv` 保留 |
+| `wayrun.fs.delete(path)` | 删除插件目录或缓存目录中的文件；文件本就不存在时也返回 true |
 | `wayrun.http.get(url, params?, options?)` | 阻塞式 GET，返回 `{status, headers, body}`；传输错误会报错；`params` 追加查询参数，其保留键 `headers` 为请求头表；`options` 是带 `timeout_ms`、`headers`、`ttl` 的表，或直接给一个毫秒数作为超时 |
 | `wayrun.http.post(url, params?, options?)` | 同上，发送一个 body：`json = value`、`form = {…}` 或 `body = "…"` 三选一；从不缓存 |
 | `wayrun.crypto.sha256(text)` / `wayrun.crypto.md5(text)` | 小写十六进制摘要 |
@@ -126,9 +128,10 @@ actions = {
 
 `os`、`io`、`package` 与 `load` 均不可达：脚本起不了进程。读取受路径限制：相对名
 落在插件自己的目录（`$XDG_CONFIG_HOME/wayrun/plugins/<id>/`）下，绝对或 `~/` 路径
-必须位于声明区域、插件目录或脚本目录内；`sqlite.snapshot` 用同一规则。写入范围更窄：
-`fs.write` 只能在插件自己的目录内（自动创建父目录），并拒绝 `kv.db` 及其
-`-wal`/`-shm`/`-journal` 兄弟文件；`kv` 保持自己的存储。
+必须位于声明区域、插件目录、缓存目录或脚本目录内；`sqlite.snapshot` 用同一规则。写入范围限于
+插件自己的目录或缓存目录（自动创建父目录）：相对名落在插件目录；配置目录里的
+`kv.db` 及其 `-wal`/`-shm`/`-journal` 兄弟文件保留给 `kv`。`fs.delete` 可以从这
+两处删除文件。
 
 `wayrun.env` 只能读当前插件在调用中声明的名字，`http` 可访问网络。`print` 与
 `wayrun.log` 写入启动器的 journal，绝不写 stdout（stdout 是 JSON-RPC 通道），且每次
@@ -199,8 +202,9 @@ local strings = wayrun.json.decode(text or "{}")
 - 行序即脚本返回的顺序；没有相关度通道。
 - 图标遵循 [plugins.md](plugins.md#外部主机) 的规则：脚本自带的文件，或
   `wayrun.icon(name)` 解析出的主题图标。网络图片也由脚本自己处理：用
-  `wayrun.http.get` 取回字节，用 `wayrun.fs.write` 写进 `wayrun.plugin_dir(id)`，
-  再把该目录与文件名拼成绝对路径作为 `icon` 返回；缓存与刷新由脚本负责。
+  `wayrun.http.get` 取回字节，用 `wayrun.fs.write` 写进
+  `wayrun.plugin_cache_dir(id)`，再把该目录与文件名拼成绝对路径作为 `icon`
+  返回；用 `wayrun.fs.delete` 清理旧缓存。
 
 ## 注册
 

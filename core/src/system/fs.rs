@@ -32,9 +32,14 @@ pub fn create_dir_private(dir: &Path) -> std::io::Result<()> {
         .create(dir)
 }
 
+/// `$XDG_CACHE_HOME/wayrun` (or `~/.cache/wayrun`), not created.
+pub fn cache_root() -> Option<PathBuf> {
+    Some(dirs::cache_dir()?.join("wayrun"))
+}
+
 /// `$XDG_CACHE_HOME/wayrun` (or `~/.cache/wayrun`), created on demand.
 pub fn cache_dir() -> Option<PathBuf> {
-    let dir = dirs::cache_dir()?.join("wayrun");
+    let dir = cache_root()?;
     create_dir_private(&dir).ok()?;
     Some(dir)
 }

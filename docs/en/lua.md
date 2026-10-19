@@ -106,12 +106,14 @@ A row with no `on_click` is display-only; it can still carry `actions`.
 | `wayrun.script_dir()` | the script's own directory, for an icon it ships |
 | `wayrun.import(name)` | loads `<script_dir>/<name>.lua` in the same sandbox and caches its value; a nil return becomes true; a circular or escaping import raises |
 | `wayrun.plugin_dir(id)` | the directory a plugin may read from, `$XDG_CONFIG_HOME/wayrun/plugins/<id>` |
-| `wayrun.fs.read(name)` | a file: a relative name under the plugin directory, or an absolute/`~/` path in a declared area or the script's directory; nil when absent, an error when it escapes |
+| `wayrun.plugin_cache_dir(id)` | the writable cache for a plugin, `$XDG_CACHE_HOME/wayrun/plugins/<id>` |
+| `wayrun.fs.read(name)` | a file: a relative name under the plugin directory, or an absolute/`~/` path in a declared area, the plugin's directory, its cache, or the script's directory; nil when absent, an error when it escapes |
 | `wayrun.toml.decode(text)` | TOML in, a table out |
 | `wayrun.json.decode(text)` / `wayrun.json.encode(value)` | JSON in and out |
 | `wayrun.fs.list(dir)` | sorted entry names under a directory in those places, or nil |
 | `wayrun.fs.stat(path)` | `{ mtime_ns, size }` for a path in those places, or nil |
-| `wayrun.fs.write(path, data)` | writes a string into the plugin directory (parents created); true on success; `kv.db` and its siblings are reserved |
+| `wayrun.fs.write(path, data)` | writes a string into the plugin directory or its cache (parents created); true on success; `kv.db` and its siblings are reserved |
+| `wayrun.fs.delete(path)` | removes a file in the plugin directory or its cache; true when it is already absent |
 | `wayrun.http.get(url, params?, options?)` | blocking GET answering `{status, headers, body}`; a transport error raises; `params` adds query values and takes a reserved `headers` table; `options` is a table with `timeout_ms`, `headers` and `ttl`, or a bare timeout in ms |
 | `wayrun.http.post(url, params?, options?)` | the same, sending one body: `json = value`, `form = {…}` or `body = "…"`; never cached |
 | `wayrun.crypto.sha256(text)` / `wayrun.crypto.md5(text)` | lowercase hex digest |
@@ -138,11 +140,12 @@ for `pcall` rather than dying as a killed host.
 run programs. Reading is scoped by path: a relative name resolves under the
 plugin's own directory (`$XDG_CONFIG_HOME/wayrun/plugins/<id>/`), while an
 absolute or `~/` path must lie in a declared read area, the plugin's directory,
-or the script's directory; `sqlite.snapshot` uses the same rule. Writing is
-narrower: `fs.write` stays inside the plugin's own directory (parents are
-created) and refuses `kv.db` and its `-wal`/`-shm`/`-journal` siblings; `kv`
-keeps its own store. `wayrun.env` reads only the names the calling plugin
-declares, and `http` reaches the network. `print` and `wayrun.log` write to the
+its cache, or the script's directory; `sqlite.snapshot` uses the same rule. Writing is
+narrower: `fs.write` stays inside the plugin's own directory or its cache
+(parents are created); relative names land in the config directory, where
+`kv.db` and its `-wal`/`-shm`/`-journal` siblings stay reserved. `fs.delete`
+removes files from either place. `wayrun.env` reads only the names the calling
+plugin declares, and `http` reaches the network. `print` and `wayrun.log` write to the
 launcher's journal, never to stdout (stdout is the JSON-RPC wire), and both are
 bounded per call. The sandbox bounds what a script can do; what it can read is
 what the plugin's `env` and `read` declare. A call that raises yields no rows
@@ -222,8 +225,8 @@ A host in another language reads the same value from `$WAYRUN_LOCALE`.
 - Icons follow the rule in [plugins.md](plugins.md#external-hosts): a file the
   script ships, or a theme icon `wayrun.icon(name)` resolved. A remote image is
   the script's job too: fetch the bytes with `wayrun.http.get`, write them with
-  `wayrun.fs.write` into `wayrun.plugin_dir(id)`, and return that directory
-  joined with the file name; cache and refresh it yourself.
+  `wayrun.fs.write` into `wayrun.plugin_cache_dir(id)`, and return that
+  directory joined with the file name; use `wayrun.fs.delete` to evict.
 
 ## Registering
 

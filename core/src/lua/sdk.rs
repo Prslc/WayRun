@@ -29,6 +29,11 @@ pub(super) fn plugin_dir(id: &str) -> Option<PathBuf> {
     Some(crate::config::dir()?.join("plugins").join(id))
 }
 
+/// `$XDG_CACHE_HOME/wayrun/plugins/<id>`, created on demand by `fs.write`.
+pub(super) fn plugin_cache_dir(id: &str) -> Option<PathBuf> {
+    Some(crate::system::fs::cache_root()?.join("plugins").join(id))
+}
+
 /// The scope handles a script's bindings share: filled after the plugin table
 /// is read, then resolved by id at call time.
 pub(super) struct Shared {
@@ -147,6 +152,12 @@ pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua:
         })?,
     )?;
     sdk.set(
+        "plugin_cache_dir",
+        lua.create_function(|_, id: String| {
+            Ok(plugin_cache_dir(&id).map(|dir| dir.display().to_string()))
+        })?,
+    )?;
+    sdk.set(
         "log",
         lua.create_function(move |_, message: String| {
             log.write(&message);
@@ -164,9 +175,10 @@ pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua:
             let Some(own) = plugin_dir(&id) else {
                 return Err("no plugin directory".to_string());
             };
+            let cache = plugin_cache_dir(&id);
             let areas = read_areas.borrow();
             let declared = areas.get(&id).map(Vec::as_slice).unwrap_or(&[]);
-            read_path(&own, declared, script.as_deref(), path)
+            read_path(&own, cache.as_deref(), declared, script.as_deref(), path)
         })
     };
     let write_guard: areas::Guard = {
@@ -178,7 +190,7 @@ pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua:
             let Some(own) = plugin_dir(&id) else {
                 return Err("no plugin directory".to_string());
             };
-            write_path(&own, path)
+            write_path(&own, plugin_cache_dir(&id).as_deref(), path)
         })
     };
     sdk.set("json", json_lib(lua)?)?;
@@ -341,6 +353,7 @@ fn toml_lib(lua: &Lua) -> mlua::Result<Table> {
 /// and `~/` paths must lie in a declared area, that directory or the script's.
 fn read_path(
     own: &Path,
+    cache: Option<&Path>,
     declared: &[PathBuf],
     script: Option<&Path>,
     path: &str,
@@ -350,32 +363,42 @@ fn read_path(
     }
     let mut roots = declared.to_vec();
     roots.push(own.to_path_buf());
+    if let Some(cache) = cache {
+        roots.push(cache.to_path_buf());
+    }
     if let Some(dir) = script {
         roots.push(dir.to_path_buf());
     }
     areas::check(&roots, path)
 }
 
-/// A write path: only inside the plugin's own directory, and never the store.
-fn write_path(own: &Path, path: &str) -> Result<PathBuf, String> {
+/// A write path: the plugin directory or its cache, never the kv store.
+fn write_path(own: &Path, cache: Option<&Path>, path: &str) -> Result<PathBuf, String> {
+    let own = areas::resolve(own);
+    let cache = cache.map(areas::resolve);
     let resolved = if areas::relative(path) {
-        areas::inside(own, path)?
+        areas::inside(&own, path)?
     } else {
         let Some(expanded) = areas::expand(path) else {
             return Err("the name must be absolute or start with ~/".to_string());
         };
         let resolved = areas::resolve(&expanded);
-        if !resolved.starts_with(areas::resolve(own)) {
-            return Err("writes stay inside the plugin directory".to_string());
+        let in_cache = cache
+            .as_ref()
+            .is_some_and(|cache| resolved.starts_with(cache));
+        if !resolved.starts_with(&own) && !in_cache {
+            return Err("writes stay inside the plugin directory or its cache".to_string());
         }
         resolved
     };
-    let name = resolved
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default();
-    if matches!(name, "kv.db" | "kv.db-wal" | "kv.db-shm" | "kv.db-journal") {
-        return Err("kv owns this file".to_string());
+    if resolved.starts_with(&own) {
+        let name = resolved
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if matches!(name, "kv.db" | "kv.db-wal" | "kv.db-shm" | "kv.db-journal") {
+            return Err("kv owns this file".to_string());
+        }
     }
     Ok(resolved)
 }
@@ -442,6 +465,7 @@ fn fs_lib(lua: &Lua, read: areas::Guard, write: areas::Guard) -> mlua::Result<Ta
             }
         })?,
     )?;
+    let delete_guard = Rc::clone(&write);
     fs.set(
         "write",
         lua.create_function(move |_, (path, data): (String, mlua::LuaString)| {
@@ -459,7 +483,26 @@ fn fs_lib(lua: &Lua, read: areas::Guard, write: areas::Guard) -> mlua::Result<Ta
             Ok(true)
         })?,
     )?;
+    fs.set(
+        "delete",
+        lua.create_function(move |_, path: String| {
+            let target = delete_guard(&path).map_err(|problem| {
+                mlua::Error::RuntimeError(format!("fs.delete {path:?}: {problem}"))
+            })?;
+            delete_path(&target)
+                .map_err(|error| mlua::Error::RuntimeError(format!("fs.delete {path:?}: {error}")))
+        })?,
+    )?;
     Ok(fs)
+}
+
+/// Remove one file; an absent file is already what the caller asked for.
+fn delete_path(target: &Path) -> std::io::Result<bool> {
+    match std::fs::remove_file(target) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(test)]
@@ -472,17 +515,40 @@ mod tests {
     #[test]
     fn a_read_path_uses_the_plugin_dir_or_a_declared_area() {
         let own = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
         let area = tempfile::tempdir().unwrap();
         let script = tempfile::tempdir().unwrap();
         std::fs::write(own.path().join("local.txt"), "x").unwrap();
+        std::fs::write(cache.path().join("cached.bin"), "z").unwrap();
         std::fs::write(area.path().join("note.txt"), "y").unwrap();
         let declared = [area.path().to_path_buf()];
         let script_dir = script.path().to_path_buf();
 
-        assert!(read_path(own.path(), &declared, Some(&script_dir), "local.txt").is_ok());
         assert!(
             read_path(
                 own.path(),
+                Some(cache.path()),
+                &declared,
+                Some(&script_dir),
+                "local.txt"
+            )
+            .is_ok()
+        );
+        assert!(
+            read_path(
+                own.path(),
+                Some(cache.path()),
+                &declared,
+                Some(&script_dir),
+                cache.path().join("cached.bin").to_str().unwrap()
+            )
+            .is_ok(),
+            "the plugin cache is readable"
+        );
+        assert!(
+            read_path(
+                own.path(),
+                Some(cache.path()),
                 &declared,
                 Some(&script_dir),
                 area.path().join("note.txt").to_str().unwrap()
@@ -492,6 +558,7 @@ mod tests {
         assert!(
             read_path(
                 own.path(),
+                Some(cache.path()),
                 &declared,
                 Some(&script_dir),
                 script.path().join("shipped.txt").to_str().unwrap()
@@ -499,8 +566,26 @@ mod tests {
             .is_ok(),
             "the script's own directory is readable"
         );
-        assert!(read_path(own.path(), &declared, Some(&script_dir), "/etc/hostname").is_err());
-        assert!(read_path(own.path(), &declared, Some(&script_dir), "../escape").is_err());
+        assert!(
+            read_path(
+                own.path(),
+                Some(cache.path()),
+                &declared,
+                Some(&script_dir),
+                "/etc/hostname"
+            )
+            .is_err()
+        );
+        assert!(
+            read_path(
+                own.path(),
+                Some(cache.path()),
+                &declared,
+                Some(&script_dir),
+                "../escape"
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -519,12 +604,45 @@ mod tests {
     #[test]
     fn a_write_path_stays_in_the_plugin_dir_and_leaves_kv_alone() {
         let own = tempfile::tempdir().unwrap();
-        assert!(write_path(own.path(), "data/cache.json").is_ok());
-        assert!(write_path(own.path(), own.path().join("x.json").to_str().unwrap()).is_ok());
-        assert!(write_path(own.path(), "kv.db").is_err());
-        assert!(write_path(own.path(), "kv.db-wal").is_err());
-        assert!(write_path(own.path(), "/etc/hostname").is_err());
-        assert!(write_path(own.path(), "../escape").is_err());
+        let cache = tempfile::tempdir().unwrap();
+        assert!(write_path(own.path(), Some(cache.path()), "data/cache.json").is_ok());
+        assert!(
+            write_path(
+                own.path(),
+                Some(cache.path()),
+                own.path().join("x.json").to_str().unwrap()
+            )
+            .is_ok()
+        );
+        assert!(
+            write_path(
+                own.path(),
+                Some(cache.path()),
+                cache.path().join("avatars/x.png").to_str().unwrap()
+            )
+            .is_ok(),
+            "the plugin cache is writable"
+        );
+        assert!(write_path(own.path(), Some(cache.path()), "kv.db").is_err());
+        assert!(write_path(own.path(), Some(cache.path()), "kv.db-wal").is_err());
+        assert!(write_path(own.path(), Some(cache.path()), "/etc/hostname").is_err());
+        assert!(write_path(own.path(), Some(cache.path()), "../escape").is_err());
+    }
+
+    #[test]
+    fn deleting_a_file_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("x");
+        std::fs::write(&file, "x").unwrap();
+        assert!(delete_path(&file).unwrap());
+        assert!(
+            delete_path(&file).unwrap(),
+            "a missing file is already gone"
+        );
+        assert!(
+            delete_path(dir.path()).is_err(),
+            "a directory is not a file"
+        );
     }
 
     /// Every name the sandbox binds, one level into a sub-table: the leaves the
