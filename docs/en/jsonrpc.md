@@ -34,11 +34,13 @@ The core also pushes JSON-RPC notifications (no `id`):
 |--------|--------|---------|
 | `theme` | theme colors | the resolved theme, on connect and on every palette change |
 | `results` | array of result items | a search payload |
+| `results_partial` | array of result items | a streaming search's intermediate payload; the search stays pending |
 | `image_ready` | `{"path": "…"}` | a background image fetch landed; the UI reloads that path |
 
 `search` sent **without** an `id` is streaming: the core aborts any pending
-search, then answers with a `results` notification. Sent **with** an `id` it
-answers synchronously with the array, for one-shot clients.
+search, then answers with a `results` notification. A streaming host may emit
+`results_partial` notifications before that final payload. Sent **with** an `id`
+it answers synchronously with the array, for one-shot clients.
 
 ## Actions
 
@@ -136,6 +138,21 @@ state.
 The core translates its own strings (action titles, the launcher's help line);
 whatever a host sends is relayed as it is, so a host owns the language of its
 identity and its rows.
+
+## Streaming searches
+
+A core that supports streaming sends `"stream": true` in a `search` request's
+params. A host may then send any number of notifications before its reply:
+
+```json
+{"jsonrpc":"2.0","method":"partial","params":{"id":17,"rows":[ … ]}}
+```
+
+`rows` is a result-item array with the same schema as the reply, and `id` is the
+request's own id. Each notification replaces the rows on screen; the final reply
+is authoritative and ends the search. A host that does not stream omits them,
+and an older core never sends `stream`, so a host treats the absent flag as
+"answer once".
 
 ## Result items
 

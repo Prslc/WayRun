@@ -19,7 +19,7 @@ return {
     description = "Short description",
     api = 1,                             -- the plugin contract it was written against
     env = { "MY_TOKEN" },                -- the env names it may read
-    search = function(text)              -- rows for a routed query, in order
+    search = function(text, emit)        -- rows for a routed query, in order
       return {
         { title = "You searched: " .. text,
           on_click = { type = "copy", text = text } },
@@ -38,6 +38,12 @@ A `preview = { type = "image", path = "/absolute/file.png" }` (or an `https://`
 URL the core caches) opens the split view beside the list for the selected row;
 PNG, SVG, JPEG, WebP, GIF and BMP decode in this version. `preview = { type = "text", text = "…" }` puts a
 wrapped plain-text excerpt in the same column.
+
+A streaming search also receives `emit`: when the core supports streaming it
+passes a function, and each `emit(rows)` shows those rows at once while the
+search keeps running. The final return is still the authoritative payload. An
+older core passes `nil`, so guard it with `if emit then … end`; that core never
+sends the capability, and the plugin answers once as before.
 
 ## The plugin table
 
@@ -116,6 +122,7 @@ A row with no `on_click` is display-only; it can still carry `actions`.
 | `wayrun.fs.delete(path)` | removes a file in the plugin directory or its cache; true when it is already absent |
 | `wayrun.http.get(url, params?, options?)` | blocking GET answering `{status, headers, body}`; a transport error raises; `params` adds query values and takes a reserved `headers` table; `options` is a table with `timeout_ms`, `headers` and `ttl`, or a bare timeout in ms |
 | `wayrun.http.get_many(requests)` | concurrent GETs: `requests` is an array of `{url, params?, options?}`, answered in order; a transport failure holds its slot as `{error = "…"}` |
+| `wayrun.http.cached(url, params?, options?)` | the stored reply without a network call, or nil; `stale` is true when its `ttl` has passed |
 | `wayrun.http.post(url, params?, options?)` | the same, sending one body: `json = value`, `form = {…}` or `body = "…"`; never cached |
 | `wayrun.crypto.sha256(text)` / `wayrun.crypto.md5(text)` | lowercase hex digest |
 | `wayrun.crypto.hmac_sha256(key, text)` | lowercase hex HMAC |
@@ -139,6 +146,10 @@ for `pcall` rather than dying as a killed host.
 cache first; replies keep the input order, and a transport failure is
 `{error = "…"}` in its slot instead of raising for the whole batch. The batch
 shares the host call's ceiling, so keep the per-request timeouts within it.
+
+`http.cached` answers from the plugin's store alone, expired entries included,
+and marks an expired one with `stale = true`. That is what `emit` is for: show
+the stale rows first, then call `http.get` and return the fresh ones.
 
 ## The sandbox
 

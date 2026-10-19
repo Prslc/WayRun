@@ -201,6 +201,31 @@ impl Stores {
         }
     }
 
+    /// The stored value whatever its expiry, with whether it is stale; unlike
+    /// `get`, this never drops the row.
+    pub(super) fn get_any(
+        &mut self,
+        id: &str,
+        path: &Path,
+        key: &str,
+        now: i64,
+    ) -> Result<Option<(String, bool)>> {
+        if !path.is_file() {
+            return Ok(None);
+        }
+        let connection = self.connection(id, path)?;
+        let row = connection
+            .prepare_cached("SELECT value, expires_at FROM kv WHERE key = ?1")?
+            .query_row([key], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<i64>>(1)?))
+            })
+            .optional()?;
+        Ok(row.map(|(value, expires_at)| {
+            let stale = expires_at.is_some_and(|at| at <= now);
+            (value, stale)
+        }))
+    }
+
     pub(super) fn set(
         &mut self,
         id: &str,
@@ -385,6 +410,25 @@ mod tests {
         assert_eq!(keys, "b/one,b/two");
         assert_eq!(pair, "b/one=1");
         assert_eq!(all, 3);
+    }
+
+    #[test]
+    fn get_any_keeps_a_stale_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("kv.db");
+        let mut stores = Stores::default();
+        stores.set("demo", &path, "k", "v", Some(1)).unwrap();
+
+        assert_eq!(
+            stores.get_any("demo", &path, "k", 0).unwrap(),
+            Some(("v".to_string(), false))
+        );
+        // a stale read answers and leaves the row for the next one
+        assert_eq!(
+            stores.get_any("demo", &path, "k", 2).unwrap(),
+            Some(("v".to_string(), true))
+        );
+        assert!(stores.get_any("demo", &path, "k", 2).unwrap().is_some());
     }
 
     #[test]

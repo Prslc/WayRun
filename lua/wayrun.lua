@@ -8,6 +8,7 @@
 ---@field status integer
 ---@field headers table<string, string>
 ---@field body string
+---@field stale boolean?
 
 ---@class WayrunFuzzyHit
 ---@field index integer
@@ -149,6 +150,12 @@ function wayrun.http.get(url, params, options) end
 ---@param requests table
 ---@return table[]
 function wayrun.http.get_many(requests) end
+
+---@param url string
+---@param params table?
+---@param options table|number?
+---@return WayrunHTTPReply|nil
+function wayrun.http.cached(url, params, options) end
 
 ---@param url string
 ---@param params table?

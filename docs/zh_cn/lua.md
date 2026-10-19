@@ -18,7 +18,7 @@ return {
     description = "简短描述",
     api = 1,                             -- 编写时所针对的插件契约版本
     env = { "MY_TOKEN" },                -- 可读的环境变量名
-    search = function(text)              -- 路由查询的候选行，按序返回
+    search = function(text, emit)        -- 路由查询的候选行，按序返回
       return {
         { title = "You searched: " .. text,
           on_click = { type = "copy", text = text } },
@@ -36,6 +36,10 @@ return {
 `https://` URL）会在选中行旁边打开分栏预览；当前版本解码 PNG、SVG、JPEG、WebP、
 GIF 与 BMP。
 `preview = { type = "text", text = "…" }` 在同一列显示按宽度换行的纯文本摘要。
+
+流式搜索还会收到 `emit`：后端支持流式时传入一个函数，每次 `emit(rows)` 立刻显示
+这批行，搜索仍在继续；最终返回值仍是权威结果。旧后端传 `nil`，因此写成
+`if emit then … end`，此时插件与以前一样只答复一次。
 
 ## 插件表
 
@@ -109,6 +113,7 @@ actions = {
 | `wayrun.fs.delete(path)` | 删除插件目录或缓存目录中的文件；文件本就不存在时也返回 true |
 | `wayrun.http.get(url, params?, options?)` | 阻塞式 GET，返回 `{status, headers, body}`；传输错误会报错；`params` 追加查询参数，其保留键 `headers` 为请求头表；`options` 是带 `timeout_ms`、`headers`、`ttl` 的表，或直接给一个毫秒数作为超时 |
 | `wayrun.http.get_many(requests)` | 并发 GET：`requests` 是 `{url, params?, options?}` 的数组，按顺序返回；传输失败的那一项为 `{error = "…"}` |
+| `wayrun.http.cached(url, params?, options?)` | 不访问网络，读取已存回复；没有则为 nil；超过 `ttl` 的回复带 `stale = true` |
 | `wayrun.http.post(url, params?, options?)` | 同上，发送一个 body：`json = value`、`form = {…}` 或 `body = "…"` 三选一；从不缓存 |
 | `wayrun.crypto.sha256(text)` / `wayrun.crypto.md5(text)` | 小写十六进制摘要 |
 | `wayrun.crypto.hmac_sha256(key, text)` | 小写十六进制 HMAC |
@@ -129,6 +134,9 @@ actions = {
 `http.get_many` 最多同时发四个请求，每项先查自己的 `ttl` 缓存；返回顺序与输入
 一致，传输失败的那一项是 `{error = "…"}`，不会让整批报错。整批共享主机调用的
 时限，单请求超时应控制在这个范围内。
+
+`http.cached` 只读插件自己的存储，过期的条目也会返回，并用 `stale = true` 标记。
+这正是 `emit` 的用法：先显示过期行，再调用 `http.get` 并把新结果返回。
 
 ## 沙箱
 

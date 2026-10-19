@@ -44,6 +44,15 @@ pub(super) fn lib(
         "get_many",
         lua.create_function(move |lua, requests: Table| many.get_many(lua, requests))?,
     )?;
+    let cached = client.clone();
+    http.set(
+        "cached",
+        lua.create_function(
+            move |lua, (url, params, options): (String, Option<Table>, Option<Value>)| {
+                cached.cached_reply(lua, url, params, options)
+            },
+        )?,
+    )?;
     let post = client;
     http.set(
         "post",
@@ -247,6 +256,55 @@ impl Client {
             headers: cached.headers,
             body: cached.body.into_bytes(),
         })
+    }
+
+    /// The stored reply under `key` and whether it is stale; unlike `cached`,
+    /// an expired entry still answers.
+    fn cached_any(&self, key: &str) -> Option<(Response, bool)> {
+        let (id, path) = self.database()?;
+        let (text, stale) = match self
+            .stores
+            .borrow_mut()
+            .get_any(&id, &path, key, now_seconds())
+        {
+            Ok(Some(found)) => found,
+            Ok(None) => return None,
+            Err(error) => {
+                warn(&self.script, &format!("http cache read {key}: {error:#}"));
+                return None;
+            }
+        };
+        let cached: Cached = serde_json::from_str(&text).ok()?;
+        Some((
+            Response {
+                status: cached.status,
+                headers: cached.headers,
+                body: cached.body.into_bytes(),
+            },
+            stale,
+        ))
+    }
+
+    /// `wayrun.http.cached`: the stored reply alone, expired entries included,
+    /// with `stale` marking one past its ttl.
+    fn cached_reply(
+        &self,
+        lua: &Lua,
+        url: String,
+        params: Option<Table>,
+        options: Option<Value>,
+    ) -> mlua::Result<Value> {
+        let mut options = parse_options(lua, options, "get")?;
+        let (url, mut headers) = with_params(url, params)?;
+        headers.append(&mut options.headers);
+        options.headers = headers;
+        let key = cache_key(&url, &options.headers);
+        let Some((response, stale)) = self.cached_any(&key) else {
+            return Ok(Value::Nil);
+        };
+        let table = reply(lua, &response)?;
+        table.set("stale", stale)?;
+        Ok(Value::Table(table))
     }
 
     /// Caches a 2xx reply for `ttl` seconds under `key`; the cache is a
@@ -890,6 +948,46 @@ mod tests {
                 &[("x-a".into(), "1".into()), ("accept".into(), "json".into())]
             ),
         );
+    }
+
+    #[test]
+    fn cached_answers_from_the_store_without_the_network() {
+        let (port, server) = serve(|mut stream| {
+            let _ = read_request(&mut stream);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                .unwrap();
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let lua = lua_with_http(dir.path());
+        let (body, cached, stale, other_query, other_header): (
+            String,
+            Option<String>,
+            bool,
+            bool,
+            bool,
+        ) = lua
+            .load(format!(
+                r#"
+                local url = "{url}"
+                local got = http.get(url, nil, {{ ttl = 300 }})
+                local hit = http.cached(url)
+                return got.body,
+                    hit and hit.body,
+                    hit and hit.stale,
+                    http.cached(url, {{ q = "other" }}) == nil,
+                    http.cached(url, nil, {{ headers = {{ ["X-Other"] = "1" }} }}) == nil
+                "#,
+                url = url_of(port, "/cached"),
+            ))
+            .eval()
+            .unwrap();
+        server.join().unwrap();
+        assert_eq!(
+            (body.as_str(), cached.as_deref(), stale),
+            ("ok", Some("ok"), false)
+        );
+        assert!(other_query && other_header);
     }
 
     #[test]
