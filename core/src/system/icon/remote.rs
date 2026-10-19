@@ -16,6 +16,7 @@ const QUEUE: usize = 64;
 const WORKERS: usize = 4;
 const PRUNE_EVERY: usize = 32;
 const TIMEOUT: Duration = Duration::from_secs(5);
+const USER_AGENT: &str = concat!("WayRun/", env!("CARGO_PKG_VERSION"));
 
 struct Job {
     url: String,
@@ -180,7 +181,7 @@ fn agent() -> ureq::Agent {
 fn fetch(agent: &ureq::Agent, url: &str, path: &Path, max_bytes: u64) -> Result<(), ()> {
     let mut response = agent
         .get(url)
-        .header("User-Agent", "WayRun")
+        .header("User-Agent", USER_AGENT)
         .config()
         .timeout_global(Some(TIMEOUT))
         .build()
