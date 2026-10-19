@@ -32,6 +32,7 @@ plugin.window.name: Window
 plugin.window.ready: Switch open windows
 
 plugin.external.ready: External plugin via %{command}
+plugin.search_failed: Search failed
 
 command.lock: Lock
 command.suspend: Suspend

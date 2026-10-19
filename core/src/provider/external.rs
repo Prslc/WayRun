@@ -300,7 +300,30 @@ async fn query_external(
     let Some(response) = host_call(command, resident, &request, HOST_TIMEOUT).await else {
         return Ok(Vec::new());
     };
+    if let Some(row) = host_error(&response) {
+        return Ok(vec![row]);
+    }
     Ok(parse_result_items(response, plugin, icon).unwrap_or_default())
+}
+
+/// A host's `search` error becomes one display-only row, so a plugin that raises
+/// is visible instead of indistinguishable from an empty result.
+fn host_error(response: &serde_json::Value) -> Option<ResultItem> {
+    let error = response.get("error")?;
+    let message = error
+        .get("message")
+        .and_then(|message| message.as_str())
+        .unwrap_or_default();
+    let summary = message.lines().next().unwrap_or_default();
+    Some(ResultItem {
+        title: t!("plugin.search_failed").to_string(),
+        summary: Some(summary.to_string()),
+        on_click: None,
+        icon: None,
+        icon_shape: None,
+        preview: None,
+        actions: Vec::new(),
+    })
 }
 
 /// Ask the host for its default view (its `top` method). `Ok(None)` when it has
@@ -508,6 +531,19 @@ mod tests {
             Some(IconShape::Circle),
             "the host's shape reaches the row"
         );
+    }
+
+    #[test]
+    fn a_host_error_becomes_a_display_row() {
+        let response = serde_json::json!({
+            "jsonrpc": "2.0",
+            "error": {"code": -32000, "message": "boom\nstack traceback:"},
+            "id": 1
+        });
+        let row = host_error(&response).unwrap();
+        assert_eq!(row.title, t!("plugin.search_failed").to_string());
+        assert_eq!(row.summary.as_deref(), Some("boom"));
+        assert!(row.on_click.is_none());
     }
 
     #[test]

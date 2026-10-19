@@ -137,8 +137,8 @@ actions = {
 `wayrun.env` 只能读当前插件在调用中声明的名字，`http` 可访问网络。`print` 与
 `wayrun.log` 写入启动器的 journal，绝不写 stdout（stdout 是 JSON-RPC 通道），且每次
 调用都有上限。沙箱约束脚本能做什么；能读到什么，由插件表的 `env` 与 `read` 声明。
-调用中抛错时，本次返回空行并记录到 journal，因此 `print`、`wayrun.log` 与 `pcall`
-就是调试手段。
+`search` 抛错时，本次返回一条带错误信息第一行的展示行；`top` 失败则保留身份卡片。
+`print`、`wayrun.log` 与 `pcall` 仍是调试手段。
 
 ## 调试
 

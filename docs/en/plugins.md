@@ -103,6 +103,9 @@ its icon box, as an avatar needs.
 A plugin that needs other network data (an API cache, a non-image file) still
 fetches and caches it itself; result icons and preview images are the core's.
 
+A host's `search` error is shown as one display-only row whose summary is the
+first line of the error message; a `top` error keeps the identity card.
+
 A host inherits the launcher's resolved locale as `WAYRUN_LOCALE`, the stem its
 own tables use (`en`, `zh_cn`, …); it owns its catalog and fallback, and the
 launcher never translates plugin text. [lua.md](lua.md#localisation) has the Lua

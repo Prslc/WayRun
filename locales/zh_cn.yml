@@ -31,6 +31,7 @@ plugin.window.name: 窗口
 plugin.window.ready: 切换已打开的窗口
 
 plugin.external.ready: 来自 %{command} 的外部插件
+plugin.search_failed: 搜索失败
 
 command.lock: 锁定
 command.suspend: 挂起

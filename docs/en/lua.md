@@ -148,9 +148,10 @@ removes files from either place. `wayrun.env` reads only the names the calling
 plugin declares, and `http` reaches the network. `print` and `wayrun.log` write to the
 launcher's journal, never to stdout (stdout is the JSON-RPC wire), and both are
 bounded per call. The sandbox bounds what a script can do; what it can read is
-what the plugin's `env` and `read` declare. A call that raises yields no rows
-and reports to the journal, so `print`, `wayrun.log` and a `pcall` around risky
-work are the debugging tools.
+what the plugin's `env` and `read` declare. A `search` call that raises is
+shown as one error row carrying the first line of the message; a `top` failure
+keeps the identity card. `print`, `wayrun.log` and a `pcall` around risky work
+stay the debugging tools.
 
 ## Debugging
 
