@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use mlua::{Lua, LuaSerdeExt, Table, Value};
@@ -7,6 +9,9 @@ use mlua::{Lua, LuaSerdeExt, Table, Value};
 use super::kv;
 use super::sdk::now_seconds;
 use super::warn;
+
+/// The most `get_many` requests in flight at once.
+const FANOUT: usize = 4;
 
 /// `wayrun.http`: the sandbox's one network exit. One agent per host keeps the
 /// connection pool; every request carries its own deadline.
@@ -33,6 +38,11 @@ pub(super) fn lib(
                 get.request(lua, false, url, params, options)
             },
         )?,
+    )?;
+    let many = client.clone();
+    http.set(
+        "get_many",
+        lua.create_function(move |lua, requests: Table| many.get_many(lua, requests))?,
     )?;
     let post = client;
     http.set(
@@ -123,7 +133,8 @@ impl Client {
         {
             return reply(lua, &cached);
         }
-        let response = self.perform(method, &url, &options, post)?;
+        let response = perform(&self.agent, method, &url, &options, post)
+            .map_err(mlua::Error::RuntimeError)?;
         if let Some(ttl) = ttl
             && (200..300).contains(&response.status)
         {
@@ -132,60 +143,90 @@ impl Client {
         reply(lua, &response)
     }
 
-    fn perform(
-        &self,
-        method: &str,
-        url: &str,
-        options: &Options,
-        post: bool,
-    ) -> mlua::Result<Response> {
-        let timeout = timeout_for(options.timeout_ms);
-        let response = if post {
-            let mut request = self.agent.post(url);
-            for (name, value) in &options.headers {
-                request = request.header(name.as_str(), value.as_str());
-            }
-            let request = request.config().timeout_global(Some(timeout)).build();
-            match &options.body {
-                Body::None => request.send_empty(),
-                Body::Json(text) => request.content_type("application/json").send(text.clone()),
-                Body::Form(pairs) => request.send_form(pairs.clone()),
-                Body::Raw(bytes) => request.send(bytes.clone()),
-            }
-        } else {
-            let mut request = self.agent.get(url);
-            for (name, value) in &options.headers {
-                request = request.header(name.as_str(), value.as_str());
-            }
-            request
-                .config()
-                .timeout_global(Some(timeout))
-                .build()
-                .call()
-        };
-        let mut response = response
-            .map_err(|error| mlua::Error::RuntimeError(format!("http.{method} {url}: {error}")))?;
-        let status = response.status().as_u16();
-        let mut headers: BTreeMap<String, String> = BTreeMap::new();
-        for (name, value) in response.headers() {
-            let value = String::from_utf8_lossy(value.as_bytes()).into_owned();
-            headers
-                .entry(name.as_str().to_string())
-                .and_modify(|joined| {
-                    joined.push_str(", ");
-                    joined.push_str(&value);
-                })
-                .or_insert(value);
+    /// Several GETs in flight at once, answered in input order; a transport
+    /// failure holds its slot as `{ error = "…" }` instead of failing the batch.
+    fn get_many(&self, lua: &Lua, requests: Table) -> mlua::Result<Table> {
+        struct Item {
+            url: String,
+            options: Options,
+            ttl: Option<u64>,
+            key: String,
         }
-        let body = response
-            .body_mut()
-            .read_to_vec()
-            .map_err(|error| mlua::Error::RuntimeError(format!("http.{method} {url}: {error}")))?;
-        Ok(Response {
-            status,
-            headers: headers.into_iter().collect(),
-            body,
-        })
+
+        let mut items = Vec::new();
+        for request in requests.sequence_values::<Table>() {
+            let request = request?;
+            let url: String = request.get("url")?;
+            let params: Option<Table> = request.get("params")?;
+            let options: Option<Value> = request.get("options")?;
+            let mut options = parse_options(lua, options, "get")?;
+            let (url, mut headers) = with_params(url, params)?;
+            headers.append(&mut options.headers);
+            options.headers = headers;
+            let ttl = options.ttl.filter(|ttl| *ttl > 0);
+            let key = cache_key(&url, &options.headers);
+            items.push(Item {
+                url,
+                options,
+                ttl,
+                key,
+            });
+        }
+
+        let mut outcomes: Vec<Option<Result<Response, String>>> =
+            std::iter::repeat_with(|| None).take(items.len()).collect();
+        let mut misses = Vec::new();
+        for (at, item) in items.iter().enumerate() {
+            if item.ttl.is_some()
+                && let Some(cached) = self.cached(&item.key)
+            {
+                outcomes[at] = Some(Ok(cached));
+            } else {
+                misses.push(at);
+            }
+        }
+
+        if !misses.is_empty() {
+            let next = AtomicUsize::new(0);
+            let results: Mutex<Vec<Option<Result<Response, String>>>> =
+                Mutex::new(std::iter::repeat_with(|| None).take(items.len()).collect());
+            let agent = &self.agent;
+            std::thread::scope(|scope| {
+                for _ in 0..FANOUT.min(misses.len()) {
+                    scope.spawn(|| {
+                        loop {
+                            let at = next.fetch_add(1, Ordering::Relaxed);
+                            let Some(&slot) = misses.get(at) else { break };
+                            let item = &items[slot];
+                            let outcome = perform(agent, "get", &item.url, &item.options, false);
+                            results.lock().expect("http fan-out")[slot] = Some(outcome);
+                        }
+                    });
+                }
+            });
+            outcomes = results.into_inner().expect("http fan-out");
+        }
+
+        let replies = lua.create_table_with_capacity(items.len(), 0)?;
+        for (at, outcome) in outcomes.into_iter().enumerate() {
+            let value = match outcome.expect("every request has an outcome") {
+                Ok(response) => {
+                    if let Some(ttl) = items[at].ttl
+                        && (200..300).contains(&response.status)
+                    {
+                        self.store(&items[at].key, &response, ttl);
+                    }
+                    reply(lua, &response)?
+                }
+                Err(error) => {
+                    let failure = lua.create_table()?;
+                    failure.set("error", error)?;
+                    failure
+                }
+            };
+            replies.set(at + 1, value)?;
+        }
+        Ok(replies)
     }
 
     /// The stored reply under `key`, or `None`; an unreadable entry reads as a
@@ -245,6 +286,61 @@ impl Client {
             }
         }
     }
+}
+
+fn perform(
+    agent: &ureq::Agent,
+    method: &str,
+    url: &str,
+    options: &Options,
+    post: bool,
+) -> Result<Response, String> {
+    let timeout = timeout_for(options.timeout_ms);
+    let response = if post {
+        let mut request = agent.post(url);
+        for (name, value) in &options.headers {
+            request = request.header(name.as_str(), value.as_str());
+        }
+        let request = request.config().timeout_global(Some(timeout)).build();
+        match &options.body {
+            Body::None => request.send_empty(),
+            Body::Json(text) => request.content_type("application/json").send(text.clone()),
+            Body::Form(pairs) => request.send_form(pairs.clone()),
+            Body::Raw(bytes) => request.send(bytes.clone()),
+        }
+    } else {
+        let mut request = agent.get(url);
+        for (name, value) in &options.headers {
+            request = request.header(name.as_str(), value.as_str());
+        }
+        request
+            .config()
+            .timeout_global(Some(timeout))
+            .build()
+            .call()
+    };
+    let mut response = response.map_err(|error| format!("http.{method} {url}: {error}"))?;
+    let status = response.status().as_u16();
+    let mut headers: BTreeMap<String, String> = BTreeMap::new();
+    for (name, value) in response.headers() {
+        let value = String::from_utf8_lossy(value.as_bytes()).into_owned();
+        headers
+            .entry(name.as_str().to_string())
+            .and_modify(|joined| {
+                joined.push_str(", ");
+                joined.push_str(&value);
+            })
+            .or_insert(value);
+    }
+    let body = response
+        .body_mut()
+        .read_to_vec()
+        .map_err(|error| format!("http.{method} {url}: {error}"))?;
+    Ok(Response {
+        status,
+        headers: headers.into_iter().collect(),
+        body,
+    })
 }
 
 fn reply(lua: &Lua, response: &Response) -> mlua::Result<Table> {
@@ -776,5 +872,43 @@ mod tests {
                 &[("x-a".into(), "1".into()), ("accept".into(), "json".into())]
             ),
         );
+    }
+
+    #[test]
+    fn get_many_answers_in_order_and_keeps_a_failed_slot() {
+        let (port_a, server_a) = serve(|mut stream| {
+            let (head, _) = read_request(&mut stream);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\na")
+                .unwrap();
+            head
+        });
+        let (port_b, server_b) = serve(|mut stream| {
+            let (head, _) = read_request(&mut stream);
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\nb")
+                .unwrap();
+            head
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let lua = lua_with_http(dir.path());
+        let (first, last, failed): (String, String, bool) = lua
+            .load(format!(
+                r#"
+                local replies = http.get_many({{
+                    {{ url = "{a}" }},
+                    {{ url = "http://127.0.0.1:1/x" }},
+                    {{ url = "{b}" }},
+                }})
+                return replies[1].body, replies[3].body, replies[2].error ~= nil
+                "#,
+                a = url_of(port_a, "/a"),
+                b = url_of(port_b, "/b"),
+            ))
+            .eval()
+            .unwrap();
+        assert_eq!((first.as_str(), last.as_str(), failed), ("a", "b", true));
+        assert!(server_a.join().unwrap().contains("/a"));
+        assert!(server_b.join().unwrap().contains("/b"));
     }
 }

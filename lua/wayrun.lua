@@ -146,6 +146,10 @@ function wayrun.toml.decode(text) end
 ---@return WayrunHTTPReply
 function wayrun.http.get(url, params, options) end
 
+---@param requests table
+---@return table[]
+function wayrun.http.get_many(requests) end
+
 ---@param url string
 ---@param params table?
 ---@param options table|number?

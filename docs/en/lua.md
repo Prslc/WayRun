@@ -115,6 +115,7 @@ A row with no `on_click` is display-only; it can still carry `actions`.
 | `wayrun.fs.write(path, data)` | writes a string into the plugin directory or its cache (parents created); true on success; `kv.db` and its siblings are reserved |
 | `wayrun.fs.delete(path)` | removes a file in the plugin directory or its cache; true when it is already absent |
 | `wayrun.http.get(url, params?, options?)` | blocking GET answering `{status, headers, body}`; a transport error raises; `params` adds query values and takes a reserved `headers` table; `options` is a table with `timeout_ms`, `headers` and `ttl`, or a bare timeout in ms |
+| `wayrun.http.get_many(requests)` | concurrent GETs: `requests` is an array of `{url, params?, options?}`, answered in order; a transport failure holds its slot as `{error = "…"}` |
 | `wayrun.http.post(url, params?, options?)` | the same, sending one body: `json = value`, `form = {…}` or `body = "…"`; never cached |
 | `wayrun.crypto.sha256(text)` / `wayrun.crypto.md5(text)` | lowercase hex digest |
 | `wayrun.crypto.hmac_sha256(key, text)` | lowercase hex HMAC |
@@ -133,6 +134,11 @@ per-keystroke query affordable. Replies carry the body as raw bytes and
 lowercase response header names, and a timeout (two seconds by default) is
 capped inside the host call's own ceiling, so a slow endpoint raises an error
 for `pcall` rather than dying as a killed host.
+
+`http.get_many` runs up to four requests at once and checks each one's `ttl`
+cache first; replies keep the input order, and a transport failure is
+`{error = "…"}` in its slot instead of raising for the whole batch. The batch
+shares the host call's ceiling, so keep the per-request timeouts within it.
 
 ## The sandbox
 

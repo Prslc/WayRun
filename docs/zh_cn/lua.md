@@ -108,6 +108,7 @@ actions = {
 | `wayrun.fs.write(path, data)` | 把字符串写入插件目录或缓存目录（自动创建父目录）；成功返回 true；`kv.db` 及其兄弟文件为 `kv` 保留 |
 | `wayrun.fs.delete(path)` | 删除插件目录或缓存目录中的文件；文件本就不存在时也返回 true |
 | `wayrun.http.get(url, params?, options?)` | 阻塞式 GET，返回 `{status, headers, body}`；传输错误会报错；`params` 追加查询参数，其保留键 `headers` 为请求头表；`options` 是带 `timeout_ms`、`headers`、`ttl` 的表，或直接给一个毫秒数作为超时 |
+| `wayrun.http.get_many(requests)` | 并发 GET：`requests` 是 `{url, params?, options?}` 的数组，按顺序返回；传输失败的那一项为 `{error = "…"}` |
 | `wayrun.http.post(url, params?, options?)` | 同上，发送一个 body：`json = value`、`form = {…}` 或 `body = "…"` 三选一；从不缓存 |
 | `wayrun.crypto.sha256(text)` / `wayrun.crypto.md5(text)` | 小写十六进制摘要 |
 | `wayrun.crypto.hmac_sha256(key, text)` | 小写十六进制 HMAC |
@@ -124,6 +125,10 @@ actions = {
 文本响应，这正是“每次按键一次查询”能负担得起的原因。返回的 body 是原始字节，响应头
 名称小写；超时默认两秒，并且不会超过主机调用本身的上限，因此慢端点会抛出可被
 `pcall` 捕获的错误，而不是让主机被强制结束。
+
+`http.get_many` 最多同时发四个请求，每项先查自己的 `ttl` 缓存；返回顺序与输入
+一致，传输失败的那一项是 `{error = "…"}`，不会让整批报错。整批共享主机调用的
+时限，单请求超时应控制在这个范围内。
 
 ## 沙箱
 
