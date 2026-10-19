@@ -51,14 +51,15 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 | `launch` | `desktop_id` | 经 GLib 的 `GAppInfo` 按 desktop id 启动应用 |
 | `copy` | `text` | 写入 Wayland 剪贴板 |
 | `desktop_action` | `desktop_id`、`action_id` | 运行一个 `[Desktop Action …]` 组 |
-| `open` | `uri` | 交给默认处理器打开（URL、`file:` 或 `mailto:`） |
+| `open` | `uri` | 用系统默认应用打开（URL、`file:` 或 `mailto:`） |
+| `open_with` | `desktop_id`、`uri` | 用指定的应用打开 URI，而不是系统默认应用 |
 | `reveal` | `uri` | 在文件管理器中定位文件（仅面板可见） |
 | `terminal` | `uri` | 在 URI 所在目录打开终端，文件则用其父目录（仅面板可见） |
 
 `run` 的 `cmd` 是整条 shell 行，内容不会被改写：`%u` 这类字段码原样交给 shell，
 因为只有 `launch` 与 `desktop_action` 会读 `.desktop` 的字段码；后两者的 id 不加
 引号。`file:` URI 会做百分号编码，路径里的空格和非 ASCII 字符都能保留；
-`Terminal=true` 的处理器会在终端中启动。
+`Terminal=true` 的应用会在终端中启动。
 
 `search` 的 `params` 是带 `text` 键的对象（非空字符串）。缺省、空 `text`、裸字符串、
 `{"query": …}`、非字符串 `text` 都会返回 `-32602`。以通知形式发送空 `text` 会取消

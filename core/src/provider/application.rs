@@ -12,7 +12,6 @@ use gio::prelude::{AppInfoExt, IconExt};
 use crate::live::{Live, Source};
 use crate::plugin::{Meta, Plugin, Rank, Ranked};
 use crate::system::desktop_action;
-use crate::system::icon::resolve;
 use crate::system::xdg;
 use crate::wire::{Action, ActionItem, ResultItem};
 use rust_i18n::t;
@@ -108,15 +107,9 @@ pub(super) struct CachedApp {
 }
 
 impl CachedApp {
-    /// Resolve the gio icon spec (`!!/path` for file icons, otherwise a theme
-    /// name) to the absolute path the UI renders.
+    /// The absolute path the UI renders, from the entry's gio icon spec.
     pub(super) fn icon_path(&self) -> Option<String> {
-        let spec = self.icon_spec.as_deref()?;
-        if let Some(path) = spec.strip_prefix("!!") {
-            (!path.is_empty()).then(|| path.to_string())
-        } else {
-            resolve(spec)
-        }
+        crate::system::icon::gio_icon_path(self.icon_spec.as_deref()?)
     }
 }
 

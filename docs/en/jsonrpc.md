@@ -56,6 +56,7 @@ what a row runs. It is the params of the `command` method, the type of a result'
 | `copy` | `text` | write the text to the Wayland clipboard |
 | `desktop_action` | `desktop_id`, `action_id` | run one `[Desktop Action …]` group |
 | `open` | `uri` | open a URI with the default handler (a URL, `file:` or `mailto:`) |
+| `open_with` | `desktop_id`, `uri` | open a URI with one named handler instead of the default |
 | `reveal` | `uri` | show a file in the file manager (panel-only) |
 | `terminal` | `uri` | open a terminal in the URI's directory, its parent for a file (panel-only) |
 

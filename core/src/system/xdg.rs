@@ -52,6 +52,19 @@ pub fn desktop_dirs() -> Vec<PathBuf> {
     data_subdirs("applications")
 }
 
+/// The `mimeapps.list` overrides that add or pin a content type's handlers; the
+/// copies under an applications directory come with [`desktop_dirs`].
+pub fn mimeapps_files() -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    if let Some(config) = dirs::config_dir() {
+        push_unique(&mut files, config.join("mimeapps.list"));
+    }
+    for config in config_dirs() {
+        push_unique(&mut files, config.join("mimeapps.list"));
+    }
+    files
+}
+
 /// Theme roots a named icon may live under, user first.
 pub fn icon_theme_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();

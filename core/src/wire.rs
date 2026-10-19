@@ -35,6 +35,11 @@ pub enum Action {
     Open {
         uri: String,
     },
+    /// Open one URI with a named handler instead of the default one.
+    OpenWith {
+        desktop_id: String,
+        uri: String,
+    },
 }
 
 impl Action {

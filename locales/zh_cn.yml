@@ -40,6 +40,7 @@ command.shutdown: 关机
 command.logout: 注销
 
 action.open: 打开
+action.open_with: "用 %{app} 打开"
 action.copy_path: 复制路径
 action.reveal: 在文件管理器中显示
 action.terminal: 在终端中打开

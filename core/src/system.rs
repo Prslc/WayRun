@@ -3,6 +3,7 @@ pub mod db;
 pub mod desktop_action;
 pub mod executor;
 pub mod fs;
+pub mod handlers;
 pub mod icon;
 pub mod process;
 pub mod theme;

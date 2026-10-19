@@ -4,13 +4,15 @@ use std::future::Future;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use anyhow::Result;
 use gio::prelude::FileExt;
 
 use crate::plugin::{Meta, Plugin};
 use crate::system::fs::get_home;
-use crate::system::icon::{content_type_icon, resolve};
+use crate::system::handlers::{self, Handler};
+use crate::system::icon::{content_type_icon, gio_icon_path, resolve};
 use crate::wire::{Action, ActionItem, ResultItem};
 use rust_i18n::t;
 
@@ -78,8 +80,17 @@ macro_rules! search_plugin {
     };
 }
 
-/// A file or directory row's commands, in panel order: a terminal leads so the
-/// two ways to open sit together, then reveal in the file manager, then copy its path.
+/// The guess reads only the name, so a directory's type is decided here.
+fn content_type_for(path: &Path) -> String {
+    if std::fs::metadata(path).is_ok_and(|meta| meta.is_dir()) {
+        "inode/directory".to_string()
+    } else {
+        gio::content_type_guess(Some(path), None).0.to_string()
+    }
+}
+
+/// A file or directory row's commands, in panel order: terminal, reveal and
+/// copy path, then the system's alternative openers.
 pub(super) fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
     let Some(Action::Open { uri }) = item.on_click.as_ref() else {
         return Vec::new();
@@ -90,8 +101,7 @@ pub(super) fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
     let Some(path) = gio::File::for_uri(uri).path() else {
         return Vec::new();
     };
-    let path = path.to_string_lossy();
-    vec![
+    let mut actions = vec![
         ActionItem {
             title: t!("action.terminal"),
             action: Action::Terminal { uri: uri.clone() },
@@ -111,14 +121,36 @@ pub(super) fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
         ActionItem {
             title: t!("action.copy_path"),
             action: Action::Copy {
-                text: path.into_owned(),
+                text: path.to_string_lossy().into_owned(),
             },
             icon: Some("builtin:copy".to_string()),
             id: Some("copy_path".to_string()),
             plugin: None,
             default: false,
         },
-    ]
+    ];
+    actions.extend(open_with_actions(
+        uri,
+        handlers::for_content_type(&content_type_for(&path)),
+    ));
+    actions
+}
+
+fn open_with_actions(uri: &str, handlers: Arc<[Handler]>) -> Vec<ActionItem> {
+    handlers
+        .iter()
+        .map(|handler| ActionItem {
+            title: t!("action.open_with", app = handler.title),
+            action: Action::OpenWith {
+                desktop_id: handler.desktop_id.clone(),
+                uri: uri.to_string(),
+            },
+            icon: handler.icon_spec.as_deref().and_then(gio_icon_path),
+            id: Some(format!("open_with:{}", handler.desktop_id)),
+            plugin: None,
+            default: false,
+        })
+        .collect()
 }
 
 search_plugin!(
@@ -341,8 +373,17 @@ mod tests {
 
     #[test]
     fn a_file_row_offers_terminal_reveal_and_copy() {
-        let actions: Vec<ActionItem> = file_actions(&row("a.txt", file("file:///tmp/a.txt")));
-        let titles: Vec<&str> = actions.iter().map(|a| a.title.as_str()).collect();
+        let all = file_actions(&row("a.txt", file("file:///tmp/a.txt")));
+        assert!(all.len() >= 3);
+        let (fixed, openers) = all.split_at(3);
+        assert!(
+            openers.iter().all(|action| action
+                .id
+                .as_deref()
+                .is_some_and(|id| id.starts_with("open_with:"))),
+            "the system's openers follow the fixed commands"
+        );
+        let titles: Vec<&str> = fixed.iter().map(|a| a.title.as_str()).collect();
         assert_eq!(
             titles,
             [
@@ -350,22 +391,22 @@ mod tests {
                 t!("action.reveal"),
                 t!("action.copy_path")
             ],
-            "opening leads, so it sits next to the row's own command"
+            "the fixed commands keep their panel order"
         );
         assert_eq!(
-            actions[0].action,
+            fixed[0].action,
             Action::Terminal {
                 uri: "file:///tmp/a.txt".to_string()
             }
         );
         assert_eq!(
-            actions[1].action,
+            fixed[1].action,
             Action::Reveal {
                 uri: "file:///tmp/a.txt".to_string()
             }
         );
         assert_eq!(
-            actions[2].action,
+            fixed[2].action,
             Action::Copy {
                 text: "/tmp/a.txt".to_string()
             }
@@ -396,6 +437,36 @@ mod tests {
                 text: "/tmp/a b".to_string()
             }
         );
+    }
+
+    #[test]
+    fn a_handler_becomes_an_open_with_action() {
+        let actions = open_with_actions(
+            "file:///tmp/a.txt",
+            Arc::from(vec![Handler {
+                desktop_id: "code.desktop".to_string(),
+                title: "VS Code".to_string(),
+                icon_spec: Some("!!/tmp/code.svg".to_string()),
+            }]),
+        );
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].title, t!("action.open_with", app = "VS Code"));
+        assert_eq!(
+            actions[0].action,
+            Action::OpenWith {
+                desktop_id: "code.desktop".to_string(),
+                uri: "file:///tmp/a.txt".to_string(),
+            }
+        );
+        assert_eq!(actions[0].id.as_deref(), Some("open_with:code.desktop"));
+        assert_eq!(actions[0].icon.as_deref(), Some("/tmp/code.svg"));
+    }
+
+    #[test]
+    fn a_directory_asks_for_the_directory_handlers() {
+        let temp = tempfile::tempdir().unwrap();
+        assert_eq!(content_type_for(temp.path()), "inode/directory");
+        assert_eq!(content_type_for(&temp.path().join("a.txt")), "text/plain");
     }
 
     #[test]

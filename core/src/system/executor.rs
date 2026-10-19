@@ -188,6 +188,18 @@ pub fn open_uri(uri: &str) {
     let _ = gio::AppInfo::launch_default_for_uri(uri, Some(&launch_context()));
 }
 
+/// Open `uri` with one named handler; a handler that vanished since the panel
+/// was built runs nothing.
+pub fn open_with(desktop_id: &str, uri: &str) {
+    let context = launch_context();
+    for app in gio::AppInfo::all() {
+        if app.id().as_deref() == Some(desktop_id) {
+            let _ = app.launch_uris(&[uri], Some(&context));
+            return;
+        }
+    }
+}
+
 /// Show a file in the file manager: `org.freedesktop.FileManager1.ShowItems`
 /// selects it, else fall back to opening the containing directory.
 pub fn reveal(uri: &str) {
@@ -265,6 +277,7 @@ pub fn execute(command: &crate::wire::Action) {
         Action::Reveal { uri } => reveal(uri),
         Action::Terminal { uri } => open_terminal(uri),
         Action::Open { uri } => open_uri(uri),
+        Action::OpenWith { desktop_id, uri } => open_with(desktop_id, uri),
     }
 }
 

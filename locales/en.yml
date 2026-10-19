@@ -41,6 +41,7 @@ command.shutdown: Shutdown
 command.logout: Logout
 
 action.open: Open
+action.open_with: "Open with %{app}"
 action.copy_path: Copy path
 action.reveal: Reveal in file manager
 action.terminal: Open in terminal

@@ -63,6 +63,14 @@ pub fn host_icon_spec(spec: &str) -> Option<String> {
     spec.starts_with('/').then(|| spec.to_string())
 }
 
+/// A GIO icon serialized as `!!/abs/path` for a file icon, else a theme name.
+pub fn gio_icon_path(spec: &str) -> Option<String> {
+    if let Some(path) = spec.strip_prefix("!!") {
+        return (!path.is_empty()).then(|| path.to_string());
+    }
+    resolve(spec)
+}
+
 /// What the Lua SDK's `wayrun.icon()` binds: an absolute path, a theme icon
 /// name or a `papirus:` spec; a `builtin:` glyph resolves to nil.
 pub fn resolve_for_host(name: &str) -> Option<String> {
