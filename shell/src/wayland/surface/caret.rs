@@ -1,3 +1,4 @@
+use std::time::Instant;
 use tiny_skia::Pixmap;
 
 use crate::wayland::Shell;
@@ -7,7 +8,7 @@ impl Shell {
     /// The frame without the caret, saved in a rect just around it. A blink
     /// restores this patch and redraws the caret, so no second full frame is held.
     pub(super) fn capture_caret_patch(&mut self) {
-        let frame = self.app.frame(std::time::Instant::now());
+        let frame = self.app.frame(Instant::now());
         let (x, y, w, h) = render::caret_rect(&frame, &mut self.text);
         let scale = self.app.scale_factor();
         let Some(pixmap) = self.pixmap.as_ref() else {

@@ -135,6 +135,8 @@ impl State {
 mod tests {
     use super::*;
     use crate::app::test_support::{item, run, state};
+    use std::time::Duration;
+    use std::time::Instant;
     use wayrun_core::wire::ActionItem;
 
     #[test]
@@ -144,26 +146,11 @@ mod tests {
         let now = Instant::now();
         state.search_started = Some(now);
 
-        assert!(
-            !state
-                .frame(now + std::time::Duration::from_millis(100))
-                .footer
-                .loading
-        );
-        assert!(
-            state
-                .frame(now + std::time::Duration::from_millis(200))
-                .footer
-                .loading
-        );
+        assert!(!state.frame(now + Duration::from_millis(100)).footer.loading);
+        assert!(state.frame(now + Duration::from_millis(200)).footer.loading);
 
-        state.apply_results(Vec::new(), now + std::time::Duration::from_millis(200));
-        assert!(
-            !state
-                .frame(now + std::time::Duration::from_millis(300))
-                .footer
-                .loading
-        );
+        state.apply_results(Vec::new(), now + Duration::from_millis(200));
+        assert!(!state.frame(now + Duration::from_millis(300)).footer.loading);
     }
 
     #[test]
@@ -171,11 +158,11 @@ mod tests {
         let mut state = state();
         let now = Instant::now();
         assert!(state.search_sent(now));
-        assert!(!state.search_sent(now + std::time::Duration::from_millis(100)));
+        assert!(!state.search_sent(now + Duration::from_millis(100)));
         assert_eq!(state.search_started, Some(now));
 
-        state.apply_results(Vec::new(), now + std::time::Duration::from_millis(200));
-        assert!(state.search_sent(now + std::time::Duration::from_millis(300)));
+        state.apply_results(Vec::new(), now + Duration::from_millis(200));
+        assert!(state.search_sent(now + Duration::from_millis(300)));
     }
 
     #[test]
@@ -186,20 +173,10 @@ mod tests {
         state.search_started = Some(now);
 
         state.apply_partial(vec![item("Files", None, None, None)], now);
-        assert!(
-            state
-                .frame(now + std::time::Duration::from_millis(200))
-                .footer
-                .loading
-        );
+        assert!(state.frame(now + Duration::from_millis(200)).footer.loading);
 
-        state.apply_results(Vec::new(), now + std::time::Duration::from_millis(300));
-        assert!(
-            !state
-                .frame(now + std::time::Duration::from_millis(400))
-                .footer
-                .loading
-        );
+        state.apply_results(Vec::new(), now + Duration::from_millis(300));
+        assert!(!state.frame(now + Duration::from_millis(400)).footer.loading);
     }
 
     #[test]
@@ -211,14 +188,9 @@ mod tests {
         let rows = vec![item("Files", None, None, None)];
 
         state.apply_partial(rows.clone(), now);
-        state.apply_results(rows, now + std::time::Duration::from_millis(10));
+        state.apply_results(rows, now + Duration::from_millis(10));
 
-        assert!(
-            !state
-                .frame(now + std::time::Duration::from_millis(300))
-                .footer
-                .loading
-        );
+        assert!(!state.frame(now + Duration::from_millis(300)).footer.loading);
     }
 
     #[test]
@@ -235,7 +207,7 @@ mod tests {
                 Some("/i.svg"),
             ),
         ];
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         state.apply_results(items.clone(), now);
 
         state.cursor.selected = 1;
@@ -264,7 +236,7 @@ mod tests {
         let mut state = state();
         state.query = "query".to_string();
         state.presentation.entrance_started = true;
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         let rows = |count: usize| {
             (0..count)
                 .map(|index| item(&format!("row{index}"), None, None, None))
@@ -278,17 +250,17 @@ mod tests {
         assert_eq!(state.presentation.card_target, target);
         assert_eq!(state.card_height(), start, "the event itself does not jump");
 
-        state.advance(now + std::time::Duration::from_millis(40));
+        state.advance(now + Duration::from_millis(40));
         let mid = state.card_height();
         assert!(
             mid > start && mid < target,
             "{mid} between {start} and {target}"
         );
 
-        state.apply_results(rows(1), now + std::time::Duration::from_millis(60));
+        state.apply_results(rows(1), now + Duration::from_millis(60));
         let lower = state.layout().content_h(1);
         assert_eq!(state.presentation.card_target, lower);
-        state.advance(now + std::time::Duration::from_secs(2));
+        state.advance(now + Duration::from_secs(2));
         assert_eq!(state.card_height(), lower);
     }
 
@@ -297,10 +269,7 @@ mod tests {
         let mut state = state();
         state.query = "query".to_string();
         state.presentation.reduce_motion = true;
-        state.apply_results(
-            vec![item("A", None, Some(run("a")), None)],
-            std::time::Instant::now(),
-        );
+        state.apply_results(vec![item("A", None, Some(run("a")), None)], Instant::now());
         assert!(state.row_motion.iter().all(Option::is_none));
     }
 
@@ -308,7 +277,7 @@ mod tests {
     fn a_row_from_outside_the_window_enters_instead_of_sliding() {
         let mut state = state();
         state.query = "query".to_string();
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         let rows: Vec<_> = (0..8)
             .map(|index| {
                 item(
@@ -323,7 +292,7 @@ mod tests {
 
         let mut next = rows;
         next.swap(0, 6);
-        state.apply_results(next, now + std::time::Duration::from_millis(10));
+        state.apply_results(next, now + Duration::from_millis(10));
         assert!(
             state.row_motion[0].is_some_and(|motion| motion.enter),
             "r6 was off screen and enters"
@@ -335,14 +304,14 @@ mod tests {
     fn only_rows_new_to_the_payload_animate_in() {
         let mut state = state();
         state.query = "query".to_string();
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         let a = item("A", None, Some(run("a")), None);
         let b = item("B", None, Some(run("b")), None);
         state.apply_results(vec![a.clone(), b], now);
         assert!(state.row_motion.iter().all(Option::is_some));
         assert!(state.row_motion.iter().flatten().all(|motion| motion.enter));
 
-        let later = now + std::time::Duration::from_millis(60);
+        let later = now + Duration::from_millis(60);
         let c = item("C", None, Some(run("c")), None);
         state.apply_results(vec![a.clone(), c.clone()], later);
         assert!(state.row_motion[0].is_none(), "A kept its place");
@@ -364,7 +333,7 @@ mod tests {
     fn nothing_is_launched_without_a_target() {
         let mut state = state();
         let items = vec![item("Files", None, None, None)];
-        state.apply_results(items, std::time::Instant::now());
+        state.apply_results(items, Instant::now());
         assert_eq!(state.selected_row(), None);
     }
 
@@ -390,7 +359,7 @@ mod tests {
             plugin: Some("file-search".to_string()),
             default: true,
         }];
-        state.apply_results(vec![row], std::time::Instant::now());
+        state.apply_results(vec![row], Instant::now());
 
         let launch = state.selected_row().unwrap();
         // what Enter runs

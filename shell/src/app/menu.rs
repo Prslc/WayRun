@@ -225,6 +225,7 @@ impl State {
 mod tests {
     use super::*;
     use crate::app::test_support::{file_row, item, plugin_action, run, state, with_actions};
+    use std::time::Instant;
 
     #[test]
     fn the_rows_own_command_clears_a_remembered_default() {
@@ -275,7 +276,7 @@ mod tests {
             ),
             terminal,
         ];
-        state.apply_results(vec![row], std::time::Instant::now());
+        state.apply_results(vec![row], Instant::now());
         assert!(state.open_actions());
 
         fn remember(state: &mut State, selected: usize) -> Option<(String, Option<String>)> {
@@ -304,7 +305,7 @@ mod tests {
     #[test]
     fn the_panel_opens_over_the_selected_row_and_runs_its_action() {
         let mut state = state();
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         state.apply_results(
             vec![
                 item(
@@ -362,7 +363,7 @@ mod tests {
                 }),
                 None,
             )],
-            std::time::Instant::now(),
+            Instant::now(),
         );
         assert!(!state.open_actions());
         assert!(state.menu.is_none());
@@ -371,7 +372,7 @@ mod tests {
     #[test]
     fn a_new_payload_closes_the_panel() {
         let mut state = state();
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         state.apply_results(
             vec![with_actions(
                 item("a", None, Some(run("a")), None),
@@ -468,7 +469,7 @@ mod tests {
                 default: true,
             },
         ];
-        state.apply_results(vec![row], std::time::Instant::now());
+        state.apply_results(vec![row], Instant::now());
         assert!(state.open_actions());
 
         assert_eq!(
@@ -480,7 +481,7 @@ mod tests {
 
     #[test]
     fn a_default_gesture_keeps_the_panel_on_the_entry_it_marked() {
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         let mut state = state();
         let uri = "file:///tmp/a.txt";
         let reveal = |default| {
@@ -530,7 +531,7 @@ mod tests {
 
     #[test]
     fn a_panel_gesture_on_a_vanished_row_leaves_the_panel_closed() {
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         let mut state = state();
         let uri = "file:///tmp/a.txt";
         let reveal = || {
@@ -554,7 +555,7 @@ mod tests {
 
     #[test]
     fn a_resume_dropped_before_the_reply_lands_leaves_the_panel_closed() {
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         let mut state = state();
         let uri = "file:///tmp/a.txt";
         let reveal = |default| {
@@ -591,7 +592,7 @@ mod tests {
     #[test]
     fn the_panel_window_follows_the_selection_past_max_rows() {
         let mut state = state();
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         let actions: Vec<&str> = (0..10).map(|_| "act").collect();
         state.apply_results(
             vec![with_actions(
@@ -617,7 +618,7 @@ mod tests {
 
     #[test]
     fn the_enter_hint_names_a_default_action_and_keeps_launch_without_one() {
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         let uri = "file:///tmp/a.txt";
         let mut state = state();
         let mut row = item(

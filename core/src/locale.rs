@@ -1,3 +1,4 @@
+use std::env;
 use std::sync::OnceLock;
 
 /// The `LANGUAGE` the process started with, kept so launched apps can get it
@@ -8,18 +9,18 @@ static AMBIENT_LANGUAGE: OnceLock<Option<String>> = OnceLock::new();
 /// crate's chrome, the rows and glib's `.desktop` strings alike; needs a restart.
 pub fn init() {
     let config = crate::config::get();
-    let locale = resolve(&config.ui.locale, |key| std::env::var(key).ok());
+    let locale = resolve(&config.ui.locale, |key| env::var(key).ok());
     rust_i18n::set_locale(&locale);
-    let ambient = std::env::var("LANGUAGE").ok();
+    let ambient = env::var("LANGUAGE").ok();
     let tag = glib_tag(&locale);
     if ambient.as_deref() != Some(tag.as_str()) {
         // SAFETY: both binaries call `init` before any other thread exists, and
         // glib first reads the variable when its first locale lookup runs later.
-        unsafe { std::env::set_var("LANGUAGE", &tag) };
+        unsafe { env::set_var("LANGUAGE", &tag) };
     }
-    if std::env::var("WAYRUN_LOCALE").ok().as_deref() != Some(locale.as_str()) {
+    if env::var("WAYRUN_LOCALE").ok().as_deref() != Some(locale.as_str()) {
         // SAFETY: `init` runs before any other thread exists, like the pin above.
-        unsafe { std::env::set_var("WAYRUN_LOCALE", &locale) };
+        unsafe { env::set_var("WAYRUN_LOCALE", &locale) };
     }
     let _ = AMBIENT_LANGUAGE.set(ambient);
 }
@@ -111,6 +112,7 @@ fn glib_tag(stem: &str) -> String {
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+    use std::fs;
     use std::path::{Path, PathBuf};
 
     fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
@@ -177,7 +179,7 @@ mod tests {
     }
 
     fn read(path: &Path) -> String {
-        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
+        fs::read_to_string(path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
     }
 
     /// The flat `a.b.c:` keys a locale file defines.

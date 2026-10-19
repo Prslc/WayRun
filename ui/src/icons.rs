@@ -3,7 +3,9 @@ mod raster;
 mod render;
 
 use std::collections::{HashMap, HashSet};
+use std::sync::mpsc;
 use std::sync::mpsc::Sender;
+use std::thread;
 
 use tiny_skia::{FillRule, Mask, PathBuilder, Pixmap, PixmapPaint, Transform};
 use wayrun_core::wire::IconShape;
@@ -277,8 +279,8 @@ pub fn spawn_worker<F>(done: F) -> Sender<(u64, IconKey)>
 where
     F: Fn((u64, IconKey, Option<Pixmap>)) -> bool + Send + 'static,
 {
-    let (jobs, queue) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
+    let (jobs, queue) = mpsc::channel();
+    thread::spawn(move || {
         while let Ok((generation, key)) = queue.recv() {
             let shape = match &key {
                 IconKey::Plain { shape, .. } | IconKey::Tinted { shape, .. } => *shape,
@@ -324,21 +326,24 @@ fn clip(icon: &mut Pixmap, shape: IconShape) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
+    use std::fs;
+    use std::path::PathBuf;
     use tiny_skia::Color;
 
     /// A PNG on disk is the shape `render` accepts, so the test writes one: an
     /// opaque red square.
-    fn red_png(name: &str) -> std::path::PathBuf {
+    fn red_png(name: &str) -> PathBuf {
         let mut source = Pixmap::new(4, 4).unwrap();
         source.fill(Color::from_rgba8(255, 0, 0, 255));
-        let path = std::env::temp_dir().join(name);
-        std::fs::write(&path, source.encode_png().unwrap()).unwrap();
+        let path = env::temp_dir().join(name);
+        fs::write(&path, source.encode_png().unwrap()).unwrap();
         path
     }
 
     /// The cache plus the queue the worker would drain.
-    fn test_cache() -> (IconCache, std::sync::mpsc::Receiver<(u64, IconKey)>) {
-        let (jobs, queued) = std::sync::mpsc::channel();
+    fn test_cache() -> (IconCache, mpsc::Receiver<(u64, IconKey)>) {
+        let (jobs, queued) = mpsc::channel();
         (IconCache::new(jobs), queued)
     }
 
@@ -399,7 +404,7 @@ mod tests {
         );
         assert!(target.pixel(15, 15).unwrap().alpha() > 0, "inside the box");
 
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
@@ -412,7 +417,7 @@ mod tests {
         assert_eq!(icon.pixel(0, 0).unwrap().alpha(), 0, "a corner is clipped");
         assert!(icon.pixel(15, 2).unwrap().alpha() > 0, "the top edge stays");
 
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
@@ -420,8 +425,8 @@ mod tests {
         // `resvg` is built without `text`/`system-fonts`; path-only SVGs, which
         // is what every theme and plugin icon is, must still render.
         let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="#ff0000"/></svg>"##;
-        let path = std::env::temp_dir().join("wayrun-icon-test.svg");
-        std::fs::write(&path, svg).unwrap();
+        let path = env::temp_dir().join("wayrun-icon-test.svg");
+        fs::write(&path, svg).unwrap();
 
         let (mut cache, _queued) = test_cache();
         let mut target = Pixmap::new(34, 34).unwrap();
@@ -432,15 +437,15 @@ mod tests {
         assert_eq!(centre.alpha(), 255, "the square is drawn");
         assert_eq!((centre.red(), centre.green(), centre.blue()), (255, 0, 0));
 
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
     fn a_greyscale_glyph_is_tinted_to_the_theme_colour() {
         // a `#444` silhouette, the shape a Papirus action icon has on this box
         let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="#444444"/></svg>"##;
-        let path = std::env::temp_dir().join("wayrun-icon-tint.svg");
-        std::fs::write(&path, svg).unwrap();
+        let path = env::temp_dir().join("wayrun-icon-tint.svg");
+        fs::write(&path, svg).unwrap();
 
         let (mut cache, _queued) = test_cache();
         let mut target = Pixmap::new(34, 34).unwrap();
@@ -457,14 +462,14 @@ mod tests {
             (centre.red(), centre.green(), centre.blue()),
             (241, 223, 218)
         );
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
     fn a_coloured_glyph_keeps_its_own_colour() {
         let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="#1e88e5"/></svg>"##;
-        let path = std::env::temp_dir().join("wayrun-icon-notint.svg");
-        std::fs::write(&path, svg).unwrap();
+        let path = env::temp_dir().join("wayrun-icon-notint.svg");
+        fs::write(&path, svg).unwrap();
 
         let (mut cache, _queued) = test_cache();
         let mut target = Pixmap::new(34, 34).unwrap();
@@ -480,7 +485,7 @@ mod tests {
             (centre.red(), centre.green(), centre.blue()),
             (0x1e, 0x88, 0xe5)
         );
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
@@ -527,7 +532,7 @@ mod tests {
         cache.draw(&mut target, plain(&path, 2.0, 2.0, 30));
         assert_eq!(target.pixel(17, 17).unwrap().alpha(), 255);
 
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
@@ -572,7 +577,7 @@ mod tests {
         );
         assert!(queued.try_recv().is_ok(), "the cleared miss asks again");
 
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
     }
 
     #[test]

@@ -1,8 +1,10 @@
 use std::cell::RefCell;
 use std::io::{BufRead, BufReader, Read};
+use std::iter;
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::rc::Rc;
+use std::thread;
 
 use mlua::Lua;
 
@@ -13,7 +15,7 @@ pub(super) fn lua_with_http(dir: &Path) -> Lua {
     let lua = Lua::new();
     let active: kv::Active = Rc::new(RefCell::new(Some("demo".to_string())));
     let paths: kv::Paths = Rc::new(RefCell::new(
-        std::iter::once(("demo".to_string(), dir.join("demo").join("kv.db"))).collect(),
+        iter::once(("demo".to_string(), dir.join("demo").join("kv.db"))).collect(),
     ));
     let stores: kv::Handle = Rc::new(RefCell::new(kv::Stores::default()));
     lua.globals()
@@ -57,10 +59,10 @@ pub(super) fn read_request(stream: &mut TcpStream) -> (String, String) {
 /// an assertion inside it fails the test.
 pub(super) fn serve<T: Send + 'static>(
     handler: impl FnOnce(TcpStream) -> T + Send + 'static,
-) -> (u16, std::thread::JoinHandle<T>) {
+) -> (u16, thread::JoinHandle<T>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
-    let server = std::thread::spawn(move || {
+    let server = thread::spawn(move || {
         let (stream, _) = listener.accept().unwrap();
         handler(stream)
     });

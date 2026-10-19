@@ -1,4 +1,5 @@
 use serde_json::{Value, json};
+use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
@@ -268,9 +269,9 @@ async fn run_worker<F, Fut>(
     dispatch: F,
 ) where
     F: Fn(String, Option<Emit>) -> Fut + Send + Sync + 'static,
-    Fut: std::future::Future<Output = Vec<ResultItem>> + Send + 'static,
+    Fut: Future<Output = Vec<ResultItem>> + Send + 'static,
 {
-    let dispatch = std::sync::Arc::new(dispatch);
+    let dispatch = Arc::new(dispatch);
     while rx.changed().await.is_ok() {
         let Some(mut query) = rx.borrow_and_update().clone() else {
             continue;
@@ -279,7 +280,7 @@ async fn run_worker<F, Fut>(
             // Each query gets its own task: a panicking provider must not
             // silence the worker that answers every later search.
             let (partial_tx, mut partial_rx) = mpsc::channel(8);
-            let dispatch = std::sync::Arc::clone(&dispatch);
+            let dispatch = Arc::clone(&dispatch);
             let mut task = tokio::spawn({
                 let query = query.clone();
                 async move { dispatch(query, Some(partial_tx)).await }
@@ -334,6 +335,7 @@ async fn run_worker<F, Fut>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     use tokio::sync::mpsc;
 
     /// Returns the messages emitted while one line is handled.
@@ -395,7 +397,7 @@ mod tests {
 
         // the cancel lands before the test yields, so the query's payload is
         // superseded: nothing may stream
-        let outcome = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
+        let outcome = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
         assert!(outcome.is_err(), "the cancelled payload must not stream");
     }
 
@@ -414,11 +416,11 @@ mod tests {
         tokio::spawn(run_worker(rx, tx, dispatch));
         request.send_replace(Some("x".to_string()));
 
-        let first = tokio::time::timeout(std::time::Duration::from_secs(1), out.recv())
+        let first = tokio::time::timeout(Duration::from_secs(1), out.recv())
             .await
             .unwrap()
             .unwrap();
-        let second = tokio::time::timeout(std::time::Duration::from_secs(1), out.recv())
+        let second = tokio::time::timeout(Duration::from_secs(1), out.recv())
             .await
             .unwrap()
             .unwrap();
@@ -440,7 +442,7 @@ mod tests {
                 let finished = Arc::clone(&finished);
                 async move {
                     if query == "slow" {
-                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        tokio::time::sleep(Duration::from_secs(5)).await;
                         finished.store(true, Ordering::SeqCst);
                     }
                     Vec::new()
@@ -450,10 +452,10 @@ mod tests {
         tokio::spawn(run_worker(rx, tx, dispatch));
 
         request.send_replace(Some("slow".to_string()));
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
         request.send_replace(Some("fast".to_string()));
 
-        let line = tokio::time::timeout(std::time::Duration::from_secs(1), out.recv())
+        let line = tokio::time::timeout(Duration::from_secs(1), out.recv())
             .await
             .expect("the newer search answers")
             .expect("the worker is alive");

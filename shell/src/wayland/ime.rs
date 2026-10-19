@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use smithay_client_toolkit::dispatch2::Dispatch2;
 use wayland_client::backend::ObjectData;
@@ -146,7 +147,7 @@ impl Shell {
             return;
         }
 
-        let frame = self.app.frame(std::time::Instant::now());
+        let frame = self.app.frame(Instant::now());
         let (x, y, width, height) = render::caret_rect(&frame, &mut self.text);
         // 4px-quantised, like the blur region: a present must not commit a
         // text-input state change of its own.

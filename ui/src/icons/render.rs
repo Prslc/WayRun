@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::fs;
 
 use tiny_skia::{FilterQuality, Pixmap, PixmapPaint, PremultipliedColorU8, Transform};
 
@@ -30,7 +31,7 @@ fn load(path: &str) -> Option<Cow<'static, [u8]>> {
     if let Some(name) = path.strip_prefix("builtin:") {
         return Some(Cow::Borrowed(builtin::glyph(name)));
     }
-    Some(Cow::Owned(std::fs::read(path).ok()?))
+    Some(Cow::Owned(fs::read(path).ok()?))
 }
 
 /// Whether a spec is an SVG; every compiled glyph is one.
@@ -196,27 +197,29 @@ fn render_svg(data: &[u8], size: u32) -> Option<Pixmap> {
 #[cfg(test)]
 mod tests {
     use image::ImageEncoder;
+    use std::env;
+    use std::process;
 
     use super::*;
 
     #[test]
     fn an_svg_intrinsic_size_comes_from_its_attributes() {
-        let path = std::env::temp_dir().join("wayrun-aspect.svg");
-        std::fs::write(
+        let path = env::temp_dir().join("wayrun-aspect.svg");
+        fs::write(
             &path,
             br#"<svg xmlns="http://www.w3.org/2000/svg" width="160" height="90"><rect width="160" height="90"/></svg>"#,
         )
         .unwrap();
         assert_eq!(intrinsic_size(path.to_str().unwrap()), Some((160, 90)));
 
-        std::fs::write(
+        fs::write(
             &path,
             br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 32"><rect width="64" height="32"/></svg>"#,
         )
         .unwrap();
         assert_eq!(intrinsic_size(path.to_str().unwrap()), Some((64, 32)));
 
-        let _ = std::fs::remove_file(&path);
+        let _ = fs::remove_file(&path);
     }
 
     #[test]
@@ -225,8 +228,8 @@ mod tests {
         image::codecs::jpeg::JpegEncoder::new(&mut data)
             .write_image(&[220, 40, 40], 1, 1, image::ExtendedColorType::Rgb8)
             .unwrap();
-        let path = std::env::temp_dir().join(format!("wayrun-preview-{}.jpg", std::process::id()));
-        std::fs::write(&path, data).unwrap();
+        let path = env::temp_dir().join(format!("wayrun-preview-{}.jpg", process::id()));
+        fs::write(&path, data).unwrap();
 
         let pixmap = render(path.to_str().unwrap(), 8).unwrap();
         assert_eq!((pixmap.width(), pixmap.height()), (8, 8));
@@ -234,6 +237,6 @@ mod tests {
         assert!(pixel.alpha() > 0);
         assert!(pixel.red() > pixel.blue());
 
-        let _ = std::fs::remove_file(path);
+        let _ = fs::remove_file(path);
     }
 }

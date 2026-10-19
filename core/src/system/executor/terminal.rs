@@ -1,3 +1,4 @@
+use std::env;
 use std::path::{Path, PathBuf};
 
 use gio::prelude::FileExt;
@@ -14,7 +15,7 @@ pub fn open_terminal(uri: &str) {
     let Some(dir) = terminal_dir(&path, is_dir) else {
         return;
     };
-    let Some(mut argv) = terminal_command_from(std::env::var("TERMINAL").ok().as_deref()) else {
+    let Some(mut argv) = terminal_command_from(env::var("TERMINAL").ok().as_deref()) else {
         return;
     };
     if let Some(extra) = terminal_dir_arg(&argv, &dir) {
@@ -30,7 +31,7 @@ pub fn run_in_terminal(cmd: &str) {
 }
 
 pub fn run_in_terminal_in(cmd: &str, dir: Option<&Path>) {
-    let Some(argv) = terminal_run_argv(std::env::var("TERMINAL").ok().as_deref(), cmd, dir) else {
+    let Some(argv) = terminal_run_argv(env::var("TERMINAL").ok().as_deref(), cmd, dir) else {
         return;
     };
     spawn_argv(&argv, dir);

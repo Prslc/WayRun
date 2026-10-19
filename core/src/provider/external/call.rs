@@ -1,4 +1,9 @@
+use std::io;
+use std::process;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use anyhow::Result;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
@@ -22,7 +27,7 @@ pub(super) async fn host_call(
     command: &str,
     resident: bool,
     request: &serde_json::Value,
-    limit: std::time::Duration,
+    limit: Duration,
 ) -> Option<serde_json::Value> {
     if resident {
         super::super::resident::call(command, request, limit).await
@@ -37,7 +42,7 @@ async fn host_call_streaming(
     command: &str,
     resident: bool,
     request: &serde_json::Value,
-    limit: std::time::Duration,
+    limit: Duration,
     partial: impl FnMut(serde_json::Value) + Send + 'static,
 ) -> Option<serde_json::Value> {
     if resident {
@@ -52,7 +57,7 @@ async fn host_call_streaming(
 async fn rpc_call_within(
     command: &str,
     request: &serde_json::Value,
-    limit: std::time::Duration,
+    limit: Duration,
 ) -> Option<serde_json::Value> {
     rpc_call_streaming(command, request, limit, &mut |_| {}).await
 }
@@ -62,7 +67,7 @@ async fn rpc_call_within(
 async fn rpc_call_streaming(
     command: &str,
     request: &serde_json::Value,
-    limit: std::time::Duration,
+    limit: Duration,
     partial: &mut impl FnMut(serde_json::Value),
 ) -> Option<serde_json::Value> {
     let mut req_str = serde_json::to_string(request).ok()?;
@@ -74,17 +79,17 @@ async fn rpc_call_streaming(
         // running (and keep holding whatever it is stuck on).
         let spawned = Command::new(command)
             .kill_on_drop(true)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::inherit())
+            .stdin(process::Stdio::piped())
+            .stdout(process::Stdio::piped())
+            .stderr(process::Stdio::inherit())
             .spawn();
         match spawned {
             Ok(child) => break child,
             // Another thread's fork held a just-written script open until it
             // exec'd; a brief retry outlasts that window.
-            Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 3 => {
+            Err(error) if error.kind() == io::ErrorKind::ExecutableFileBusy && tries < 3 => {
                 tries += 1;
-                tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+                tokio::time::sleep(Duration::from_millis(2)).await;
             }
             Err(_) => return None, // command not found -> no host
         }
@@ -112,7 +117,7 @@ async fn rpc_call_streaming(
             partial(value);
         }
         let _ = child.wait().await;
-        Ok::<_, std::io::Error>(reply)
+        Ok::<_, io::Error>(reply)
     };
 
     match tokio::time::timeout(limit, exchange).await {
@@ -177,9 +182,9 @@ pub(super) async fn query_external_streaming(
         "params": { "plugin": plugin, "text": text, "stream": true },
         "id": next_id(),
     });
-    let last = std::sync::Arc::new(std::sync::Mutex::new(None::<Vec<ResultItem>>));
+    let last = Arc::new(Mutex::new(None::<Vec<ResultItem>>));
     let partial = {
-        let last = std::sync::Arc::clone(&last);
+        let last = Arc::clone(&last);
         let plugin = plugin.to_string();
         let icon = icon.to_string();
         move |value: serde_json::Value| {
@@ -246,6 +251,9 @@ pub(super) async fn query_default(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::Instant;
 
     #[tokio::test]
     async fn an_empty_query_never_reaches_the_host() {
@@ -261,18 +269,18 @@ mod tests {
     async fn a_stalled_host_is_given_up_on() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("stall.sh");
-        std::fs::write(&path, "#!/bin/sh\ncat >/dev/null\nexec sleep 600\n").unwrap();
-        let mut perms = std::fs::metadata(&path).unwrap().permissions();
-        std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
-        std::fs::set_permissions(&path, perms).unwrap();
+        fs::write(&path, "#!/bin/sh\ncat >/dev/null\nexec sleep 600\n").unwrap();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        PermissionsExt::set_mode(&mut perms, 0o755);
+        fs::set_permissions(&path, perms).unwrap();
 
         let request = serde_json::json!({"jsonrpc": "2.0", "method": "search", "id": 1});
-        let limit = std::time::Duration::from_millis(200);
-        let started = std::time::Instant::now();
+        let limit = Duration::from_millis(200);
+        let started = Instant::now();
         let reply = rpc_call_within(&path.display().to_string(), &request, limit).await;
         assert!(reply.is_none(), "a stalled host has no answer");
         assert!(
-            started.elapsed() < std::time::Duration::from_secs(3),
+            started.elapsed() < Duration::from_secs(3),
             "gave up on the deadline, not on the host: {:?}",
             started.elapsed()
         );
@@ -280,10 +288,10 @@ mod tests {
 
     fn streaming_host(dir: &tempfile::TempDir, name: &str, body: &str) -> String {
         let path = dir.path().join(name);
-        std::fs::write(&path, body).unwrap();
-        let mut perms = std::fs::metadata(&path).unwrap().permissions();
-        std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
-        std::fs::set_permissions(&path, perms).unwrap();
+        fs::write(&path, body).unwrap();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        PermissionsExt::set_mode(&mut perms, 0o755);
+        fs::set_permissions(&path, perms).unwrap();
         path.display().to_string()
     }
 

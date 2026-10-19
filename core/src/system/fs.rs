@@ -1,9 +1,12 @@
 use anyhow::{Context, Result};
 use std::env;
 use std::ffi::OsStr;
+use std::fs;
+use std::io;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process;
 
 /// Release the allocator's free pages back to the kernel. Only glibc's
 /// `malloc_trim` does this; other targets leave it to their allocator.
@@ -24,9 +27,9 @@ pub fn get_home() -> Result<PathBuf> {
 }
 
 /// Create a directory (and parents) with the XDG spec's 0700.
-pub fn create_dir_private(dir: &Path) -> std::io::Result<()> {
+pub fn create_dir_private(dir: &Path) -> io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
-    std::fs::DirBuilder::new()
+    fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(dir)
@@ -48,7 +51,7 @@ pub fn cache_dir() -> Option<PathBuf> {
 /// slash is a path itself. Symlinks resolve to the target whose exec bit decides.
 pub fn which_in(path: impl AsRef<OsStr>, name: &str) -> Option<PathBuf> {
     let executable = |candidate: &Path| {
-        std::fs::metadata(candidate)
+        fs::metadata(candidate)
             .map(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
             .unwrap_or(false)
     };
@@ -64,11 +67,11 @@ pub fn which_in(path: impl AsRef<OsStr>, name: &str) -> Option<PathBuf> {
 
 /// Create `path` only when it is absent; `O_EXCL` keeps the test atomic, so an
 /// editor's atomic save is never truncated.
-pub fn write_if_absent(path: &Path, contents: &str) -> std::io::Result<()> {
+pub fn write_if_absent(path: &Path, contents: &str) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         create_dir_private(parent)?;
     }
-    let mut file = std::fs::OpenOptions::new()
+    let mut file = fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)?;
@@ -79,13 +82,13 @@ pub fn write_if_absent(path: &Path, contents: &str) -> std::io::Result<()> {
 /// after it (a `.tmp` a crash left behind) does not spell the rule its own way.
 pub fn tmp_path(path: &Path) -> PathBuf {
     let mut tmp = path.as_os_str().to_owned();
-    tmp.push(format!(".{}.tmp", std::process::id()));
+    tmp.push(format!(".{}.tmp", process::id()));
     PathBuf::from(tmp)
 }
 
 /// Write the pid-suffixed staging file, then rename: a reader only ever sees a
 /// whole file, and two cores never share one staging name.
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     write_atomic_with(path, |file| file.write_all(bytes))
 }
 
@@ -93,13 +96,13 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// pieces streams them instead of assembling the bytes first.
 pub fn write_atomic_with(
     path: &Path,
-    write: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
-) -> std::io::Result<()> {
+    write: impl FnOnce(&mut fs::File) -> io::Result<()>,
+) -> io::Result<()> {
     let tmp = tmp_path(path);
-    let mut file = std::fs::File::create(&tmp)?;
+    let mut file = fs::File::create(&tmp)?;
     write(&mut file)?;
     drop(file);
-    std::fs::rename(&tmp, path)
+    fs::rename(&tmp, path)
 }
 
 /// Flatpak apps live in `<installation>/exports/share`, which only reaches
@@ -134,7 +137,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested/private");
         create_dir_private(&path).unwrap();
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o700);
     }
 
@@ -142,10 +145,10 @@ mod tests {
     fn which_in_scans_the_path_and_checks_the_exec_bit() {
         let dir = tempfile::tempdir().unwrap();
         let write = |path: &Path, mode: u32| {
-            std::fs::write(path, "#!/bin/sh\n").unwrap();
-            let mut perms = std::fs::metadata(path).unwrap().permissions();
+            fs::write(path, "#!/bin/sh\n").unwrap();
+            let mut perms = fs::metadata(path).unwrap().permissions();
             perms.set_mode(mode);
-            std::fs::set_permissions(path, perms).unwrap();
+            fs::set_permissions(path, perms).unwrap();
         };
         let tool = dir.path().join("tool");
         write(&tool, 0o755);
@@ -175,15 +178,14 @@ mod tests {
 
     #[test]
     fn writing_a_missing_file_never_truncates_an_existing_one() {
-        let dir =
-            std::env::temp_dir().join(format!("wayrun-write-if-absent-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = env::temp_dir().join(format!("wayrun-write-if-absent-{}", process::id()));
+        let _ = fs::remove_dir_all(&dir);
         let path = dir.join("x.toml");
 
         write_if_absent(&path, "first").unwrap();
         assert!(write_if_absent(&path, "second").is_err());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "first");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "first");
 
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = fs::remove_dir_all(&dir);
     }
 }

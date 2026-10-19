@@ -1,4 +1,4 @@
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{BufReader, Read, Seek, SeekFrom};
 
 use tiny_skia::{IntSize, Pixmap, PixmapRef, PremultipliedColorU8};
@@ -10,7 +10,7 @@ const JPEG_MAGIC: [u8; 2] = [0xff, 0xd8];
 /// file and decode at the target scale; the other formats read it whole.
 pub(super) fn decode(path: &str, size: u32) -> Option<Pixmap> {
     let source = streamed_source(path, size).or_else(|| {
-        let data = std::fs::read(path).ok()?;
+        let data = fs::read(path).ok()?;
         Pixmap::decode_png(&data)
             .ok()
             .or_else(|| decode_image(&data))

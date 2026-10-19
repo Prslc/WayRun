@@ -1,4 +1,5 @@
 use crate::wire::ThemeConfig;
+use std::fs;
 use std::path::PathBuf;
 
 /// The Material palette DankMaterialShell generated with matugen. It holds both
@@ -48,7 +49,7 @@ pub fn load_theme() -> ThemeConfig {
 /// The shell draws the container from `surface_container_high` (what the GTK
 /// template fed `popover_bg_color`), so the card keeps its depth.
 fn load_dms() -> Option<ThemeConfig> {
-    let text = std::fs::read_to_string(dms_colors_path()?).ok()?;
+    let text = fs::read_to_string(dms_colors_path()?).ok()?;
     from_json(&text)
 }
 

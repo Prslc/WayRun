@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
@@ -145,7 +146,7 @@ fn find_in_theme(dir: &Path, index: &ThemeIndex, name: &str) -> Option<String> {
 /// Fallback for a theme without a usable `index.theme`: try `name.<ext>` one and
 /// two directories down, which covers every layout the spec allows.
 fn scan_theme(dir: &Path, name: &str) -> Option<String> {
-    let entries = std::fs::read_dir(dir).ok()?;
+    let entries = fs::read_dir(dir).ok()?;
     for entry in entries.flatten() {
         let sub = entry.path();
         if !sub.is_dir() {
@@ -156,7 +157,7 @@ fn scan_theme(dir: &Path, name: &str) -> Option<String> {
             if path.is_file() {
                 return Some(path.to_string_lossy().into_owned());
             }
-            let Ok(inner) = std::fs::read_dir(&sub) else {
+            let Ok(inner) = fs::read_dir(&sub) else {
                 continue;
             };
             for inner in inner.flatten() {
@@ -174,7 +175,7 @@ fn scan_theme(dir: &Path, name: &str) -> Option<String> {
 /// The parsed `index.theme` of `theme`, from the first root that ships one.
 fn index_for(theme: &str, roots: &[PathBuf]) -> Option<ThemeIndex> {
     roots.iter().find_map(|root| {
-        std::fs::read_to_string(root.join(theme).join("index.theme"))
+        fs::read_to_string(root.join(theme).join("index.theme"))
             .ok()
             .map(|text| parse_index(&text))
     })
@@ -220,7 +221,7 @@ fn chain_for(start: &str) -> Arc<Chain> {
                     roots.iter().filter_map(move |root| {
                         let dir = root.join(&theme);
                         dir.is_dir().then(|| {
-                            let index = std::fs::read_to_string(dir.join("index.theme"))
+                            let index = fs::read_to_string(dir.join("index.theme"))
                                 .ok()
                                 .map(|text| parse_index(&text));
                             (dir, index)
@@ -291,6 +292,9 @@ pub fn warn_if_no_icon_theme() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
+    use std::process;
+    use std::slice::from_ref;
 
     #[test]
     fn an_index_lists_its_directories_and_inherits() {
@@ -315,42 +319,42 @@ mod tests {
 
     #[test]
     fn the_chain_follows_inherits_and_ends_at_hicolor() {
-        let root = std::env::temp_dir().join(format!("wayrun-chain-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("child")).unwrap();
-        std::fs::create_dir_all(root.join("base")).unwrap();
-        std::fs::write(
+        let root = env::temp_dir().join(format!("wayrun-chain-{}", process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("child")).unwrap();
+        fs::create_dir_all(root.join("base")).unwrap();
+        fs::write(
             root.join("child/index.theme"),
             "[Icon Theme]\nDirectories=\nInherits=base\n",
         )
         .unwrap();
-        std::fs::write(
+        fs::write(
             root.join("base/index.theme"),
             "[Icon Theme]\nDirectories=\n",
         )
         .unwrap();
 
         assert_eq!(
-            theme_chain_from("child", std::slice::from_ref(&root)),
+            theme_chain_from("child", from_ref(&root)),
             ["child", "base", "hicolor"]
         );
         // an unknown theme still resolves to the hicolor fallback
         assert_eq!(
-            theme_chain_from("nope", std::slice::from_ref(&root)),
+            theme_chain_from("nope", from_ref(&root)),
             ["nope", "hicolor"]
         );
 
-        let _ = std::fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
     fn a_theme_prefers_a_larger_directory_over_a_smaller_one() {
-        let root = std::env::temp_dir().join(format!("wayrun-size-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
+        let root = env::temp_dir().join(format!("wayrun-size-{}", process::id()));
+        let _ = fs::remove_dir_all(&root);
         let theme = root.join("T");
-        std::fs::create_dir_all(theme.join("16x16/apps")).unwrap();
-        std::fs::create_dir_all(theme.join("64x64/apps")).unwrap();
-        std::fs::write(
+        fs::create_dir_all(theme.join("16x16/apps")).unwrap();
+        fs::create_dir_all(theme.join("64x64/apps")).unwrap();
+        fs::write(
             theme.join("index.theme"),
             "[Icon Theme]\nDirectories=16x16/apps,64x64/apps\n\n\
              [16x16/apps]\nSize=16\nType=Fixed\n\n\
@@ -358,14 +362,14 @@ mod tests {
         )
         .unwrap();
         // only the too-small variant exists, so it is still the hit
-        std::fs::write(theme.join("16x16/apps/foo.png"), "x").unwrap();
-        std::fs::write(theme.join("64x64/apps/foo.svg"), "x").unwrap();
+        fs::write(theme.join("16x16/apps/foo.png"), "x").unwrap();
+        fs::write(theme.join("64x64/apps/foo.svg"), "x").unwrap();
 
-        let index = parse_index(&std::fs::read_to_string(theme.join("index.theme")).unwrap());
+        let index = parse_index(&fs::read_to_string(theme.join("index.theme")).unwrap());
         let path = find_in_theme(&theme, &index, "foo").unwrap();
         // 48 is closer to 64 than to 16
         assert!(path.ends_with("64x64/apps/foo.svg"), "{path}");
 
-        let _ = std::fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&root);
     }
 }

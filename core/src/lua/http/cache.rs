@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::str::from_utf8;
 
 use mlua::{Lua, Table, Value};
 
@@ -90,7 +91,7 @@ impl Client {
         let Some((id, path)) = self.database() else {
             return;
         };
-        let Ok(body) = std::str::from_utf8(&response.body) else {
+        let Ok(body) = from_utf8(&response.body) else {
             return;
         };
         let cached = Cached {
@@ -149,6 +150,7 @@ mod tests {
     use std::net::TcpListener;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::thread;
 
     #[test]
     fn the_cache_key_separates_requests_by_header() {
@@ -181,7 +183,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let seen = Arc::new(AtomicUsize::new(0));
         let counter = Arc::clone(&seen);
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { break };
                 let _ = read_request(&mut stream);

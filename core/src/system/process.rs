@@ -2,6 +2,7 @@ use std::io::Read;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
 
 /// Default deadline for a blocking helper process.
@@ -41,12 +42,12 @@ pub fn output_within_capped(
     let (out_tx, out_rx) = mpsc::channel();
     let (err_tx, err_rx) = mpsc::channel();
     if let Some(mut pipe) = child.stdout.take() {
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             let _ = out_tx.send(read_capped(&mut pipe, stdout_cap));
         });
     }
     if let Some(mut pipe) = child.stderr.take() {
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             let _ = err_tx.send(read_capped(&mut pipe, stderr_cap));
         });
     }
@@ -93,7 +94,7 @@ fn wait_status(child: &mut Child, limit: Duration) -> Option<ExitStatus> {
             let _ = child.wait();
             return None;
         }
-        std::thread::sleep(POLL);
+        thread::sleep(POLL);
     }
 }
 

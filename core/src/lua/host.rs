@@ -1,6 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::io::{BufRead, Write};
+use std::fs;
+use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::UNIX_EPOCH;
@@ -22,7 +23,7 @@ pub fn run(script: &str) -> Result<()> {
         anyhow::bail!("usage: wayrun --lua-host <script.lua>");
     }
     let source =
-        std::fs::read_to_string(script).with_context(|| format!("reading lua script {script}"))?;
+        fs::read_to_string(script).with_context(|| format!("reading lua script {script}"))?;
     let mut host = Host::new(script, strip_shebang(&source))
         .with_context(|| format!("loading lua script {script}"))?;
     host.serve()
@@ -103,7 +104,7 @@ fn watch_stamps(script: &str, imports: &module::Imports) -> Vec<(PathBuf, Stamp)
 }
 
 fn file_stamp(path: &Path) -> Stamp {
-    let meta = std::fs::metadata(path).ok()?;
+    let meta = fs::metadata(path).ok()?;
     let mtime = meta
         .modified()
         .ok()?
@@ -127,7 +128,7 @@ struct Host {
 
 impl Host {
     fn new(script: &str, source: &str) -> Result<Self> {
-        let out: Sink = Rc::new(RefCell::new(Box::new(std::io::stdout())));
+        let out: Sink = Rc::new(RefCell::new(Box::new(io::stdout())));
         Self::with_sink(script, source, out)
     }
 
@@ -165,7 +166,7 @@ impl Host {
         if !self.stale() {
             return false;
         }
-        let source = match std::fs::read_to_string(&self.script) {
+        let source = match fs::read_to_string(&self.script) {
             Ok(source) => source,
             Err(error) => {
                 warn(&self.script, &format!("reload failed: {error}"));
@@ -215,7 +216,7 @@ impl Host {
     }
 
     fn serve(&mut self) -> Result<()> {
-        let stdin = std::io::stdin();
+        let stdin = io::stdin();
         for line in stdin.lock().lines() {
             let line = line?;
             if line.trim().is_empty() {
@@ -445,12 +446,12 @@ mod tests {
     struct Capture(Rc<RefCell<Vec<u8>>>);
 
     impl Write for Capture {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             self.0.borrow_mut().extend_from_slice(buf);
             Ok(buf.len())
         }
 
-        fn flush(&mut self) -> std::io::Result<()> {
+        fn flush(&mut self) -> io::Result<()> {
             Ok(())
         }
     }
@@ -465,8 +466,8 @@ mod tests {
     /// A script on disk, so a reload re-reads the real file.
     fn file_host(dir: &tempfile::TempDir, source: &str) -> (Host, Rc<RefCell<Vec<u8>>>) {
         let path = dir.path().join("main.lua");
-        std::fs::write(&path, source).unwrap();
-        std::fs::write(dir.path().join("util.lua"), "return { value = 'one' }").unwrap();
+        fs::write(&path, source).unwrap();
+        fs::write(dir.path().join("util.lua"), "return { value = 'one' }").unwrap();
         let buffer = Rc::new(RefCell::new(Vec::new()));
         let out: Sink = Rc::new(RefCell::new(Box::new(Capture(Rc::clone(&buffer)))));
         let host = Host::with_sink(path.to_str().unwrap(), source, out).unwrap();
@@ -494,7 +495,7 @@ mod tests {
         assert_eq!(search(&host, "demo", "x")[0]["title"], "one");
         assert!(!host.refresh(), "an unchanged script is not reloaded");
 
-        std::fs::write(dir.path().join("util.lua"), "return { value = 'two!' }").unwrap();
+        fs::write(dir.path().join("util.lua"), "return { value = 'two!' }").unwrap();
         assert!(host.refresh(), "the imported file changed");
         assert_eq!(search(&host, "demo", "x")[0]["title"], "two!");
     }
@@ -505,7 +506,7 @@ mod tests {
         let (mut host, _buffer) = file_host(&dir, IMPORTING_SCRIPT);
         assert_eq!(search(&host, "demo", "x")[0]["title"], "one");
 
-        std::fs::write(dir.path().join("util.lua"), "this is not lua").unwrap();
+        fs::write(dir.path().join("util.lua"), "this is not lua").unwrap();
         assert!(!host.refresh(), "the reload failed");
         assert_eq!(
             search(&host, "demo", "x")[0]["title"],
@@ -513,7 +514,7 @@ mod tests {
             "the last good VM still answers"
         );
 
-        std::fs::write(dir.path().join("util.lua"), "return { value = 'three' }").unwrap();
+        fs::write(dir.path().join("util.lua"), "return { value = 'three' }").unwrap();
         assert!(host.refresh(), "a later fix is picked up");
         assert_eq!(search(&host, "demo", "x")[0]["title"], "three");
     }
@@ -527,7 +528,7 @@ mod tests {
                 return { { title = "rewritten" } }
             end } }
         "#;
-        std::fs::write(dir.path().join("main.lua"), rewritten).unwrap();
+        fs::write(dir.path().join("main.lua"), rewritten).unwrap();
         assert!(host.refresh(), "the script itself changed");
         assert_eq!(search(&host, "demo", "x")[0]["title"], "rewritten");
     }
@@ -688,9 +689,9 @@ mod tests {
     #[test]
     fn import_loads_a_module_next_to_the_script() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("util.lua"), "return { answer = 42 }").unwrap();
+        fs::write(dir.path().join("util.lua"), "return { answer = 42 }").unwrap();
         let script = dir.path().join("main.lua");
-        std::fs::write(
+        fs::write(
             &script,
             r#"return { { id = "demo", search = function()
                 local util = wayrun.import("util")
@@ -698,7 +699,7 @@ mod tests {
             end } }"#,
         )
         .unwrap();
-        let source = std::fs::read_to_string(&script).unwrap();
+        let source = fs::read_to_string(&script).unwrap();
         let host = Host::new(script.to_str().unwrap(), &source).unwrap();
         assert_eq!(search(&host, "demo", "x")[0]["title"], "42");
     }
@@ -879,7 +880,7 @@ mod tests {
     #[test]
     fn a_declared_area_serves_list_stat_and_snapshot() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("note.txt"), "hi").unwrap();
+        fs::write(dir.path().join("note.txt"), "hi").unwrap();
         {
             let connection = rusqlite::Connection::open(dir.path().join("data.sqlite")).unwrap();
             connection

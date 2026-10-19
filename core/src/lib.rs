@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::env;
 
 // The launcher's strings, shared with the shell: both crates read the same
 // tables, so one locale covers the core's rows and the shell's own chrome.
@@ -32,7 +33,7 @@ pub use system::fs::trim_allocator;
 
 /// `--list-plugins` prints the registry and exits; otherwise serve the protocol.
 async fn serve_or_list() -> Result<()> {
-    if std::env::args().any(|a| a == "--list-plugins") {
+    if env::args().any(|a| a == "--list-plugins") {
         plugin::print_list().await;
         return Ok(());
     }

@@ -1,4 +1,7 @@
 use serde::Deserialize;
+use std::fs;
+use std::path::Path;
+use std::sync::OnceLock;
 
 #[derive(Deserialize, PartialEq)]
 pub(super) struct Config {
@@ -35,7 +38,7 @@ pub(super) fn load_or_default() -> Config {
 
         ensure_default_config(&path);
 
-        if let Ok(content) = std::fs::read_to_string(&path)
+        if let Ok(content) = fs::read_to_string(&path)
             && let Ok(user) = toml::from_str::<Config>(&content)
         {
             config = merge_config(config, user);
@@ -47,8 +50,8 @@ pub(super) fn load_or_default() -> Config {
 
 /// The shipped `plugins.toml`, written once; a watcher reload must not recreate
 /// the file an editor just replaced.
-fn ensure_default_config(path: &std::path::Path) {
-    static ONCE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+fn ensure_default_config(path: &Path) {
+    static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| {
         let _ = crate::write_if_absent(path, DEFAULT_CONFIG);
     });

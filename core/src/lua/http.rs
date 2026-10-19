@@ -1,5 +1,7 @@
+use std::iter;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
 
 use mlua::{Lua, Table, Value};
 
@@ -152,7 +154,7 @@ impl Client {
         }
 
         let mut outcomes: Vec<Option<Result<Response, String>>> =
-            std::iter::repeat_with(|| None).take(items.len()).collect();
+            iter::repeat_with(|| None).take(items.len()).collect();
         let mut misses = Vec::new();
         for (at, item) in items.iter().enumerate() {
             if item.ttl.is_some()
@@ -167,9 +169,9 @@ impl Client {
         if !misses.is_empty() {
             let next = AtomicUsize::new(0);
             let results: Mutex<Vec<Option<Result<Response, String>>>> =
-                Mutex::new(std::iter::repeat_with(|| None).take(items.len()).collect());
+                Mutex::new(iter::repeat_with(|| None).take(items.len()).collect());
             let agent = &self.agent;
-            std::thread::scope(|scope| {
+            thread::scope(|scope| {
                 for _ in 0..FANOUT.min(misses.len()) {
                     scope.spawn(|| {
                         loop {
@@ -225,6 +227,7 @@ mod tests {
     use crate::lua::http::test_support::{lua_with_http, read_request, serve, url_of};
     use std::io::Write;
     use std::net::TcpListener;
+    use std::thread;
     use std::time::{Duration, Instant};
 
     #[test]
@@ -319,10 +322,10 @@ mod tests {
     fn a_millisecond_timeout_bounds_the_call() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let _ = read_request(&mut stream);
-            std::thread::sleep(Duration::from_secs(2));
+            thread::sleep(Duration::from_secs(2));
             let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok");
         });
         let dir = tempfile::tempdir().unwrap();

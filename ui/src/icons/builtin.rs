@@ -40,6 +40,7 @@ pub(super) fn glyph(name: &str) -> &'static [u8] {
 
 #[cfg(test)]
 mod tests {
+    use std::str::from_utf8;
     use wayrun_core::wire::BUILTIN_GLYPHS;
 
     use super::*;
@@ -47,7 +48,7 @@ mod tests {
     #[test]
     fn every_glyph_is_a_colourful_svg() {
         for (name, bytes) in GLYPHS {
-            let text = std::str::from_utf8(bytes).unwrap();
+            let text = from_utf8(bytes).unwrap();
             assert!(
                 text.contains("<svg") && !text.contains("currentColor"),
                 "{name} is not a colourful svg"

@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::ops::Range;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
@@ -239,7 +240,7 @@ fn dir_path(index: &Index, slot: u32) -> PathBuf {
 
 /// The old file records belonging to directory `slot`: the file table is sorted
 /// by `dir`, so they are one contiguous run.
-fn file_range(index: &Index, slot: u32) -> std::ops::Range<u32> {
+fn file_range(index: &Index, slot: u32) -> Range<u32> {
     let bound = |after: bool| {
         let (mut lo, mut hi) = (0, index.file_count);
         while lo < hi {
@@ -263,6 +264,7 @@ mod tests {
     use crate::provider::file::index::builder::build;
     use crate::provider::file::index::format::{header_bytes, layout_ok};
     use crate::provider::file::index::test_support::{parsed, write};
+    use std::fs;
     use std::path::Path;
 
     /// The image's tables as text, in slot order, blooms included: what a patch
@@ -308,8 +310,8 @@ mod tests {
         write(&home.join("keep/new.txt"));
         write(&home.join("keep/sub/deep/one.txt"));
         write(&home.join("fresh/dir/two.txt"));
-        std::fs::remove_file(home.join("keep/a.txt")).unwrap();
-        std::fs::remove_dir_all(home.join("other")).unwrap();
+        fs::remove_file(home.join("keep/a.txt")).unwrap();
+        fs::remove_dir_all(home.join("other")).unwrap();
 
         let index = parsed(&before, home);
         let changed = changed_dirs(&index);

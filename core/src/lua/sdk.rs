@@ -1,7 +1,12 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::env;
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::process;
 use std::rc::Rc;
+use std::time::SystemTime;
 use std::time::{Duration, UNIX_EPOCH};
 
 use gio::prelude::FileExt;
@@ -113,13 +118,13 @@ pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua:
                     "env {name}: plugin {id} does not declare it; add the name to the plugin table's env"
                 )));
             }
-            Ok(std::env::var(name).ok())
+            Ok(env::var(name).ok())
         })?,
     )?;
     sdk.set(
         "which",
         lua.create_function(|_, name: String| {
-            let path = std::env::var_os("PATH").unwrap_or_default();
+            let path = env::var_os("PATH").unwrap_or_default();
             Ok(crate::system::fs::which_in(path, &name).map(|path| path.display().to_string()))
         })?,
     )?;
@@ -243,23 +248,23 @@ fn exec_program(
             "exec {program}: plugin {id} does not declare it; add the name to the plugin table's exec"
         )));
     }
-    let path = crate::system::fs::which_in(std::env::var_os("PATH").unwrap_or_default(), program)
+    let path = crate::system::fs::which_in(env::var_os("PATH").unwrap_or_default(), program)
         .ok_or_else(|| {
-        mlua::Error::RuntimeError(format!("exec {program}: not on the launcher's PATH"))
-    })?;
-    let mut command = std::process::Command::new(path);
+            mlua::Error::RuntimeError(format!("exec {program}: not on the launcher's PATH"))
+        })?;
+    let mut command = process::Command::new(path);
     command.args(&args).env_clear();
     if let Ok(home) = crate::system::fs::get_home() {
         command.current_dir(home);
     }
     for name in EXEC_ENV {
-        if let Some(value) = std::env::var_os(name) {
+        if let Some(value) = env::var_os(name) {
             command.env(name, value);
         }
     }
     let declared_env = env_scope.borrow().get(&id).cloned().unwrap_or_default();
     for name in declared_env {
-        if let Some(value) = std::env::var_os(&name) {
+        if let Some(value) = env::var_os(&name) {
             command.env(name, value);
         }
     }
@@ -298,8 +303,8 @@ pub(super) fn file_uri(path: &str) -> Option<String> {
 
 /// Unix seconds, the host clock a signature or a cache TTL needs.
 pub(super) fn now_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         .map(|since| since.as_secs() as i64)
         .unwrap_or(0)
 }
@@ -307,7 +312,7 @@ pub(super) fn now_seconds() -> i64 {
 /// The script's own directory, so a plugin can ship an icon beside itself; the
 /// host has just read the file, so canonicalize only fails in theory.
 pub(super) fn script_dir(script: &str) -> Option<PathBuf> {
-    let path = std::fs::canonicalize(script).unwrap_or_else(|_| PathBuf::from(script));
+    let path = fs::canonicalize(script).unwrap_or_else(|_| PathBuf::from(script));
     path.parent().map(|dir| dir.to_path_buf())
 }
 
@@ -404,15 +409,15 @@ fn write_path(own: &Path, cache: Option<&Path>, path: &str) -> Result<PathBuf, S
 }
 
 fn fs_lib(lua: &Lua, read: areas::Guard, write: areas::Guard) -> mlua::Result<Table> {
-    let fs = lua.create_table()?;
+    let lib = lua.create_table()?;
     let list_guard = Rc::clone(&read);
-    fs.set(
+    lib.set(
         "list",
         lua.create_function(move |lua, dir: String| {
             let dir = list_guard(&dir).map_err(|problem| {
                 mlua::Error::RuntimeError(format!("fs.list {dir:?}: {problem}"))
             })?;
-            let Ok(entries) = std::fs::read_dir(&dir) else {
+            let Ok(entries) = fs::read_dir(&dir) else {
                 return Ok(Value::Nil);
             };
             // readdir order is unspecified; sort so the listing is stable.
@@ -429,13 +434,13 @@ fn fs_lib(lua: &Lua, read: areas::Guard, write: areas::Guard) -> mlua::Result<Ta
         })?,
     )?;
     let stat_guard = Rc::clone(&read);
-    fs.set(
+    lib.set(
         "stat",
         lua.create_function(move |lua, path: String| {
             let path = stat_guard(&path).map_err(|problem| {
                 mlua::Error::RuntimeError(format!("fs.stat {path:?}: {problem}"))
             })?;
-            let Ok(meta) = std::fs::metadata(&path) else {
+            let Ok(meta) = fs::metadata(&path) else {
                 return Ok(Value::Nil);
             };
             let mtime_ns = meta
@@ -450,15 +455,15 @@ fn fs_lib(lua: &Lua, read: areas::Guard, write: areas::Guard) -> mlua::Result<Ta
             Ok(Value::Table(stat))
         })?,
     )?;
-    fs.set(
+    lib.set(
         "read",
         lua.create_function(move |lua, name: String| {
             let path = read(&name).map_err(|problem| {
                 mlua::Error::RuntimeError(format!("fs.read {name:?}: {problem}"))
             })?;
-            match std::fs::read_to_string(&path) {
+            match fs::read_to_string(&path) {
                 Ok(text) => Ok(Value::String(lua.create_string(text)?)),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Value::Nil),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Value::Nil),
                 Err(error) => Err(mlua::Error::RuntimeError(format!(
                     "fs.read {name:?}: {error}"
                 ))),
@@ -466,24 +471,24 @@ fn fs_lib(lua: &Lua, read: areas::Guard, write: areas::Guard) -> mlua::Result<Ta
         })?,
     )?;
     let delete_guard = Rc::clone(&write);
-    fs.set(
+    lib.set(
         "write",
         lua.create_function(move |_, (path, data): (String, mlua::LuaString)| {
             let target = write(&path).map_err(|problem| {
                 mlua::Error::RuntimeError(format!("fs.write {path:?}: {problem}"))
             })?;
             if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent).map_err(|error| {
+                fs::create_dir_all(parent).map_err(|error| {
                     mlua::Error::RuntimeError(format!("fs.write {path:?}: {error}"))
                 })?;
             }
-            std::fs::write(&target, data.as_bytes()).map_err(|error| {
+            fs::write(&target, data.as_bytes()).map_err(|error| {
                 mlua::Error::RuntimeError(format!("fs.write {path:?}: {error}"))
             })?;
             Ok(true)
         })?,
     )?;
-    fs.set(
+    lib.set(
         "delete",
         lua.create_function(move |_, path: String| {
             let target = delete_guard(&path).map_err(|problem| {
@@ -493,14 +498,14 @@ fn fs_lib(lua: &Lua, read: areas::Guard, write: areas::Guard) -> mlua::Result<Ta
                 .map_err(|error| mlua::Error::RuntimeError(format!("fs.delete {path:?}: {error}")))
         })?,
     )?;
-    Ok(fs)
+    Ok(lib)
 }
 
 /// Remove one file; an absent file is already what the caller asked for.
-fn delete_path(target: &Path) -> std::io::Result<bool> {
-    match std::fs::remove_file(target) {
+fn delete_path(target: &Path) -> io::Result<bool> {
+    match fs::remove_file(target) {
         Ok(()) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
         Err(error) => Err(error),
     }
 }
@@ -518,9 +523,9 @@ mod tests {
         let cache = tempfile::tempdir().unwrap();
         let area = tempfile::tempdir().unwrap();
         let script = tempfile::tempdir().unwrap();
-        std::fs::write(own.path().join("local.txt"), "x").unwrap();
-        std::fs::write(cache.path().join("cached.bin"), "z").unwrap();
-        std::fs::write(area.path().join("note.txt"), "y").unwrap();
+        fs::write(own.path().join("local.txt"), "x").unwrap();
+        fs::write(cache.path().join("cached.bin"), "z").unwrap();
+        fs::write(area.path().join("note.txt"), "y").unwrap();
         let declared = [area.path().to_path_buf()];
         let script_dir = script.path().to_path_buf();
 
@@ -633,7 +638,7 @@ mod tests {
     fn deleting_a_file_is_idempotent() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("x");
-        std::fs::write(&file, "x").unwrap();
+        fs::write(&file, "x").unwrap();
         assert!(delete_path(&file).unwrap());
         assert!(
             delete_path(&file).unwrap(),
@@ -725,7 +730,7 @@ mod tests {
             .join("docs")
             .join(locale)
             .join("lua.md");
-        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
+        fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
     }
 
     fn stub() -> String {
@@ -734,7 +739,7 @@ mod tests {
             .expect("the core lives in the workspace")
             .join("lua")
             .join("wayrun.lua");
-        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
+        fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
     }
 
     /// The `wayrun.<name>` declarations a LuaLS stub file holds; a parent table

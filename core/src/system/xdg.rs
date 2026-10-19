@@ -1,4 +1,5 @@
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 /// `$XDG_DATA_HOME`, or `~/.local/share` when unset.
@@ -125,7 +126,7 @@ pub fn icon_settings_files() -> Vec<PathBuf> {
 pub fn settings_icon_theme() -> Option<String> {
     icon_settings_files()
         .iter()
-        .find_map(|path| icon_theme_name(&std::fs::read_to_string(path).ok()?))
+        .find_map(|path| icon_theme_name(&fs::read_to_string(path).ok()?))
 }
 
 fn icon_theme_name(text: &str) -> Option<String> {

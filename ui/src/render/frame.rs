@@ -157,11 +157,12 @@ mod tests {
     use super::super::canvas::dim_u8;
     use super::*;
     use crate::view::test_frame;
+    use std::sync::mpsc;
     use tiny_skia::Color;
 
     /// A cache whose queue nobody drains: these frames draw no icons.
     fn idle_icons() -> IconCache {
-        let (jobs, _queued) = std::sync::mpsc::channel();
+        let (jobs, _queued) = mpsc::channel();
         IconCache::new(jobs)
     }
 

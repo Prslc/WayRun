@@ -1,7 +1,9 @@
+use std::env;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{ChildStdin, Command, Stdio};
-use std::sync::mpsc::{Sender as StdSender, channel};
+use std::sync::mpsc::{self, Sender as StdSender, channel};
 use std::sync::{LazyLock, Mutex, PoisonError};
+use std::thread;
 
 use calloop::channel::Sender;
 use serde_json::{Value, json};
@@ -69,7 +71,7 @@ pub fn default(scope: &str, action_id: Option<&str>) {
 pub fn start(tx: Sender<BackendEvent>) {
     // Re-exec this same binary in core mode; stderr is inherited so the core's
     // warnings land in the unit's journal.
-    let spawned = std::env::current_exe().and_then(|exe| {
+    let spawned = env::current_exe().and_then(|exe| {
         let mut command = Command::new(exe);
         command
             .arg("--core")
@@ -100,11 +102,11 @@ pub fn start(tx: Sender<BackendEvent>) {
     if let Some(stdin) = stdin {
         let (sender, receiver) = channel::<String>();
         *OUTBOX.lock().unwrap_or_else(PoisonError::into_inner) = Some(sender);
-        std::thread::spawn(move || drain(stdin, receiver));
+        thread::spawn(move || drain(stdin, receiver));
     }
 
     if let Some(stdout) = stdout {
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 let Ok(line) = line else { break };
                 if let Some(event) = parse(&line)
@@ -123,7 +125,7 @@ pub fn start(tx: Sender<BackendEvent>) {
     search("a");
 }
 
-fn drain(mut stdin: ChildStdin, receiver: std::sync::mpsc::Receiver<String>) {
+fn drain(mut stdin: ChildStdin, receiver: mpsc::Receiver<String>) {
     while let Ok(line) = receiver.recv() {
         if stdin.write_all(line.as_bytes()).is_err() || stdin.write_all(b"\n").is_err() {
             break;

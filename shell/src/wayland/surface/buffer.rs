@@ -1,3 +1,4 @@
+use std::env;
 use std::time::Instant;
 
 use smithay_client_toolkit::compositor::FrameCallbackData;
@@ -240,7 +241,7 @@ impl Shell {
         // `WAYRUN_SNAPSHOT=<path>` writes the buffer as drawn, once per show: the
         // only way to tell what the shell produced from what the compositor did.
         if !self.first_frame_logged
-            && let Some(path) = std::env::var_os("WAYRUN_SNAPSHOT")
+            && let Some(path) = env::var_os("WAYRUN_SNAPSHOT")
         {
             let pixmap = self.pixmap.as_ref();
             if let Some(pixmap) = pixmap {

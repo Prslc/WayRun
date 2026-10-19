@@ -1,5 +1,7 @@
 use std::collections::BinaryHeap;
 use std::ffi::OsStr;
+use std::ffi::OsString;
+use std::fs;
 use std::future::Future;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
@@ -82,7 +84,7 @@ macro_rules! search_plugin {
 
 /// The guess reads only the name, so a directory's type is decided here.
 fn content_type_for(path: &Path) -> String {
-    if std::fs::metadata(path).is_ok_and(|meta| meta.is_dir()) {
+    if fs::metadata(path).is_ok_and(|meta| meta.is_dir()) {
         "inode/directory".to_string()
     } else {
         gio::content_type_guess(Some(path), None).0.to_string()
@@ -255,9 +257,7 @@ fn path_rows_in(query: &str, home: &Path) -> Vec<PathHit> {
     let leaf = query.rsplit('/').next().unwrap_or(query);
     let listing = query.ends_with('/') || leaf == "." || leaf == "..";
     if !listing && let Some(path) = path::exact_path(query, home) {
-        let is_dir = std::fs::metadata(&path)
-            .ok()
-            .is_some_and(|meta| meta.is_dir());
+        let is_dir = fs::metadata(&path).ok().is_some_and(|meta| meta.is_dir());
         return vec![PathHit {
             item: entry_item(&path, is_dir),
             exact: true,
@@ -270,13 +270,13 @@ fn path_rows_in(query: &str, home: &Path) -> Vec<PathHit> {
         return Vec::new();
     };
     let leaf = query[slash + 1..].to_lowercase();
-    let Ok(entries) = std::fs::read_dir(&dir) else {
+    let Ok(entries) = fs::read_dir(&dir) else {
         return Vec::new();
     };
     // Keep the smallest names only, so a huge directory is one readdir pass
     // and O(n log cap) work, not a full sort.
     let cap = crate::provider::SHOW_CAP;
-    let mut kept: BinaryHeap<(String, std::ffi::OsString)> = BinaryHeap::with_capacity(cap + 1);
+    let mut kept: BinaryHeap<(String, OsString)> = BinaryHeap::with_capacity(cap + 1);
     for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(text) = name.to_str() else {
@@ -514,11 +514,11 @@ mod tests {
     fn a_path_query_completes_the_directory_it_names() {
         let home = tempfile::tempdir().unwrap();
         let project = home.path().join("Project");
-        std::fs::create_dir_all(project.join("WayRun")).unwrap();
-        std::fs::create_dir_all(project.join("Wayland")).unwrap();
-        std::fs::write(project.join("WayRun/inside.txt"), "x").unwrap();
-        std::fs::write(project.join("Other.txt"), "x").unwrap();
-        std::fs::write(project.join(".hidden"), "x").unwrap();
+        fs::create_dir_all(project.join("WayRun")).unwrap();
+        fs::create_dir_all(project.join("Wayland")).unwrap();
+        fs::write(project.join("WayRun/inside.txt"), "x").unwrap();
+        fs::write(project.join("Other.txt"), "x").unwrap();
+        fs::write(project.join(".hidden"), "x").unwrap();
 
         let titles = |query: &str| -> Vec<String> {
             path_rows_in(query, home.path())
@@ -548,7 +548,7 @@ mod tests {
     #[test]
     fn a_plain_query_falls_back_to_the_first_home_level() {
         let home = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(home.path().join("Project")).unwrap();
+        fs::create_dir_all(home.path().join("Project")).unwrap();
 
         let hits = home_matches_in("Proj", home.path());
         assert_eq!(hits.len(), 1);
@@ -571,9 +571,9 @@ mod tests {
     fn a_listing_is_capped_and_sorted() {
         let home = tempfile::tempdir().unwrap();
         let dir = home.path().join("Many");
-        std::fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(&dir).unwrap();
         for at in 0..60 {
-            std::fs::write(dir.join(format!("f{at:02}.txt")), "x").unwrap();
+            fs::write(dir.join(format!("f{at:02}.txt")), "x").unwrap();
         }
 
         let rows = path_rows_in("Many/", home.path());

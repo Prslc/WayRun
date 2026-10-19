@@ -1,8 +1,10 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::OsString;
+use std::fs;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
+use std::process;
 use std::rc::Rc;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -188,7 +190,7 @@ fn sqlite_params(params: Option<Table>) -> mlua::Result<Vec<rusqlite::types::Val
 /// The cached immutable copy of `source` for its current `(mtime, size)`; the
 /// snapshot keeps the writer's locking, `-wal` and `-shm` out of the picture.
 fn snapshot_copy(source: &Path, cache: &Path) -> Result<PathBuf> {
-    let meta = std::fs::metadata(source)?;
+    let meta = fs::metadata(source)?;
     let size = meta.len();
     let nanos = meta
         .modified()?
@@ -203,9 +205,9 @@ fn snapshot_copy(source: &Path, cache: &Path) -> Result<PathBuf> {
     }
 
     // A pid-suffixed tmp keeps two racing hosts from interleaving one copy.
-    let tmp = cache.join(format!("{stem}.{}.tmp", std::process::id()));
-    std::fs::copy(source, &tmp)?;
-    std::fs::rename(&tmp, &target)?;
+    let tmp = cache.join(format!("{stem}.{}.tmp", process::id()));
+    fs::copy(source, &tmp)?;
+    fs::rename(&tmp, &target)?;
     prune(cache, &stem, &target);
     Ok(target)
 }
@@ -214,7 +216,7 @@ fn snapshot_copy(source: &Path, cache: &Path) -> Result<PathBuf> {
 /// is this process's tmp (another live process's is left until it is stale).
 fn prune(dir: &Path, stem: &str, keep: &Path) {
     const TMP_GRACE: Duration = Duration::from_secs(3600);
-    let Ok(entries) = std::fs::read_dir(dir) else {
+    let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
     for path in entries.flatten().map(|entry| entry.path()) {
@@ -227,16 +229,16 @@ fn prune(dir: &Path, stem: &str, keep: &Path) {
                 .rsplit_once('.')
                 .and_then(|(rest, _)| rest.rsplit_once('.'))
                 .and_then(|(_, pid)| pid.parse::<u32>().ok());
-            pid == Some(std::process::id()) || older_than(&path, TMP_GRACE)
+            pid == Some(process::id()) || older_than(&path, TMP_GRACE)
         };
         if completed || tmp {
-            let _ = std::fs::remove_file(path);
+            let _ = fs::remove_file(path);
         }
     }
 }
 
 fn older_than(path: &Path, age: Duration) -> bool {
-    std::fs::metadata(path)
+    fs::metadata(path)
         .and_then(|meta| meta.modified())
         .ok()
         .and_then(|modified| modified.elapsed().ok())

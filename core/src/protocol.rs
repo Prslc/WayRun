@@ -1,4 +1,6 @@
+use std::io;
 use std::io::Write as _;
+use std::thread;
 
 use tokio::sync::mpsc;
 
@@ -68,9 +70,9 @@ pub(super) const DRAIN: &str = "\0";
 
 /// Own stdout for the process lifetime: one channel, so no two producers
 /// interleave. A plain thread, because it must outlive the runtime to flush.
-pub(super) fn spawn_writer(mut rx: mpsc::Receiver<String>) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
-        let mut stdout = std::io::stdout();
+pub(super) fn spawn_writer(mut rx: mpsc::Receiver<String>) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let mut stdout = io::stdout();
         while let Some(json) = rx.blocking_recv() {
             if json == DRAIN {
                 break;

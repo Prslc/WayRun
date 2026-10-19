@@ -4,6 +4,7 @@ use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::sync::{Mutex, PoisonError};
+use std::thread;
 
 use crate::plugin::{Match, classify_bytes_confident, classify_ci_confident};
 use crate::provider::file::entry_item;
@@ -19,7 +20,7 @@ pub(super) const PARALLEL_FLOOR: u32 = 8192;
 /// The chunk count `n` entries split into: one per core, but never fewer than
 /// [`PARALLEL_FLOOR`] entries per chunk, so a spawn buys more than it costs.
 pub(super) fn threads_for(n: u32) -> u32 {
-    std::thread::available_parallelism()
+    thread::available_parallelism()
         .map_or(1, |num| num.get() as u32)
         .min(n.div_ceil(PARALLEL_FLOOR).max(1))
 }
@@ -264,6 +265,7 @@ mod tests {
     use super::*;
     use crate::provider::file::index::MAX_ENTRIES;
     use crate::provider::file::index::test_support::{build_ok, parsed, summaries, write};
+    use std::fs;
 
     #[test]
     fn an_index_round_trip_finds_a_path_any_depth() {
@@ -446,7 +448,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join(OsStr::from_bytes(b"h\xffme"));
         let sub = OsStr::from_bytes(b"d\xffir");
-        std::fs::create_dir(&home).unwrap();
+        fs::create_dir(&home).unwrap();
         write(&home.join(sub).join("x.txt"));
 
         let bytes = build_ok(&home, MAX_ENTRIES);

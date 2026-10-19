@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -54,7 +55,7 @@ pub(super) fn bind(
                 return Ok(value);
             }
 
-            let source = std::fs::read_to_string(&file)
+            let source = fs::read_to_string(&file)
                 .map_err(|error| mlua::Error::RuntimeError(format!("import {name:?}: {error}")))?;
             loading.set(key.as_str(), true)?;
             let env: Table = lua.registry_value(&env_key)?;
@@ -109,7 +110,7 @@ mod tests {
 
     fn wayrun_for(dir: &Path) -> (Lua, Table) {
         let script = dir.join("main.lua");
-        std::fs::write(&script, "").unwrap();
+        fs::write(&script, "").unwrap();
         let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::default()).unwrap();
         let wayrun = lua.create_table().unwrap();
         let active = Rc::new(RefCell::new(None));
@@ -122,7 +123,7 @@ mod tests {
     #[test]
     fn an_import_loads_once_and_caches_the_result() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
+        fs::write(
             dir.path().join("util.lua"),
             "count = (count or 0) + 1; return { n = count }",
         )
@@ -139,8 +140,8 @@ mod tests {
     #[test]
     fn a_circular_import_raises() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("a.lua"), "return wayrun.import('b')").unwrap();
-        std::fs::write(dir.path().join("b.lua"), "return wayrun.import('a')").unwrap();
+        fs::write(dir.path().join("a.lua"), "return wayrun.import('b')").unwrap();
+        fs::write(dir.path().join("b.lua"), "return wayrun.import('a')").unwrap();
         let (_lua, wayrun) = wayrun_for(dir.path());
         let import: Function = wayrun.get("import").unwrap();
         let error = import.call::<Value>("a").unwrap_err().to_string();

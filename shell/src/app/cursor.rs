@@ -165,6 +165,7 @@ pub fn whole_rows(accum: &mut f32, delta: f32) -> i32 {
 mod tests {
     use super::*;
     use crate::app::test_support::{item, run, state};
+    use std::time::Instant;
     use wayrun_core::wire::ResultItem;
     use wayrun_ui::geom;
 
@@ -211,7 +212,7 @@ mod tests {
         let items: Vec<ResultItem> = (0..20)
             .map(|i| item(&format!("row {i}"), None, Some(run("x")), None))
             .collect();
-        state.apply_results(items, std::time::Instant::now());
+        state.apply_results(items, Instant::now());
 
         // the pointer sits on the second visible row
         let layout = state.layout();

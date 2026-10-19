@@ -355,6 +355,7 @@ fn release_font_pages(_: &FontSystem) {}
 mod tests {
     use super::{TextEngine, blend, family_of};
     use cosmic_text::{Family, Weight};
+    use std::rc::Rc;
 
     #[test]
     fn generic_families_map_to_their_cosmic_variants() {
@@ -372,15 +373,15 @@ mod tests {
         let mut engine = TextEngine::with_family("Source Han Sans CN".to_string());
         let first = engine.shape("Firefox", 14.0, Weight::BOLD);
         let second = engine.shape("Firefox", 14.0, Weight::BOLD);
-        assert!(std::rc::Rc::ptr_eq(&first, &second), "cache hit");
+        assert!(Rc::ptr_eq(&first, &second), "cache hit");
 
         // a different size is a different key
         let other = engine.shape("Firefox", 12.0, Weight::BOLD);
-        assert!(!std::rc::Rc::ptr_eq(&first, &other));
+        assert!(!Rc::ptr_eq(&first, &other));
         // and a cleared cache re-shapes
         engine.clear_cache();
         let after = engine.shape("Firefox", 14.0, Weight::BOLD);
-        assert!(!std::rc::Rc::ptr_eq(&first, &after));
+        assert!(!Rc::ptr_eq(&first, &after));
     }
 
     #[test]
@@ -396,9 +397,9 @@ mod tests {
         // 300 distinct lines against the 256-line cap: eviction took the oldest
         // one; a wholesale clear would have dropped the rest of the table too.
         let again = engine.shape(&lines[0], 14.0, Weight::NORMAL);
-        assert!(!std::rc::Rc::ptr_eq(&first, &again), "the oldest is gone");
+        assert!(!Rc::ptr_eq(&first, &again), "the oldest is gone");
         let hit = engine.shape(&lines[299], 14.0, Weight::NORMAL);
-        assert!(std::rc::Rc::ptr_eq(&recent, &hit), "the newest survived");
+        assert!(Rc::ptr_eq(&recent, &hit), "the newest survived");
     }
 
     #[test]
@@ -418,22 +419,19 @@ mod tests {
 
         let first = engine.fit(long, 14.0, Weight::BOLD, max);
         let again = engine.fit(long, 14.0, Weight::BOLD, max);
-        assert!(std::rc::Rc::ptr_eq(&first, &again), "the elision is kept");
+        assert!(Rc::ptr_eq(&first, &again), "the elision is kept");
         // a different limit is a different fit
         let wider = engine.fit(long, 14.0, Weight::BOLD, max + 20.0);
-        assert!(!std::rc::Rc::ptr_eq(&first, &wider));
+        assert!(!Rc::ptr_eq(&first, &wider));
 
         // a line that fits is remembered too
         let fitting = engine.fit("Short", 14.0, Weight::NORMAL, 1000.0);
         let fitting_again = engine.fit("Short", 14.0, Weight::NORMAL, 1000.0);
-        assert!(std::rc::Rc::ptr_eq(&fitting, &fitting_again));
+        assert!(Rc::ptr_eq(&fitting, &fitting_again));
 
         engine.clear_cache();
         let after = engine.fit(long, 14.0, Weight::BOLD, max);
-        assert!(
-            !std::rc::Rc::ptr_eq(&first, &after),
-            "a cleared cache re-fits"
-        );
+        assert!(!Rc::ptr_eq(&first, &after), "a cleared cache re-fits");
     }
 
     #[test]

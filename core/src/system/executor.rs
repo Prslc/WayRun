@@ -1,4 +1,5 @@
 use gio::prelude::{AppInfoExt, AppLaunchContextExt, FileExt};
+use std::env;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process;
@@ -255,7 +256,7 @@ fn spawn_argv(argv: &[String], dir: Option<&Path>) {
 
 /// Whether a bare program name resolves to an executable on `PATH`.
 fn program_on_path(name: &str) -> bool {
-    let path = std::env::var_os("PATH").unwrap_or_default();
+    let path = env::var_os("PATH").unwrap_or_default();
     crate::system::fs::which_in(path, name).is_some()
 }
 
@@ -312,7 +313,7 @@ mod tests {
     #[test]
     fn a_launched_program_gets_the_default_sigpipe() {
         use std::os::unix::process::ExitStatusExt;
-        let mut command = std::process::Command::new("sh");
+        let mut command = process::Command::new("sh");
         restore_signals(&mut command);
         let status = command.args(["-c", "kill -s PIPE $$"]).status().unwrap();
         assert_eq!(status.signal(), Some(libc::SIGPIPE));

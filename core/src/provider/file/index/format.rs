@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+use std::str::from_utf8;
 
 /// The index cache's magic and format version; either mismatch rebuilds.
 pub(super) const MAGIC: [u8; 4] = *b"WRFI";
@@ -154,7 +155,7 @@ impl<'a> Index<'a> {
     pub(super) fn path_lower(&self, off: u32, len: u32) -> &'a str {
         let start = self.paths.saturating_add(off as usize);
         let end = start.saturating_add(len as usize);
-        std::str::from_utf8(self.bytes.get(start..end).unwrap_or_default()).unwrap_or_default()
+        from_utf8(self.bytes.get(start..end).unwrap_or_default()).unwrap_or_default()
     }
 
     /// A file row's bloom, zero for a corrupt slot (which then filters out, as

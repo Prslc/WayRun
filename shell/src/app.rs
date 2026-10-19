@@ -8,6 +8,7 @@ mod row;
 #[cfg(test)]
 mod test_support;
 
+use std::env;
 use std::time::{Duration, Instant};
 
 use wayrun_core::wire::{Action, Preview, ResultItem};
@@ -83,8 +84,8 @@ pub struct State {
 impl State {
     pub fn new() -> Self {
         let now = Instant::now();
-        let reduced_env = std::env::var_os("WAYRUN_REDUCED_MOTION").is_some();
-        let timing = std::env::var_os("WAYRUN_TIMING").is_some();
+        let reduced_env = env::var_os("WAYRUN_REDUCED_MOTION").is_some();
+        let timing = env::var_os("WAYRUN_TIMING").is_some();
         Self {
             query: String::new(),
             caret: 0,

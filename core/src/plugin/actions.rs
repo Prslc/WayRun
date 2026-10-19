@@ -2,6 +2,7 @@ use super::registry::{Entry, REGISTRY, ensure_loaded};
 use crate::system::icon::find_icon_spec;
 use crate::wire::{ActionItem, ResultItem};
 use rust_i18n::t;
+use std::collections::HashMap;
 
 /// Attach each row's action panel.
 pub async fn decorate(items: Vec<ResultItem>) -> Vec<ResultItem> {
@@ -46,7 +47,7 @@ fn plugin_actions(entries: &[Entry], item: &ResultItem) -> (Option<String>, Vec<
 /// own command leading.
 fn attach_actions(
     item: &mut ResultItem,
-    defaults: &std::collections::HashMap<String, String>,
+    defaults: &HashMap<String, String>,
     plugin_actions: (Option<String>, Vec<ActionItem>),
 ) {
     let Some(on_click) = item.on_click.clone() else {

@@ -3,6 +3,10 @@ mod config;
 mod session;
 mod wayland;
 
+use std::env;
+use std::error::Error;
+use std::path::Path;
+use std::process;
 use std::time::Instant;
 
 use calloop::EventLoop;
@@ -15,9 +19,9 @@ use crate::session::{backend, ipc};
 use crate::wayland::Shell;
 use wayrun_ui::render;
 
-fn main() -> std::process::ExitCode {
+fn main() -> process::ExitCode {
     wayrun_core::locale::init();
-    let mut args = std::env::args();
+    let mut args = env::args();
     let invoked_as = args.next().unwrap_or_default();
     let rest: Vec<String> = args.collect();
 
@@ -26,18 +30,18 @@ fn main() -> std::process::ExitCode {
     if let Some(at) = rest.iter().position(|arg| arg == "--lua-host") {
         let script = rest.get(at + 1).map(String::as_str).unwrap_or_default();
         return match wayrun_core::lua::run(script) {
-            Ok(()) => std::process::ExitCode::SUCCESS,
+            Ok(()) => process::ExitCode::SUCCESS,
             Err(error) => {
                 // `{:#}` keeps the cause: a broken script must say why.
                 eprintln!("wayrun: {error:#}");
-                std::process::ExitCode::FAILURE
+                process::ExitCode::FAILURE
             }
         };
     }
 
     // The shell re-execs this binary with `--core`; a `wayrun-core` symlink
     // keeps the documented stdin/JSON-RPC entry point working.
-    let as_core = std::path::Path::new(&invoked_as)
+    let as_core = Path::new(&invoked_as)
         .file_name()
         .is_some_and(|name| name == "wayrun-core");
     if as_core
@@ -46,10 +50,10 @@ fn main() -> std::process::ExitCode {
             .any(|arg| arg == "--core" || arg == "--list-plugins")
     {
         return match wayrun_core::run() {
-            Ok(()) => std::process::ExitCode::SUCCESS,
+            Ok(()) => process::ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("wayrun: {error}");
-                std::process::ExitCode::FAILURE
+                process::ExitCode::FAILURE
             }
         };
     }
@@ -58,7 +62,7 @@ fn main() -> std::process::ExitCode {
 
     if rest.first().map(String::as_str) == Some("bench") {
         render::bench();
-        return std::process::ExitCode::SUCCESS;
+        return process::ExitCode::SUCCESS;
     }
 
     if let Some(verb) = rest.first()
@@ -68,16 +72,16 @@ fn main() -> std::process::ExitCode {
     }
 
     match run() {
-        Ok(()) => std::process::ExitCode::SUCCESS,
+        Ok(()) => process::ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("wayrun: {error}");
-            std::process::ExitCode::FAILURE
+            process::ExitCode::FAILURE
         }
     }
 }
 
-fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let resident = std::env::var_os("WAYRUN_RESIDENT").is_some();
+fn run() -> Result<(), Box<dyn Error>> {
+    let resident = env::var_os("WAYRUN_RESIDENT").is_some();
 
     // The IPC listener is also the single-instance guard: take it before the
     // first Wayland round trip and before any worker starts.

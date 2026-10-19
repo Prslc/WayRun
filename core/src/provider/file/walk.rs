@@ -156,6 +156,7 @@ pub(super) fn quick_search(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     /// The names a stock install skips: the shipped template's list, the one
     /// place those defaults are written down.
@@ -197,9 +198,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let shallow = dir.path().join("Documents/a/b");
         let deep = shallow.join("c");
-        std::fs::create_dir_all(&deep).unwrap();
-        std::fs::write(shallow.join("shallow.txt"), "x").unwrap();
-        std::fs::write(deep.join("deep.txt"), "x").unwrap();
+        fs::create_dir_all(&deep).unwrap();
+        fs::write(shallow.join("shallow.txt"), "x").unwrap();
+        fs::write(deep.join("deep.txt"), "x").unwrap();
 
         let files = Files::default();
         let found = quick_search(dir.path(), "shallow.txt", false, true, &files);

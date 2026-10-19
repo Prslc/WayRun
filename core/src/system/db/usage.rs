@@ -1,5 +1,6 @@
 use anyhow::Result;
 use rusqlite::Connection;
+use std::collections::HashMap;
 
 use super::with_db;
 use crate::wire::Action;
@@ -11,9 +12,9 @@ pub fn record(command: &Action) -> Result<()> {
 
 /// The usage counts behind the given action keys, for a caller ordering a whole
 /// payload at once: one query, not one per row.
-pub fn counts(keys: &[String]) -> std::collections::HashMap<String, u32> {
+pub fn counts(keys: &[String]) -> HashMap<String, u32> {
     if keys.is_empty() {
-        return std::collections::HashMap::default();
+        return HashMap::default();
     }
     with_db(|conn| counts_with(conn, keys)).unwrap_or_default()
 }
@@ -22,11 +23,8 @@ pub fn counts(keys: &[String]) -> std::collections::HashMap<String, u32> {
 /// sqlite parses it once instead of once per payload size.
 const COUNT_BATCH: usize = 100;
 
-fn counts_with(
-    conn: &Connection,
-    keys: &[String],
-) -> Result<std::collections::HashMap<String, u32>> {
-    let mut counts = std::collections::HashMap::default();
+fn counts_with(conn: &Connection, keys: &[String]) -> Result<HashMap<String, u32>> {
+    let mut counts = HashMap::default();
     let (full, tail) = keys.split_at(keys.len() / COUNT_BATCH * COUNT_BATCH);
     for keys in full
         .chunks(COUNT_BATCH)

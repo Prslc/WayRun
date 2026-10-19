@@ -95,6 +95,8 @@ pub(super) fn check(roots: &[PathBuf], requested: &str) -> Result<PathBuf, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::os::unix::fs::symlink;
 
     #[test]
     fn expand_handles_tilde_and_refuses_climbs() {
@@ -123,9 +125,9 @@ mod tests {
     #[test]
     fn inside_joins_a_relative_name_and_refuses_an_escape() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("a.txt"), "x").unwrap();
-        std::fs::create_dir(dir.path().join("sub")).unwrap();
-        std::fs::write(dir.path().join("sub/b.txt"), "y").unwrap();
+        fs::write(dir.path().join("a.txt"), "x").unwrap();
+        fs::create_dir(dir.path().join("sub")).unwrap();
+        fs::write(dir.path().join("sub/b.txt"), "y").unwrap();
 
         assert_eq!(
             inside(dir.path(), "a.txt").unwrap(),
@@ -147,8 +149,8 @@ mod tests {
     fn a_symlink_inside_the_plugin_dir_does_not_escape() {
         let dir = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
-        std::fs::write(outside.path().join("note.txt"), "hi").unwrap();
-        std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
+        fs::write(outside.path().join("note.txt"), "hi").unwrap();
+        symlink(outside.path(), dir.path().join("link")).unwrap();
         assert!(inside(dir.path(), "link/note.txt").is_err());
     }
 
@@ -156,8 +158,8 @@ mod tests {
     fn a_symlink_cannot_step_out_of_an_area() {
         let dir = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
-        std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
-        std::fs::write(outside.path().join("note.txt"), "hi").unwrap();
+        symlink(outside.path(), dir.path().join("link")).unwrap();
+        fs::write(outside.path().join("note.txt"), "hi").unwrap();
         let roots = vec![dir.path().to_path_buf()];
         assert!(
             check(&roots, dir.path().join("link/note.txt").to_str().unwrap()).is_err(),

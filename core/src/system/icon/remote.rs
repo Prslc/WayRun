@@ -1,7 +1,11 @@
 use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, LazyLock, Mutex, OnceLock};
+use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use sha2::{Digest, Sha256};
@@ -36,7 +40,7 @@ type Notifier = Arc<dyn Fn(&str) + Send + Sync>;
 static STARTED: AtomicBool = AtomicBool::new(false);
 static PRUNED: AtomicBool = AtomicBool::new(false);
 static WRITTEN: AtomicUsize = AtomicUsize::new(0);
-static JOBS: OnceLock<std::sync::mpsc::SyncSender<Job>> = OnceLock::new();
+static JOBS: OnceLock<mpsc::SyncSender<Job>> = OnceLock::new();
 static NOTIFIER: OnceLock<Notifier> = OnceLock::new();
 static STATE: LazyLock<Mutex<State>> = LazyLock::new(Default::default);
 
@@ -45,14 +49,14 @@ pub(crate) fn start(notify: impl Fn(&str) + Send + Sync + 'static) {
     if STARTED.swap(true, Ordering::SeqCst) {
         return;
     }
-    let (jobs, queue) = std::sync::mpsc::sync_channel(QUEUE);
+    let (jobs, queue) = mpsc::sync_channel(QUEUE);
     let _ = JOBS.set(jobs);
     let notifier: Notifier = Arc::new(notify);
     let _ = NOTIFIER.set(notifier);
     let queue = Arc::new(Mutex::new(queue));
     for _ in 0..WORKERS {
         let queue = Arc::clone(&queue);
-        std::thread::spawn(move || worker(queue));
+        thread::spawn(move || worker(queue));
     }
 }
 
@@ -84,7 +88,7 @@ fn url(spec: &str, max_bytes: u64) -> Option<String> {
 }
 
 fn should_fetch(path: &Path) -> bool {
-    let Ok(meta) = std::fs::metadata(path) else {
+    let Ok(meta) = fs::metadata(path) else {
         return true;
     };
     meta.modified()
@@ -121,7 +125,7 @@ fn enqueue(url: &str, path: PathBuf, max_bytes: u64) {
     }
 }
 
-fn worker(queue: Arc<Mutex<std::sync::mpsc::Receiver<Job>>>) {
+fn worker(queue: Arc<Mutex<mpsc::Receiver<Job>>>) {
     if !PRUNED.swap(true, Ordering::Relaxed) {
         prune();
     }
@@ -219,13 +223,13 @@ fn image(content_type: &str, body: &[u8]) -> bool {
         || body.starts_with(b"<?xml")
 }
 
-fn write(path: &Path, body: &[u8]) -> std::io::Result<()> {
+fn write(path: &Path, body: &[u8]) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         crate::system::fs::create_dir_private(dir)?;
     }
     let temp = path.with_extension("tmp");
-    std::fs::write(&temp, body)?;
-    std::fs::rename(&temp, path)
+    fs::write(&temp, body)?;
+    fs::rename(&temp, path)
 }
 
 fn cache_path(url: &str) -> Option<PathBuf> {
@@ -261,7 +265,7 @@ fn prune() {
     let Some(dir) = crate::system::fs::cache_root().map(|root| root.join("icons")) else {
         return;
     };
-    let Ok(entries) = std::fs::read_dir(&dir) else {
+    let Ok(entries) = fs::read_dir(&dir) else {
         return;
     };
     let mut files: Vec<(PathBuf, u64, SystemTime)> = entries
@@ -286,7 +290,7 @@ fn prune() {
         if count <= CACHE_FILES && total <= CACHE_BYTES {
             break;
         }
-        if std::fs::remove_file(&path).is_ok() {
+        if fs::remove_file(&path).is_ok() {
             count -= 1;
             total = total.saturating_sub(len);
         }

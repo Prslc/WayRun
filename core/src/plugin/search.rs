@@ -1,4 +1,5 @@
 use std::cmp::Reverse;
+use std::collections::HashMap;
 use std::time::Duration;
 
 use super::Meta;
@@ -150,7 +151,7 @@ const DEFAULT_DEADLINE: Duration = Duration::from_millis(50);
 fn merge_ranked(
     rows: Vec<(Rank, u32, ResultItem)>,
     keys: &[String],
-    counts: &std::collections::HashMap<String, u32>,
+    counts: &HashMap<String, u32>,
 ) -> Vec<ResultItem> {
     // Materialize the sort keys first: a `sort_by_key` closure runs on every
     // comparison, and the usage lookup is a hash per call.

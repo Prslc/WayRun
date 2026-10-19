@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use std::env;
+use std::process;
 
 use super::{Compositor, Window};
 use crate::system::process::{DEADLINE, output_within};
@@ -34,8 +36,8 @@ struct RawWorkspace {
 
 impl Compositor for Hyprland {
     fn available(&self) -> bool {
-        std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
-            || std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktop| {
+        env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
+            || env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktop| {
                 desktop
                     .split(':')
                     .any(|d| d.eq_ignore_ascii_case("hyprland"))
@@ -43,7 +45,7 @@ impl Compositor for Hyprland {
     }
 
     fn windows(&self) -> Result<Vec<Window>> {
-        let mut command = std::process::Command::new("hyprctl");
+        let mut command = process::Command::new("hyprctl");
         command.args(["-j", "clients"]);
         let output = output_within(command, DEADLINE)
             .context("`hyprctl -j clients` did not answer within the deadline")?;

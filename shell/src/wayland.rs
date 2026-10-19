@@ -4,6 +4,10 @@ mod input;
 mod scale;
 mod surface;
 
+use std::env;
+use std::error::Error;
+use std::process;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use calloop::LoopHandle;
@@ -157,7 +161,7 @@ pub struct Shell {
     pointer: Option<wl_pointer::WlPointer>,
     /// Where the clipboard worker takes a show's read request, and where the
     /// decoded text comes back stamped with that show.
-    paste_jobs: std::sync::mpsc::Sender<u64>,
+    paste_jobs: mpsc::Sender<u64>,
     /// Bumped on every `open`: a paste that outlived its show is dropped.
     paste_generation: u64,
     modifiers: Modifiers,
@@ -224,9 +228,9 @@ impl Shell {
         qh: &QueueHandle<Shell>,
         handle: &LoopHandle<'static, Shell>,
         globals: &GlobalList,
-        paste_jobs: std::sync::mpsc::Sender<u64>,
-        icon_jobs: std::sync::mpsc::Sender<(u64, IconKey)>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+        paste_jobs: mpsc::Sender<u64>,
+        icon_jobs: mpsc::Sender<(u64, IconKey)>,
+    ) -> Result<Self, Box<dyn Error>> {
         let compositor = CompositorState::bind(globals, qh)?;
         let shm = Shm::bind(globals, qh)?;
         let layer_shell = LayerShell::bind(globals, qh)?;
@@ -280,8 +284,8 @@ impl Shell {
             icons: IconCache::new(icon_jobs),
             text: TextEngine::with_family(wayrun_core::config::get().font.family.clone()),
             app: Launcher::new(),
-            resident: std::env::var_os("WAYRUN_RESIDENT").is_some(),
-            ime_log: std::env::var_os("WAYRUN_IME_LOG").is_some(),
+            resident: env::var_os("WAYRUN_RESIDENT").is_some(),
+            ime_log: env::var_os("WAYRUN_IME_LOG").is_some(),
             started: Instant::now(),
             open_at: None,
             last_present: None,
@@ -311,7 +315,7 @@ impl Shell {
             }
             BackendEvent::CoreExited => {
                 eprintln!("wayrun: the core exited");
-                std::process::exit(1);
+                process::exit(1);
             }
         }
         self.redraw();

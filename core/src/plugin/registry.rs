@@ -3,6 +3,7 @@ mod hosts;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use self::config::{Config, load_or_default};
@@ -27,7 +28,7 @@ pub(super) struct Entry {
     pub pending: Option<PendingHost>,
 }
 
-pub(super) type PluginMap = std::collections::HashMap<&'static str, Box<dyn super::Plugin>>;
+pub(super) type PluginMap = HashMap<&'static str, Box<dyn super::Plugin>>;
 
 /// How many external hosts may be forked at once while resolving identities.
 /// Each is a fresh interpreter, so this is the memory ceiling of the walk.
@@ -236,7 +237,7 @@ async fn resolve_pending_filtered(keyword: Option<&str>, commands: Option<&[Stri
     }
 
     if !stale.is_empty() {
-        let permits = std::sync::Arc::new(tokio::sync::Semaphore::new(DISCOVERY_CONCURRENCY));
+        let permits = Arc::new(tokio::sync::Semaphore::new(DISCOVERY_CONCURRENCY));
         let mut hosts = tokio::task::JoinSet::new();
         for (command, resident) in stale {
             let permits = permits.clone();

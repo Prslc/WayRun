@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, RwLock};
 
@@ -99,7 +100,7 @@ impl Config {
     /// reload keeps what is applied rather than resetting to defaults.
     fn load_checked() -> Option<Self> {
         let path = path()?;
-        let text = std::fs::read_to_string(path).ok()?;
+        let text = fs::read_to_string(path).ok()?;
         toml::from_str(&text).ok()
     }
 

@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -34,7 +35,7 @@ pub fn load() -> AppearanceConfig {
 fn load_checked() -> Option<AppearanceConfig> {
     ensure_template();
     let path = theme_path()?;
-    let text = std::fs::read_to_string(path).ok()?;
+    let text = fs::read_to_string(path).ok()?;
     AppearanceConfig::parse(&text)
 }
 
@@ -43,7 +44,7 @@ fn load_checked() -> Option<AppearanceConfig> {
 pub fn watch(tx: calloop::channel::Sender<AppearanceConfig>) -> Option<notify::RecommendedWatcher> {
     let path = theme_path()?;
     if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
+        let _ = fs::create_dir_all(dir);
     }
     let mut last = load();
     watch_file(&path, move || {

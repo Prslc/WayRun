@@ -1,4 +1,5 @@
 use crate::plugin::Match;
+use std::mem;
 
 use super::{DesktopMeta, Field, Query};
 
@@ -93,7 +94,7 @@ fn levenshtein(a: &[char], b: &[char]) -> usize {
             let cost = usize::from(ca != cb);
             curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
         }
-        std::mem::swap(&mut prev, &mut curr);
+        mem::swap(&mut prev, &mut curr);
     }
     prev[b.len()]
 }

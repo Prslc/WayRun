@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::io;
+use std::process;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -164,15 +166,15 @@ async fn spawn(command: &str) -> io::Result<Host> {
         // A resident host lives in the unit's journal: its warnings are ours.
         let spawned = Command::new(command)
             .kill_on_drop(true)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::inherit())
+            .stdin(process::Stdio::piped())
+            .stdout(process::Stdio::piped())
+            .stderr(process::Stdio::inherit())
             .spawn();
         match spawned {
             Ok(child) => break child,
             // Another thread's fork held a just-written script open until it
             // exec'd; a brief retry outlasts that window.
-            Err(error) if error.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 3 => {
+            Err(error) if error.kind() == io::ErrorKind::ExecutableFileBusy && tries < 3 => {
                 tries += 1;
                 tokio::time::sleep(Duration::from_millis(2)).await;
             }
@@ -241,7 +243,7 @@ fn slot_for(command: &str) -> Arc<Slot> {
 }
 
 fn ensure_reaper() {
-    static REAPER: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    static REAPER: OnceLock<()> = OnceLock::new();
     REAPER.get_or_init(|| {
         tokio::spawn(async {
             loop {
@@ -295,6 +297,8 @@ fn reap(idle: Duration, only: Option<&str>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::Path;
 
     // Functional tests, not latency tests: the suite runs in parallel with
     // process spawns of its own, so a call gets a load-tolerant deadline.
@@ -307,12 +311,12 @@ mod tests {
         use std::io::Write;
         use std::os::unix::fs::PermissionsExt;
         let path = dir.path().join(name);
-        let mut file = std::fs::File::create(&path).unwrap();
+        let mut file = fs::File::create(&path).unwrap();
         file.write_all(body.as_bytes()).unwrap();
         drop(file);
-        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
         perms.set_mode(0o755);
-        std::fs::set_permissions(&path, perms).unwrap();
+        fs::set_permissions(&path, perms).unwrap();
         path.display().to_string()
     }
 
@@ -321,7 +325,7 @@ mod tests {
     }
 
     /// A counting host: one `start` line per process, one reply per request.
-    fn echo_host(dir: &tempfile::TempDir, counter: &std::path::Path) -> String {
+    fn echo_host(dir: &tempfile::TempDir, counter: &Path) -> String {
         script(
             dir,
             "echo.sh",
@@ -332,8 +336,8 @@ mod tests {
         )
     }
 
-    fn starts(counter: &std::path::Path) -> usize {
-        std::fs::read_to_string(counter).unwrap().lines().count()
+    fn starts(counter: &Path) -> usize {
+        fs::read_to_string(counter).unwrap().lines().count()
     }
 
     #[tokio::test]
@@ -430,7 +434,7 @@ mod tests {
         });
         // Wait until the first call is inside the host, so the next two queue.
         for _ in 0..200 {
-            if std::fs::read_to_string(&served).is_ok_and(|text| !text.is_empty()) {
+            if fs::read_to_string(&served).is_ok_and(|text| !text.is_empty()) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -455,7 +459,7 @@ mod tests {
         assert!(first.await.unwrap().is_some());
         assert!(second.await.unwrap().is_none(), "overtaken while it waited");
         assert!(third.await.unwrap().is_some());
-        assert_eq!(std::fs::read_to_string(&served).unwrap().lines().count(), 2);
+        assert_eq!(fs::read_to_string(&served).unwrap().lines().count(), 2);
     }
 
     #[tokio::test]
