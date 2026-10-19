@@ -1,4 +1,4 @@
-use crate::config::{ColorOverrides, Mode};
+use crate::config::{ColorOverrides, Mode, SurfaceOverride, SurfaceOverrides};
 use wayrun_core::wire::ThemeConfig;
 
 /// The three base roles every surface derives from.
@@ -91,13 +91,28 @@ pub struct Surfaces {
 }
 
 impl Surfaces {
-    /// The surfaces derived from the theme, with `[colors].dim`'s own override
-    /// on top; every other surface follows its role.
-    pub fn resolve(theme: Theme, colors: &ColorOverrides, mode: Mode) -> Self {
+    /// The surfaces derived from the theme, with `[colors].dim` then the
+    /// `[surfaces]` overrides on top; an unset field keeps deriving.
+    pub fn resolve(
+        theme: Theme,
+        colors: &ColorOverrides,
+        overrides: &SurfaceOverrides,
+        mode: Mode,
+    ) -> Self {
         let mut surfaces = Self::derive(theme, mode);
         if let Some(color) = colors.dim {
             surfaces.dim = color;
         }
+        apply_override(&mut surfaces.card, overrides.card.as_ref());
+        apply_override(&mut surfaces.selection, overrides.selection.as_ref());
+        apply_override(&mut surfaces.hover, overrides.hover.as_ref());
+        apply_override(&mut surfaces.preview, overrides.preview.as_ref());
+        apply_override(&mut surfaces.hairline, overrides.hairline.as_ref());
+        apply_override(&mut surfaces.muted, overrides.muted.as_ref());
+        apply_override(&mut surfaces.summary, overrides.summary.as_ref());
+        apply_override(&mut surfaces.footer, overrides.footer.as_ref());
+        apply_override(&mut surfaces.accent, overrides.accent.as_ref());
+        apply_override(&mut surfaces.dim, overrides.dim.as_ref());
         surfaces
     }
 
@@ -127,6 +142,18 @@ impl Surfaces {
 
 fn tint(rgb: [u8; 3], alpha: f32) -> [u8; 4] {
     [rgb[0], rgb[1], rgb[2], alpha_u8(alpha)]
+}
+
+fn apply_override(surface: &mut [u8; 4], entry: Option<&SurfaceOverride>) {
+    let Some(entry) = entry else {
+        return;
+    };
+    if let Some(rgb) = entry.color {
+        surface[..3].copy_from_slice(&rgb);
+    }
+    if let Some(alpha) = entry.alpha {
+        surface[3] = alpha_u8(alpha);
+    }
 }
 
 /// Rounds to the nearest 8-bit alpha; `round` is not const.
@@ -239,12 +266,22 @@ mod tests {
     #[test]
     fn a_surface_derives_from_its_role_except_dim() {
         let theme = Theme::default();
-        let light = Surfaces::resolve(theme, &ColorOverrides::default(), Mode::Light);
+        let light = Surfaces::resolve(
+            theme,
+            &ColorOverrides::default(),
+            &SurfaceOverrides::default(),
+            Mode::Light,
+        );
         assert_eq!(light.card, tint(theme.container, CARD_ALPHA));
         assert_eq!(light.hairline[..3], [0, 0, 0]);
         assert_eq!(light.hairline[3], alpha_u8(HAIRLINE_ALPHA));
 
-        let dark = Surfaces::resolve(theme, &ColorOverrides::default(), Mode::Dark);
+        let dark = Surfaces::resolve(
+            theme,
+            &ColorOverrides::default(),
+            &SurfaceOverrides::default(),
+            Mode::Dark,
+        );
         assert_eq!(dark.card, tint(theme.container, CARD_ALPHA_DARK));
         assert_eq!(dark.hairline[..3], [255, 255, 255]);
         assert_eq!(dark.hairline[3], alpha_u8(HAIRLINE_ALPHA_DARK));
@@ -257,9 +294,42 @@ mod tests {
             dim: parse_color("#010203cc"),
             ..ColorOverrides::default()
         };
-        let overridden = Surfaces::resolve(theme, &colors, Mode::Dark);
+        let overridden =
+            Surfaces::resolve(theme, &colors, &SurfaceOverrides::default(), Mode::Dark);
         assert_eq!(overridden.dim, [1, 2, 3, 0xcc]);
         // every other surface still derives
         assert_eq!(overridden.card, tint(theme.container, CARD_ALPHA_DARK));
+    }
+
+    #[test]
+    fn a_surface_override_pins_only_what_it_states() {
+        let theme = Theme::default();
+        let overrides = SurfaceOverrides {
+            card: Some(SurfaceOverride {
+                color: Some([1, 2, 3]),
+                alpha: None,
+            }),
+            muted: Some(SurfaceOverride {
+                color: None,
+                alpha: Some(0.25),
+            }),
+            dim: Some(SurfaceOverride {
+                color: Some([9, 9, 9]),
+                alpha: Some(0.5),
+            }),
+            ..SurfaceOverrides::default()
+        };
+        let colors = ColorOverrides {
+            dim: parse_color("#010203cc"),
+            ..ColorOverrides::default()
+        };
+        let surfaces = Surfaces::resolve(theme, &colors, &overrides, Mode::Dark);
+
+        // a colour keeps the shipped alpha, and an alpha keeps the derived colour
+        assert_eq!(surfaces.card, [1, 2, 3, alpha_u8(CARD_ALPHA_DARK)]);
+        assert_eq!(surfaces.muted, tint(theme.fg, 0.25));
+        // `[surfaces]` layers over `[colors].dim`, and an unset surface derives
+        assert_eq!(surfaces.dim, [9, 9, 9, alpha_u8(0.5)]);
+        assert_eq!(surfaces.selection, tint(theme.primary, SELECTION_ALPHA));
     }
 }

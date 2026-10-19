@@ -12,6 +12,19 @@
 [colors.light]
 # fg = "#1f2430"             # light-only override, layered on [colors]
 
+[surfaces]
+# each surface derives from a role; set color, alpha or both to pin it
+# card = { alpha = 0.85 }              # card fill; color follows container (0.72 light)
+# selection = { color = "#7aa2f7", alpha = 0.15 } # selected-row tint
+# hover = { alpha = 0.08 }             # pointer hover tint
+# preview = { alpha = 0.05 }           # split view's tonal pane
+# hairline = { color = "#ffffff" }     # card edge (black at 0.10 light, white at 0.12 dark)
+# muted = { alpha = 0.55 }             # placeholder and hint text
+# summary = { alpha = 0.70 }           # a row's second line
+# footer = { alpha = 0.50 }            # footer text
+# accent = { color = "#7aa2f7" }       # selected row's accent bar
+# dim = { color = "#000000", alpha = 0.30 } # backdrop; overrides [colors] dim
+
 [blur]
 # enabled = true             # declare the card's rounded rect as a blur region
 

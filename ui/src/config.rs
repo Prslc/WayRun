@@ -72,6 +72,58 @@ pub struct ColorConfig {
     pub light: ColorOverrides,
 }
 
+/// One `[surfaces]` entry: `color` and `alpha` replace the derived field they
+/// name, and either may be omitted to keep deriving it.
+#[derive(serde::Deserialize, Clone, Copy, Debug, Default, PartialEq)]
+pub struct SurfaceOverride {
+    #[serde(default, deserialize_with = "lenient_rgb")]
+    pub color: Option<[u8; 3]>,
+    #[serde(default)]
+    pub alpha: Option<f32>,
+}
+
+impl SurfaceOverride {
+    fn normalized(self) -> Self {
+        Self {
+            color: self.color,
+            alpha: self.alpha.and_then(clamp01),
+        }
+    }
+}
+
+/// The `[surfaces]` table: each entry pins a surface the renderer would
+/// otherwise derive from a role.
+#[derive(serde::Deserialize, Clone, Copy, Debug, Default, PartialEq)]
+pub struct SurfaceOverrides {
+    pub card: Option<SurfaceOverride>,
+    pub selection: Option<SurfaceOverride>,
+    pub hover: Option<SurfaceOverride>,
+    pub preview: Option<SurfaceOverride>,
+    pub hairline: Option<SurfaceOverride>,
+    pub muted: Option<SurfaceOverride>,
+    pub summary: Option<SurfaceOverride>,
+    pub footer: Option<SurfaceOverride>,
+    pub accent: Option<SurfaceOverride>,
+    pub dim: Option<SurfaceOverride>,
+}
+
+impl SurfaceOverrides {
+    fn normalized(self) -> Self {
+        Self {
+            card: self.card.map(SurfaceOverride::normalized),
+            selection: self.selection.map(SurfaceOverride::normalized),
+            hover: self.hover.map(SurfaceOverride::normalized),
+            preview: self.preview.map(SurfaceOverride::normalized),
+            hairline: self.hairline.map(SurfaceOverride::normalized),
+            muted: self.muted.map(SurfaceOverride::normalized),
+            summary: self.summary.map(SurfaceOverride::normalized),
+            footer: self.footer.map(SurfaceOverride::normalized),
+            accent: self.accent.map(SurfaceOverride::normalized),
+            dim: self.dim.map(SurfaceOverride::normalized),
+        }
+    }
+}
+
 impl ColorConfig {
     /// The shared keys with `mode`'s table on top, field by field: a mode states
     /// only what it changes, and everything else inherits the shared value.
@@ -128,6 +180,7 @@ impl FontConfig {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AppearanceConfig {
     pub colors: ColorConfig,
+    pub surfaces: SurfaceOverrides,
     pub blur: bool,
     pub font: FontConfig,
     pub layout: Layout,
@@ -139,6 +192,7 @@ impl Default for AppearanceConfig {
     fn default() -> Self {
         Self {
             colors: ColorConfig::default(),
+            surfaces: SurfaceOverrides::default(),
             blur: true,
             font: FontConfig::default(),
             layout: Layout::default(),
@@ -152,6 +206,8 @@ impl Default for AppearanceConfig {
 struct ThemeFile {
     #[serde(default)]
     colors: ColorConfig,
+    #[serde(default)]
+    surfaces: SurfaceOverrides,
     #[serde(default)]
     blur: BlurFile,
     #[serde(default)]
@@ -207,6 +263,7 @@ impl AppearanceConfig {
     fn apply(&mut self, file: ThemeFile) {
         let ThemeFile {
             colors,
+            surfaces,
             blur,
             layout,
             font,
@@ -215,6 +272,7 @@ impl AppearanceConfig {
         } = file;
 
         self.colors = colors;
+        self.surfaces = surfaces.normalized();
 
         assign!(self.blur, blur.enabled);
         assign!(self.preview, preview.enabled);
@@ -352,6 +410,34 @@ mod tests {
         );
         assert_eq!(config.colors.shared.dim, Some([0, 0, 0, 0x80]));
         assert_eq!(config.colors.shared.primary, Some([0x11, 0x22, 0x33]));
+    }
+
+    #[test]
+    fn surface_overrides_set_colour_and_alpha_independently() {
+        let config = parse(
+            r##"
+            [surfaces]
+            card = { alpha = 0.9 }
+            hairline = { color = "#112233" }
+            selection = { color = "#445566", alpha = 0.2 }
+            muted = { color = "nonsense", alpha = 2.0 }
+            "##,
+        );
+        let card = config.surfaces.card.unwrap();
+        assert_eq!((card.color, card.alpha), (None, Some(0.9)));
+        let hairline = config.surfaces.hairline.unwrap();
+        assert_eq!(
+            (hairline.color, hairline.alpha),
+            (Some([0x11, 0x22, 0x33]), None)
+        );
+        let selection = config.surfaces.selection.unwrap();
+        assert_eq!(
+            (selection.color, selection.alpha),
+            (Some([0x44, 0x55, 0x66]), Some(0.2))
+        );
+        // a bad colour is dropped and a finite alpha is clamped
+        let muted = config.surfaces.muted.unwrap();
+        assert_eq!((muted.color, muted.alpha), (None, Some(1.0)));
     }
 
     #[test]

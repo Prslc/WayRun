@@ -76,7 +76,7 @@ impl Presentation {
         let theme = Theme::default();
         let mode = Mode::default();
         let colors = appearance.colors.for_mode(mode);
-        let surfaces = Surfaces::resolve(theme, &colors, mode);
+        let surfaces = Surfaces::resolve(theme, &colors, &appearance.surfaces, mode);
         let card = appearance.layout.empty_h();
         Self {
             system_theme: theme,
@@ -112,7 +112,8 @@ impl Presentation {
     fn refresh_theme(&mut self) {
         let colors = self.appearance.colors.for_mode(self.mode);
         self.theme = Theme::overlay(self.system_theme, &colors);
-        self.surfaces = Surfaces::resolve(self.theme, &colors, self.mode);
+        self.surfaces =
+            Surfaces::resolve(self.theme, &colors, &self.appearance.surfaces, self.mode);
     }
 
     /// A show starts with the entrance unstarted; the first drawn frame arms it.
@@ -316,6 +317,10 @@ mod tests {
 
         let mut config = AppearanceConfig::default();
         config.colors.shared.fg = Some([0x10, 0x20, 0x30]);
+        config.surfaces.card = Some(crate::config::SurfaceOverride {
+            color: Some([9, 8, 7]),
+            alpha: Some(0.5),
+        });
         config.layout.max_rows = 2;
         present.set_system_theme(
             Theme {
@@ -331,6 +336,7 @@ mod tests {
         assert_eq!(present.theme.primary, [1, 2, 3]);
         assert_eq!(present.theme.fg, [0x10, 0x20, 0x30]);
         assert_eq!(present.theme.container, [7, 8, 9]);
+        assert_eq!(present.surfaces.card, [9, 8, 7, 128]);
         assert_eq!(present.surfaces.dim, crate::theme::DEFAULT_DIM);
         assert_eq!(present.card_target, present.appearance.layout.empty_h());
     }
