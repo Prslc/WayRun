@@ -52,9 +52,23 @@ impl State {
 
     pub fn apply_results(&mut self, items: Vec<ResultItem>, now: Instant) {
         self.search_started = None;
+        self.show_results(items, now, true);
+    }
+
+    /// A streaming search's intermediate payload: the list updates, but the
+    /// search stays pending and only the final payload resumes a held panel.
+    pub fn apply_partial(&mut self, items: Vec<ResultItem>, now: Instant) {
+        self.show_results(items, now, false);
+    }
+
+    fn show_results(&mut self, items: Vec<ResultItem>, now: Instant, final_payload: bool) {
         let items = normalize_icons(items);
         // A panel action holds its place across the reply it asked for.
-        let resume = self.panel_resume.take();
+        let resume = if final_payload {
+            self.panel_resume.take()
+        } else {
+            None
+        };
         // An identical re-send is dropped so it cannot reset the selection.
         if self.rows == items && !self.rows.is_empty() {
             return;
@@ -162,6 +176,49 @@ mod tests {
 
         state.apply_results(Vec::new(), now + std::time::Duration::from_millis(200));
         assert!(state.search_sent(now + std::time::Duration::from_millis(300)));
+    }
+
+    #[test]
+    fn a_partial_payload_keeps_the_loading_state() {
+        let mut state = state();
+        state.query = "query".to_string();
+        let now = Instant::now();
+        state.search_started = Some(now);
+
+        state.apply_partial(vec![item("Files", None, None, None)], now);
+        assert!(
+            state
+                .frame(now + std::time::Duration::from_millis(200))
+                .footer
+                .loading
+        );
+
+        state.apply_results(Vec::new(), now + std::time::Duration::from_millis(300));
+        assert!(
+            !state
+                .frame(now + std::time::Duration::from_millis(400))
+                .footer
+                .loading
+        );
+    }
+
+    #[test]
+    fn a_final_payload_identical_to_the_partial_still_completes() {
+        let mut state = state();
+        state.query = "query".to_string();
+        let now = Instant::now();
+        state.search_started = Some(now);
+        let rows = vec![item("Files", None, None, None)];
+
+        state.apply_partial(rows.clone(), now);
+        state.apply_results(rows, now + std::time::Duration::from_millis(10));
+
+        assert!(
+            !state
+                .frame(now + std::time::Duration::from_millis(300))
+                .footer
+                .loading
+        );
     }
 
     #[test]

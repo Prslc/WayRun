@@ -11,6 +11,8 @@ use wayrun_core::wire::{Action, ResultItem, ThemeConfig};
 pub enum BackendEvent {
     Theme(ThemeConfig),
     Results(Vec<ResultItem>),
+    /// A streaming search's intermediate payload; the search stays pending.
+    ResultsPartial(Vec<ResultItem>),
     /// A background image fetch wrote its file; the cached miss must be dropped.
     ImageReady(String),
     /// The core's stdout closed: nothing can be searched or launched anymore.
@@ -137,6 +139,8 @@ fn drain(mut stdin: ChildStdin, receiver: std::sync::mpsc::Receiver<String>) {
 enum Notification {
     Theme(ThemeConfig),
     Results(Vec<ResultItem>),
+    #[serde(rename = "results_partial")]
+    ResultsPartial(Vec<ResultItem>),
     #[serde(rename = "image_ready")]
     ImageReady(ImageReady),
 }
@@ -153,6 +157,7 @@ fn parse(line: &str) -> Option<BackendEvent> {
     Some(match notification {
         Notification::Theme(config) => BackendEvent::Theme(config),
         Notification::Results(items) => BackendEvent::Results(items),
+        Notification::ResultsPartial(items) => BackendEvent::ResultsPartial(items),
         Notification::ImageReady(ready) => BackendEvent::ImageReady(ready.path),
     })
 }
@@ -172,6 +177,14 @@ mod tests {
         match results {
             BackendEvent::Results(items) => assert_eq!(items[0].title, "a"),
             other => panic!("expected results, got {other:?}"),
+        }
+
+        let partial =
+            parse(r#"{"jsonrpc":"2.0","method":"results_partial","params":[{"title":"b"}]}"#)
+                .unwrap();
+        match partial {
+            BackendEvent::ResultsPartial(items) => assert_eq!(items[0].title, "b"),
+            other => panic!("expected results_partial, got {other:?}"),
         }
 
         let ready =

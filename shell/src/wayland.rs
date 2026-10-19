@@ -34,7 +34,7 @@ use crate::app::{self, State as Launcher};
 use crate::session::backend::BackendEvent;
 use crate::session::ipc;
 use crate::wayland::ime::Pending;
-use wayrun_core::wire::IconShape;
+use wayrun_core::wire::{IconShape, ResultItem};
 use wayrun_ui::config::{AppearanceConfig, Mode};
 use wayrun_ui::icons::{IconCache, IconKey};
 use wayrun_ui::text::TextEngine;
@@ -303,42 +303,8 @@ impl Shell {
                     Mode::from_wire(config.mode.as_deref()),
                 );
             }
-            BackendEvent::Results(items) => {
-                // A payload landing after a dismissal must not repopulate the rows
-                // the dismissal dropped.
-                if self.layer.is_none() {
-                    return;
-                }
-                // Nor may one land in an empty field: a search superseded by a
-                // clear can have been emitted before the cancel reached the core.
-                if self.app.query.is_empty() {
-                    return;
-                }
-                let now = Instant::now();
-                self.app.apply_results(items, now);
-                let font = self.app.presentation.appearance.font;
-                let scale = self.app.scale_factor();
-                let icon_size = (font.icon() * scale).round() as u32;
-                let fg = self.app.presentation.theme.fg;
-                let layout = self.app.layout();
-                let first = self.app.cursor.first;
-                // Ask for what the visible window draws; a row scrolled in
-                // later asks when the frame draws it.
-                for row in self.app.rows.iter().skip(first).take(layout.max_rows) {
-                    // Each warm mirrors how the frame draws it: the row icon
-                    // plain, the action glyphs tinted to their theme colour.
-                    if let Some(path) = &row.icon {
-                        self.icons
-                            .warm(path, icon_size, row.icon_shape.unwrap_or_default());
-                    }
-                    for action in &row.actions {
-                        if let Some(path) = &action.icon {
-                            self.icons
-                                .warm_tinted(path, icon_size, fg, IconShape::Square);
-                        }
-                    }
-                }
-            }
+            BackendEvent::Results(items) => self.on_results(items, true),
+            BackendEvent::ResultsPartial(items) => self.on_results(items, false),
             BackendEvent::ImageReady(path) => {
                 self.icons.forget(&path);
                 self.redraw();
@@ -349,6 +315,43 @@ impl Shell {
             }
         }
         self.redraw();
+    }
+
+    /// A payload from the core; `final_payload` says whether the search ended.
+    fn on_results(&mut self, items: Vec<ResultItem>, final_payload: bool) {
+        // A payload landing after a dismissal or a clear must not repopulate
+        // rows the shell already dropped.
+        if self.layer.is_none() || self.app.query.is_empty() {
+            return;
+        }
+        let now = Instant::now();
+        if final_payload {
+            self.app.apply_results(items, now);
+        } else {
+            self.app.apply_partial(items, now);
+        }
+        let font = self.app.presentation.appearance.font;
+        let scale = self.app.scale_factor();
+        let icon_size = (font.icon() * scale).round() as u32;
+        let fg = self.app.presentation.theme.fg;
+        let layout = self.app.layout();
+        let first = self.app.cursor.first;
+        // Ask for what the visible window draws; a row scrolled in later asks
+        // when the frame draws it.
+        for row in self.app.rows.iter().skip(first).take(layout.max_rows) {
+            // Each warm mirrors how the frame draws it: the row icon plain, the
+            // action glyphs tinted to their theme colour.
+            if let Some(path) = &row.icon {
+                self.icons
+                    .warm(path, icon_size, row.icon_shape.unwrap_or_default());
+            }
+            for action in &row.actions {
+                if let Some(path) = &action.icon {
+                    self.icons
+                        .warm_tinted(path, icon_size, fg, IconShape::Square);
+                }
+            }
+        }
     }
 
     /// A decoded icon came back from the worker: store it and repaint, so a row
