@@ -30,7 +30,7 @@ static SLOTS: LazyLock<Mutex<HashMap<String, Arc<Slot>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// One JSON-RPC round trip against `command`'s resident host, spawned on first
-/// use and restarted after a crash or a stall; `None` reads like a missing host.
+/// use and restarted after a crash, stall or dropped caller; `None` is no host.
 pub(super) async fn call(
     command: &str,
     request: &serde_json::Value,
@@ -43,11 +43,12 @@ pub(super) async fn call(
     let (tx, rx) = tokio::sync::oneshot::channel();
     let owned = Arc::clone(&slot);
     let command = command.to_string();
-    // The exchange runs detached, so a caller dropped mid-await (a superseded
-    // search) cannot leave an unread reply ahead of the next call's.
+    // The exchange runs detached, so a dropped caller (a superseded search) is
+    // seen and its host killed instead of leaving an unread reply for the next.
     tokio::spawn(async move {
+        let mut tx = tx;
         let mut guard = owned.host.lock().await;
-        if owned.ticket.load(Ordering::SeqCst) != ticket {
+        if owned.ticket.load(Ordering::SeqCst) != ticket || tx.is_closed() {
             let _ = tx.send(None);
             return;
         }
@@ -65,21 +66,35 @@ pub(super) async fn call(
                 let _ = tx.send(None);
                 return;
             };
-            match tokio::time::timeout(limit, host.exchange(&line)).await {
-                Ok(Ok(reply)) => {
-                    host.last_used = Instant::now();
-                    Ok(reply)
-                }
-                Ok(Err(error)) => Err(format!("failed: {error}")),
-                Err(_) => Err(format!("overran {}ms and was killed", limit.as_millis())),
+            let exchange = tokio::time::timeout(limit, host.exchange(&line));
+            tokio::select! {
+                _ = tx.closed() => None,
+                out = exchange => Some(out),
             }
         };
+        let Some(outcome) = outcome else {
+            // Nobody will read the reply: replacing the host frees the slot
+            // now, instead of after the call runs out its deadline.
+            *guard = None;
+            return;
+        };
         match outcome {
-            Ok(reply) => {
+            Ok(Ok(reply)) => {
+                if let Some(host) = guard.as_mut() {
+                    host.last_used = Instant::now();
+                }
                 let _ = tx.send(Some(reply));
             }
-            Err(error) => {
-                eprintln!("wayrun-core: resident host {command} {error}");
+            Ok(Err(error)) => {
+                eprintln!("wayrun-core: resident host {command} failed: {error}");
+                *guard = None;
+                let _ = tx.send(None);
+            }
+            Err(_) => {
+                eprintln!(
+                    "wayrun-core: resident host {command} overran {}ms and was killed",
+                    limit.as_millis()
+                );
                 *guard = None;
                 let _ = tx.send(None);
             }
@@ -382,5 +397,34 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         panic!("a dead slot is forgotten");
+    }
+
+    #[tokio::test]
+    async fn a_dropped_call_replaces_its_host() {
+        let _serial = SERIAL.lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let counter = dir.path().join("starts");
+        let command = script(
+            &dir,
+            "slow.sh",
+            &format!(
+                "#!/bin/sh\necho start >> {}\nread line\ncase \"$line\" in *slow*) sleep 10 ;; esac\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"result\":\"pong\",\"id\":1}}'\n",
+                counter.display()
+            ),
+        );
+        let slow =
+            serde_json::json!({"jsonrpc":"2.0","method":"search","params":{"text":"slow"},"id":1});
+
+        let timed_out =
+            tokio::time::timeout(Duration::from_millis(500), call(&command, &slow, LIMIT)).await;
+        assert!(timed_out.is_err(), "the slow call did not answer");
+        assert_eq!(starts(&counter), 1);
+
+        let reply = tokio::time::timeout(Duration::from_secs(1), call(&command, &request(), LIMIT))
+            .await
+            .expect("a dropped call frees the host")
+            .expect("the new host answers");
+        assert_eq!(reply["result"], "pong");
+        assert_eq!(starts(&counter), 2);
     }
 }
