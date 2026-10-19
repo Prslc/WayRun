@@ -51,6 +51,7 @@ impl State {
     }
 
     pub fn apply_results(&mut self, items: Vec<ResultItem>, now: Instant) {
+        self.search_started = None;
         let items = normalize_icons(items);
         // A panel action holds its place across the reply it asked for.
         let resume = self.panel_resume.take();
@@ -121,6 +122,35 @@ mod tests {
     use super::*;
     use crate::app::test_support::{item, run, state};
     use wayrun_core::wire::ActionItem;
+
+    #[test]
+    fn a_pending_search_shows_loading_after_the_delay() {
+        let mut state = state();
+        state.query = "query".to_string();
+        let now = Instant::now();
+        state.search_started = Some(now);
+
+        assert!(
+            !state
+                .frame(now + std::time::Duration::from_millis(100))
+                .footer
+                .loading
+        );
+        assert!(
+            state
+                .frame(now + std::time::Duration::from_millis(200))
+                .footer
+                .loading
+        );
+
+        state.apply_results(Vec::new(), now + std::time::Duration::from_millis(200));
+        assert!(
+            !state
+                .frame(now + std::time::Duration::from_millis(300))
+                .footer
+                .loading
+        );
+    }
 
     #[test]
     fn the_result_dedupe_matches_the_payload_it_was_built_from() {

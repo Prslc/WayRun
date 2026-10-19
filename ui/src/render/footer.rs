@@ -63,8 +63,8 @@ fn hints() -> &'static Hints {
     })
 }
 
-/// The footer's left hints: the panel's keys when open, the launch keys once
-/// rows exist, a note for a failed search, nothing for an untouched field.
+/// The footer's left hints: panel keys, launch keys once rows exist, a note for
+/// a failed search, nothing for an untouched field or a search in flight.
 pub(super) fn footer_hints(
     rows: usize,
     query_empty: bool,
@@ -72,6 +72,7 @@ pub(super) fn footer_hints(
     has_actions: bool,
     can_default: bool,
     is_default: bool,
+    loading: bool,
 ) -> &'static [Hint] {
     let hints = hints();
     if panel {
@@ -88,7 +89,7 @@ pub(super) fn footer_hints(
         } else {
             &hints.launch
         }
-    } else if query_empty {
+    } else if query_empty || loading {
         &[]
     } else {
         &hints.no_match
@@ -121,6 +122,7 @@ pub(super) fn draw_footer(
         footer.has_actions,
         footer.can_default,
         footer.is_default,
+        footer.loading,
     );
 
     let count = if panel {
@@ -129,6 +131,8 @@ pub(super) fn draw_footer(
             "footer.count_action_one",
             "footer.count_action_many",
         )
+    } else if footer.loading {
+        t!("footer.searching").to_string()
     } else if empty {
         String::new()
     } else {
@@ -267,31 +271,44 @@ mod tests {
     #[test]
     fn the_footer_separates_no_results_from_an_untouched_field() {
         // an untouched field stays silent: its placeholder is the guide
-        assert!(footer_hints(0, true, false, false, false, false).is_empty());
+        assert!(footer_hints(0, true, false, false, false, false, false).is_empty());
         assert_eq!(
-            footer_hints(0, false, false, false, false, false),
+            footer_hints(0, false, false, false, false, false, false),
             hints().no_match.as_slice()
         );
         assert_eq!(
-            footer_hints(3, false, false, true, false, false),
+            footer_hints(3, false, false, true, false, false, false),
             hints().row.as_slice()
         );
         // the panel owns the footer while it is open
         assert_eq!(
-            footer_hints(3, false, true, true, false, false),
+            footer_hints(3, false, true, true, false, false, false),
             hints().panel.as_slice()
+        );
+    }
+
+    #[test]
+    fn a_pending_search_silences_the_no_match_note() {
+        assert!(
+            footer_hints(0, false, false, false, false, false, true).is_empty(),
+            "the right side says searching; the left has no note"
+        );
+        assert_eq!(
+            footer_hints(3, false, false, false, false, false, true),
+            hints().launch.as_slice(),
+            "stale rows keep their launch hints"
         );
     }
 
     #[test]
     fn a_row_without_actions_drops_the_actions_hint() {
         assert_eq!(
-            footer_hints(3, false, false, false, false, false),
+            footer_hints(3, false, false, false, false, false, false),
             hints().launch.as_slice()
         );
         // the panel hint outlives the selected row's actions while it is open
         assert_eq!(
-            footer_hints(3, false, true, false, false, false),
+            footer_hints(3, false, true, false, false, false, false),
             hints().panel.as_slice()
         );
     }
@@ -300,17 +317,17 @@ mod tests {
     fn a_defaultable_panel_action_shows_the_alt_hint() {
         // a plugin action that is not yet the default
         assert_eq!(
-            footer_hints(3, false, true, true, true, false),
+            footer_hints(3, false, true, true, true, false, false),
             hints().panel_default.as_slice()
         );
         // already the default: the hint offers to clear it
         assert_eq!(
-            footer_hints(3, false, true, true, true, true),
+            footer_hints(3, false, true, true, true, true, false),
             hints().panel_clear_default.as_slice()
         );
         // a launcher-level or host action has no id, so no hint
         assert_eq!(
-            footer_hints(3, false, true, true, false, false),
+            footer_hints(3, false, true, true, false, false, false),
             hints().panel.as_slice()
         );
     }

@@ -62,6 +62,7 @@ footer.default: Default
 footer.clear_default: Clear default
 footer.back: Back
 footer.no_results: No results
+footer.searching: Searching…
 footer.count_action_one: 1 action
 footer.count_action_many: "%{count} actions"
 footer.count_result_one: 1 result

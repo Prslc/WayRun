@@ -8,7 +8,7 @@ mod row;
 #[cfg(test)]
 mod test_support;
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use wayrun_core::wire::{Action, Preview, ResultItem};
 use wayrun_ui::geom::{Layout, PreviewKind};
@@ -24,6 +24,8 @@ pub use self::menu::{Menu, effective_action, marked_entry};
 pub const EXIT_DELAY_MS: u64 = 150;
 /// The field's caret blink interval.
 pub const CARET_BLINK_MS: u64 = 500;
+/// How long a search may run before the footer says it is still working.
+pub const SEARCH_LOADING_DELAY: Duration = Duration::from_millis(150);
 pub struct State {
     pub query: String,
     /// Caret, as a byte index into `query`, always on a char boundary.
@@ -72,6 +74,9 @@ pub struct State {
     pub preedit_active: bool,
     pub caret_visible: bool,
     pub caret_at: Instant,
+    /// When the latest non-empty search was sent; the footer says "searching"
+    /// once it has been pending past `SEARCH_LOADING_DELAY`.
+    pub search_started: Option<Instant>,
     pub dismiss_at: Option<Instant>,
 }
 
@@ -103,6 +108,7 @@ impl State {
             preedit_active: false,
             caret_visible: true,
             caret_at: now,
+            search_started: None,
             dismiss_at: None,
         }
     }
@@ -215,11 +221,15 @@ impl State {
 
         let selected_row = self.rows.get(self.cursor.selected);
         let panel = self.menu.is_some();
+        let loading = self
+            .search_started
+            .is_some_and(|started| now.saturating_duration_since(started) >= SEARCH_LOADING_DELAY);
         let footer = FooterView {
             rows: self.rows.len(),
             action_count: self.menu.as_ref().map_or(0, |menu| menu.actions.len()),
             query_empty: self.query.is_empty(),
             panel,
+            loading,
             has_actions: selected_row.is_some_and(|row| !row.actions.is_empty()),
             can_default: self.selected_default().is_some(),
             is_default: self
@@ -264,6 +274,7 @@ impl State {
         self.menu = None;
         self.hovered = None;
         self.dismiss_at = None;
+        self.search_started = None;
         self.presentation.begin_show(now);
         self.presentation.snap_to(self.content_height(), now);
         self.preview_drawn = None;
@@ -274,6 +285,7 @@ impl State {
 
     pub fn hidden(&mut self) {
         self.dismiss_at = None;
+        self.search_started = None;
         self.menu = None;
         // A reply that arrives while hidden must not resurrect the panel.
         self.panel_resume = None;

@@ -18,10 +18,22 @@ impl Shell {
 
     /// Re-send the current query, leaving a pending panel resume in place.
     fn resend_query(&mut self) {
+        let now = Instant::now();
         if self.app.query.is_empty() {
             // No query is no result set: the list clears in place.
-            self.app.apply_results(Vec::new(), Instant::now());
+            self.app.apply_results(Vec::new(), now);
             self.redraw();
+        } else {
+            self.app.search_started = Some(now);
+            let _ = self.loop_handle.insert_source(
+                Timer::from_duration(app::SEARCH_LOADING_DELAY),
+                move |_, _, state: &mut Shell| {
+                    if state.app.search_started == Some(now) {
+                        state.redraw();
+                    }
+                    TimeoutAction::Drop
+                },
+            );
         }
         backend::search(&self.app.query);
     }
