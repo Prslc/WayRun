@@ -25,6 +25,12 @@
 # accent = { color = "#7aa2f7" }       # selected row's accent bar
 # dim = { color = "#000000", alpha = 0.30 } # backdrop; overrides [colors] dim
 
+[surfaces.dark]
+# hairline = { color = "#ffffff" }     # dark-only surface, layered on [surfaces]
+
+[surfaces.light]
+# hairline = { color = "#000000" }     # light-only surface, layered on [surfaces]
+
 [blur]
 # enabled = true             # declare the card's rounded rect as a blur region
 

@@ -97,6 +97,20 @@ hairline = { color = "#ffffff" }        # 透明度保持该模式下的默认�
 | `accent` | `primary` | 1.00 |
 | `dim` | `#000000` | 0.30 |
 
+`[surfaces]` 是共享层；`[surfaces.dark]` 与 `[surfaces.light]` 接受相同的键，
+在该模式下按表面、按字段叠加。模式表可以只改颜色或只改透明度：
+
+```toml
+[surfaces]
+hairline = { alpha = 0.12 }
+
+[surfaces.dark]
+hairline = { color = "#ffffff" }
+
+[surfaces.light]
+hairline = { color = "#000000" }
+```
+
 ### `[blur]`
 
 卡片是半透明的；合成器支持 `ext-background-effect-v1` 时，卡片背后的区域由合成器

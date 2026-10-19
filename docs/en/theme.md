@@ -113,6 +113,21 @@ keeps the plain-string spelling.
 | `accent` | `primary` | 1.00 |
 | `dim` | `#000000` | 0.30 |
 
+`[surfaces]` is the shared table; `[surfaces.dark]` and `[surfaces.light]`
+take the same keys and layer on it surface by surface and field by field while
+that mode is active. A mode can change only the colour or only the alpha:
+
+```toml
+[surfaces]
+hairline = { alpha = 0.12 }
+
+[surfaces.dark]
+hairline = { color = "#ffffff" }
+
+[surfaces.light]
+hairline = { color = "#000000" }
+```
+
 ### `[blur]`
 
 The card is translucent; on a compositor that offers

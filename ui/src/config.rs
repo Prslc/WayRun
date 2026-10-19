@@ -91,8 +91,8 @@ impl SurfaceOverride {
     }
 }
 
-/// The `[surfaces]` table: each entry pins a surface the renderer would
-/// otherwise derive from a role.
+/// One surface table: each entry pins a surface the renderer would otherwise
+/// derive from a role.
 #[derive(serde::Deserialize, Clone, Copy, Debug, Default, PartialEq)]
 pub struct SurfaceOverrides {
     pub card: Option<SurfaceOverride>,
@@ -121,6 +121,62 @@ impl SurfaceOverrides {
             accent: self.accent.map(SurfaceOverride::normalized),
             dim: self.dim.map(SurfaceOverride::normalized),
         }
+    }
+}
+
+/// The `[surfaces]` root plus the `[surfaces.dark]`/`[surfaces.light]` tables
+/// layered on top while that mode is active, surface by surface and field by field.
+#[derive(serde::Deserialize, Clone, Copy, Debug, Default, PartialEq)]
+pub struct SurfaceConfig {
+    #[serde(flatten)]
+    pub shared: SurfaceOverrides,
+    #[serde(default)]
+    pub dark: SurfaceOverrides,
+    #[serde(default)]
+    pub light: SurfaceOverrides,
+}
+
+impl SurfaceConfig {
+    /// The shared table with `mode`'s table on top: `color` and `alpha` layer
+    /// separately, so a mode may change one and keep the other.
+    pub fn for_mode(&self, mode: Mode) -> SurfaceOverrides {
+        let mode = match mode {
+            Mode::Dark => &self.dark,
+            Mode::Light => &self.light,
+        };
+        SurfaceOverrides {
+            card: layer(self.shared.card, mode.card),
+            selection: layer(self.shared.selection, mode.selection),
+            hover: layer(self.shared.hover, mode.hover),
+            preview: layer(self.shared.preview, mode.preview),
+            hairline: layer(self.shared.hairline, mode.hairline),
+            muted: layer(self.shared.muted, mode.muted),
+            summary: layer(self.shared.summary, mode.summary),
+            footer: layer(self.shared.footer, mode.footer),
+            accent: layer(self.shared.accent, mode.accent),
+            dim: layer(self.shared.dim, mode.dim),
+        }
+    }
+
+    fn normalized(self) -> Self {
+        Self {
+            shared: self.shared.normalized(),
+            dark: self.dark.normalized(),
+            light: self.light.normalized(),
+        }
+    }
+}
+
+fn layer(
+    shared: Option<SurfaceOverride>,
+    mode: Option<SurfaceOverride>,
+) -> Option<SurfaceOverride> {
+    match (shared, mode) {
+        (Some(shared), Some(mode)) => Some(SurfaceOverride {
+            color: mode.color.or(shared.color),
+            alpha: mode.alpha.or(shared.alpha),
+        }),
+        (shared, mode) => shared.or(mode),
     }
 }
 
@@ -180,7 +236,7 @@ impl FontConfig {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AppearanceConfig {
     pub colors: ColorConfig,
-    pub surfaces: SurfaceOverrides,
+    pub surfaces: SurfaceConfig,
     pub blur: bool,
     pub font: FontConfig,
     pub layout: Layout,
@@ -192,7 +248,7 @@ impl Default for AppearanceConfig {
     fn default() -> Self {
         Self {
             colors: ColorConfig::default(),
-            surfaces: SurfaceOverrides::default(),
+            surfaces: SurfaceConfig::default(),
             blur: true,
             font: FontConfig::default(),
             layout: Layout::default(),
@@ -207,7 +263,7 @@ struct ThemeFile {
     #[serde(default)]
     colors: ColorConfig,
     #[serde(default)]
-    surfaces: SurfaceOverrides,
+    surfaces: SurfaceConfig,
     #[serde(default)]
     blur: BlurFile,
     #[serde(default)]
@@ -423,21 +479,55 @@ mod tests {
             muted = { color = "nonsense", alpha = 2.0 }
             "##,
         );
-        let card = config.surfaces.card.unwrap();
+        let card = config.surfaces.shared.card.unwrap();
         assert_eq!((card.color, card.alpha), (None, Some(0.9)));
-        let hairline = config.surfaces.hairline.unwrap();
+        let hairline = config.surfaces.shared.hairline.unwrap();
         assert_eq!(
             (hairline.color, hairline.alpha),
             (Some([0x11, 0x22, 0x33]), None)
         );
-        let selection = config.surfaces.selection.unwrap();
+        let selection = config.surfaces.shared.selection.unwrap();
         assert_eq!(
             (selection.color, selection.alpha),
             (Some([0x44, 0x55, 0x66]), Some(0.2))
         );
         // a bad colour is dropped and a finite alpha is clamped
-        let muted = config.surfaces.muted.unwrap();
+        let muted = config.surfaces.shared.muted.unwrap();
         assert_eq!((muted.color, muted.alpha), (None, Some(1.0)));
+    }
+
+    #[test]
+    fn a_mode_table_layers_surface_fields() {
+        let config = parse(
+            r##"
+            [surfaces]
+            card = { color = "#112233", alpha = 0.8 }
+            selection = { alpha = 0.2 }
+
+            [surfaces.dark]
+            card = { alpha = 0.9 }
+
+            [surfaces.light]
+            selection = { color = "#445566" }
+            "##,
+        );
+
+        let dark = config.surfaces.for_mode(Mode::Dark);
+        let card = dark.card.unwrap();
+        assert_eq!(
+            (card.color, card.alpha),
+            (Some([0x11, 0x22, 0x33]), Some(0.9))
+        );
+        // a surface the dark table does not name keeps the shared entry
+        assert_eq!(dark.selection.unwrap().alpha, Some(0.2));
+
+        let light = config.surfaces.for_mode(Mode::Light);
+        let selection = light.selection.unwrap();
+        assert_eq!(
+            (selection.color, selection.alpha),
+            (Some([0x44, 0x55, 0x66]), Some(0.2))
+        );
+        assert_eq!(light.card.unwrap().alpha, Some(0.8));
     }
 
     #[test]

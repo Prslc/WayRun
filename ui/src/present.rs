@@ -76,7 +76,8 @@ impl Presentation {
         let theme = Theme::default();
         let mode = Mode::default();
         let colors = appearance.colors.for_mode(mode);
-        let surfaces = Surfaces::resolve(theme, &colors, &appearance.surfaces, mode);
+        let overrides = appearance.surfaces.for_mode(mode);
+        let surfaces = Surfaces::resolve(theme, &colors, &overrides, mode);
         let card = appearance.layout.empty_h();
         Self {
             system_theme: theme,
@@ -111,9 +112,9 @@ impl Presentation {
 
     fn refresh_theme(&mut self) {
         let colors = self.appearance.colors.for_mode(self.mode);
+        let overrides = self.appearance.surfaces.for_mode(self.mode);
         self.theme = Theme::overlay(self.system_theme, &colors);
-        self.surfaces =
-            Surfaces::resolve(self.theme, &colors, &self.appearance.surfaces, self.mode);
+        self.surfaces = Surfaces::resolve(self.theme, &colors, &overrides, self.mode);
     }
 
     /// A show starts with the entrance unstarted; the first drawn frame arms it.
@@ -317,7 +318,7 @@ mod tests {
 
         let mut config = AppearanceConfig::default();
         config.colors.shared.fg = Some([0x10, 0x20, 0x30]);
-        config.surfaces.card = Some(crate::config::SurfaceOverride {
+        config.surfaces.dark.card = Some(crate::config::SurfaceOverride {
             color: Some([9, 8, 7]),
             alpha: Some(0.5),
         });
