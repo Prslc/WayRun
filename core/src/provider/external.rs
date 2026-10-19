@@ -336,7 +336,7 @@ fn resolve_item_icon(icon: &str, fallback: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wire::Action;
+    use crate::wire::{Action, IconShape};
 
     #[test]
     fn a_command_resolves_to_an_existing_file() {
@@ -430,11 +430,12 @@ mod tests {
                 {"title": "reveal", "on_click": {"type": "reveal", "uri": "file:///home/u"}},
                 {"title": "terminal", "on_click": {"type": "terminal", "uri": "file:///home/u"}},
                 {"title": "ephemeral", "ephemeral": true},
-                {"title": "nulls", "summary": null, "on_click": null, "icon": null},
+                {"title": "nulls", "summary": null, "on_click": null, "icon": null, "icon_shape": null},
+                {"title": "circle", "icon_shape": "circle"},
             ]
         });
         let items = parse_result_items(response, "golden", "/opt/identity.svg").unwrap();
-        assert_eq!(items.len(), 10, "every corpus row survives");
+        assert_eq!(items.len(), 11, "every corpus row survives");
         assert_eq!(
             items[0].on_click,
             Some(Action::Run {
@@ -493,6 +494,15 @@ mod tests {
             items[9].icon.as_deref(),
             Some("/opt/identity.svg"),
             "an unset icon falls back to the identity"
+        );
+        assert!(
+            items[9].icon_shape.is_none(),
+            "a null shape draws the file as it is"
+        );
+        assert_eq!(
+            items[10].icon_shape,
+            Some(IconShape::Circle),
+            "the host's shape reaches the row"
         );
     }
 
