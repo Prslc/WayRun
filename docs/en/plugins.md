@@ -66,8 +66,8 @@ instead; they then keep no cache.
 
 A result row can carry secondary commands, shown in the `Shift+Enter` panel. They
 differ by result type: `file-search`/`path-search` offer "Open in terminal",
-"Reveal in file manager" and "Copy path", then the content type's other
-registered handlers ("Open with …"); `app-search` lists the entry's
+"Reveal in file manager" and "Copy path", then the system's other handlers for
+the content type ("Open with …"); `app-search` lists the entry's
 `[Desktop Action …]` groups, and an external host's rows carry whatever `actions`
 it attaches (the workspace's `web.lua` offers "Copy URL"). The row's own command
 leads the panel, and an external host's own `actions` follow the plugin's.

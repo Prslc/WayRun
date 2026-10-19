@@ -16,8 +16,7 @@ ExecStart=/home/you/.local/bin/wayrun
 # 关闭启动器属于正常退出，因此不能用 on-failure
 Restart=always
 RestartSec=2
-# 让启动器执行的命令也能看到 ~/.local/bin
-Environment=PATH=/home/you/.local/bin:/usr/local/bin:/usr/bin:/bin
+# 不在这里设 PATH：单元继承 systemd 用户管理器的环境
 # WAYLAND_DISPLAY/DISPLAY 由图形会话导入；这里只设 XDG_RUNTIME_DIR（uid 无关的 %t）
 Environment=XDG_RUNTIME_DIR=%t
 # 常驻模式：隐藏启动，用 `wayrun toggle` 切换
@@ -26,6 +25,10 @@ Environment=WAYRUN_RESIDENT=1
 [Install]
 WantedBy=default.target
 ```
+
+单元继承 systemd 用户管理器的环境，启动器执行的命令与其他用户服务看到同一个 `PATH`。
+要补充目录（例如 `~/.cargo/bin`），写进 `~/.config/environment.d/`，不要在单元里设
+`PATH=`：单元里的赋值会整体替换继承来的值。
 
 在合成器配置里绑定 `wayrun toggle` 即可；任何能在按键上执行命令的合成器都行，下面
 以 niri 与 Hyprland 为例：

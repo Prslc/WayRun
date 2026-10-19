@@ -58,9 +58,9 @@ first level of `$HOME` is listed the same way.
 `Shift+Enter` opens a Wox-style second level for the highlighted row: the
 commands that type of result offers. It leads with the row's own command
 (**Open**), then the actions its plugin adds for that type — a file row offers
-"Open in terminal", "Reveal in file manager" and "Copy path", then the content
-type's other registered handlers ("Open with …"); an application row lists its
-`[Desktop Action …]` groups — then anything an external host attached.
+"Open in terminal", "Reveal in file manager" and "Copy path", then the system's
+other handlers for the content type ("Open with …"); an application row lists
+its `[Desktop Action …]` groups — then anything an external host attached.
 The dot marks the entry `Enter` runs, so **Open** carries it until a default is
 remembered. A row with no command to offer has no panel at all, so the footer
 hides its actions hint.

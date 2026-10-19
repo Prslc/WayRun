@@ -187,8 +187,9 @@ those are ignored — and a host sets `id` on its own actions to make them
 defaultable.
 
 The owning built-in provider adds its type-specific entries (a file reveal, copy
-path or open in terminal, a `[Desktop Action …]` group, a copy-link), and a
-host's own entries are kept after them.
+path or open in terminal, the system's other handlers for the content type, a
+`[Desktop Action …]` group, a copy-link), and a host's own entries are kept
+after them.
 
 An item without `on_click` is non-interactive (display only).
 
