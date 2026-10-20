@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
 use self::config::{Config, load_or_default};
 use self::hosts::HostCache;
 use crate::provider::external::HostMeta;
@@ -328,15 +330,29 @@ pub async fn print_list() -> io::Result<()> {
 }
 
 async fn table(out: &mut impl Write) -> io::Result<()> {
+    const ID: usize = 24;
+    const NAME: usize = 24;
+    const KEYWORD: usize = 12;
+    const ICON: usize = 24;
+    const STATUS: usize = 10;
+
     writeln!(
         out,
-        "{:<24} {:<24} {:<12} {:<24} STATUS",
-        "ID", "NAME", "KEYWORD", "ICON"
+        "{} {} {} {} {}",
+        cell("ID", ID, false),
+        cell("NAME", NAME, false),
+        cell("KEYWORD", KEYWORD, false),
+        cell("ICON", ICON, true),
+        cell("STATUS", STATUS, false)
     )?;
     writeln!(
         out,
-        "{:-<24} {:-<24} {:-<12} {:-<24} {:-<8}",
-        "", "", "", "", ""
+        "{} {} {} {} {}",
+        "-".repeat(ID),
+        "-".repeat(NAME),
+        "-".repeat(KEYWORD),
+        "-".repeat(ICON),
+        "-".repeat(STATUS)
     )?;
     for (id, name, icon, keyword, enabled) in list_plugins().await {
         let kw = if keyword.is_empty() {
@@ -344,10 +360,65 @@ async fn table(out: &mut impl Write) -> io::Result<()> {
         } else {
             &keyword
         };
-        let status = if enabled { "" } else { "[disabled]" };
-        writeln!(out, "{id:<24} {name:<24} {kw:<12} {icon:<24}{status}")?;
+        let status = if enabled { "enabled" } else { "disabled" };
+        writeln!(
+            out,
+            "{} {} {} {} {}",
+            cell(&id, ID, false),
+            cell(&name, NAME, false),
+            cell(kw, KEYWORD, false),
+            cell(&icon, ICON, true),
+            cell(status, STATUS, false)
+        )?;
     }
     Ok(())
+}
+
+/// A cell of `width` display columns, padded or clipped; `tail` keeps the end of
+/// a clipped value, for a path whose file name matters more than its root.
+fn cell(text: &str, width: usize, tail: bool) -> String {
+    let (text, used) = if text.width() <= width {
+        (text.to_string(), text.width())
+    } else if tail {
+        clip_tail(text, width)
+    } else {
+        clip_head(text, width)
+    };
+    let padding = width.saturating_sub(used);
+    format!("{text}{}", " ".repeat(padding))
+}
+
+fn clip_head(text: &str, width: usize) -> (String, usize) {
+    let limit = width.saturating_sub(1);
+    let mut out = String::new();
+    let mut used = 0;
+    for ch in text.chars() {
+        let w = ch.width().unwrap_or(0);
+        if used + w > limit {
+            break;
+        }
+        out.push(ch);
+        used += w;
+    }
+    out.push('…');
+    (out, used + 1)
+}
+
+fn clip_tail(text: &str, width: usize) -> (String, usize) {
+    let limit = width.saturating_sub(1);
+    let mut tail = Vec::new();
+    let mut used = 0;
+    for ch in text.chars().rev() {
+        let w = ch.width().unwrap_or(0);
+        if used + w > limit {
+            break;
+        }
+        tail.push(ch);
+        used += w;
+    }
+    tail.push('…');
+    tail.reverse();
+    (tail.into_iter().collect(), used + 1)
 }
 
 pub async fn list_plugins() -> Vec<(String, String, String, String, bool)> {
@@ -406,6 +477,26 @@ mod tests {
 
     fn parse(src: &str) -> Config {
         toml::from_str(src).unwrap()
+    }
+
+    #[test]
+    fn a_cell_fits_its_display_width() {
+        // a CJK name takes two columns per character
+        let name = cell("计算器", 10, false);
+        assert_eq!(name, "计算器    ");
+        assert_eq!(name.width(), 10);
+
+        // a long path keeps its file name
+        let path = "/home/me/.config/wayrun/plugins/note/assets/an-icon.svg";
+        let icon = cell(path, 20, true);
+        assert_eq!(icon.width(), 20);
+        assert!(icon.starts_with('…'), "{icon}");
+        assert!(icon.trim_end().ends_with("icon.svg"), "{icon}");
+
+        // a long name keeps its start
+        let cut = cell("a very long plugin display name", 12, false);
+        assert_eq!(cut.width(), 12);
+        assert!(cut.trim_end().ends_with('…'), "{cut}");
     }
 
     #[test]
