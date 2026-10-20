@@ -12,7 +12,7 @@ use serde_json::json;
 
 use crate::wire::ResultItem;
 
-use super::manifest::{Plugin, read_plugins};
+use super::manifest::{self, Plugin, read_plugins};
 use super::sandbox::script_env;
 use super::{kv, log::Log, module, sdk, warn};
 
@@ -31,7 +31,7 @@ pub fn run(script: &str) -> Result<()> {
 
 /// A script launched by its shebang keeps the `#!` line; Lua's own interpreter
 /// skips it, and `lua.load` does not.
-fn strip_shebang(source: &str) -> &str {
+pub(super) fn strip_shebang(source: &str) -> &str {
     match source.strip_prefix("#!") {
         Some(rest) => rest.split_once('\n').map(|(_, body)| body).unwrap_or(""),
         None => source,
@@ -48,7 +48,7 @@ fn load(
     shared: &sdk::Shared,
     imports: &module::Imports,
     log: &Log,
-) -> mlua::Result<(Lua, Vec<Plugin>)> {
+) -> mlua::Result<(Lua, Vec<Plugin>, Table)> {
     let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::default())?;
     let wayrun = sdk::build(&lua, script, shared, log.clone())?;
     let env = script_env(&lua, &wayrun, script, log.clone(), imports)?;
@@ -59,7 +59,46 @@ fn load(
         .eval()?;
     let plugins = read_plugins(&declared, script)?;
     fill_scopes(shared, &plugins);
-    Ok((lua, plugins))
+    Ok((lua, plugins, declared))
+}
+
+fn scopes(active: &kv::Active) -> sdk::Shared {
+    sdk::Shared {
+        active: Rc::clone(active),
+        kv_paths: Rc::new(RefCell::new(HashMap::new())),
+        env_scope: Rc::new(RefCell::new(HashMap::new())),
+        exec_scope: Rc::new(RefCell::new(HashMap::new())),
+        read_areas: Rc::new(RefCell::new(HashMap::new())),
+    }
+}
+
+/// One fresh load for `wayrun plugin check`: the plugin tables, and per plugin
+/// the keys the table does not define.
+pub(super) struct Inspected {
+    pub plugins: Vec<Plugin>,
+    pub unknown: Vec<Vec<String>>,
+    /// A `Plugin` carries the table's functions, so the VM stays alive beside them.
+    _lua: Lua,
+}
+
+pub(super) fn inspect(script: &str, source: &str) -> Result<Inspected> {
+    let active: kv::Active = Rc::new(RefCell::new(None));
+    let log = Log::new(script, Rc::clone(&active));
+    let shared = scopes(&active);
+    let imports: module::Imports = Rc::new(RefCell::new(Vec::new()));
+    let (lua, plugins, declared) = load(script, source, &shared, &imports, &log)
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+    let mut unknown = Vec::new();
+    for entry in declared.sequence_values::<Table>() {
+        let entry = entry.map_err(|error| anyhow::anyhow!("{error}"))?;
+        let keys = manifest::unknown_keys(&entry).map_err(|error| anyhow::anyhow!("{error}"))?;
+        unknown.push(keys);
+    }
+    Ok(Inspected {
+        plugins,
+        unknown,
+        _lua: lua,
+    })
 }
 
 /// The declared ids are known only after evaluation; the kv paths, the readable
@@ -136,15 +175,9 @@ impl Host {
         // mlua's error carries no Send bound, so it converts here, once.
         let active: kv::Active = Rc::new(RefCell::new(None));
         let log = Log::new(script, Rc::clone(&active));
-        let shared = sdk::Shared {
-            active: Rc::clone(&active),
-            kv_paths: Rc::new(RefCell::new(HashMap::new())),
-            env_scope: Rc::new(RefCell::new(HashMap::new())),
-            exec_scope: Rc::new(RefCell::new(HashMap::new())),
-            read_areas: Rc::new(RefCell::new(HashMap::new())),
-        };
+        let shared = scopes(&active);
         let imports: module::Imports = Rc::new(RefCell::new(Vec::new()));
-        let (lua, plugins) = load(script, source, &shared, &imports, &log)
+        let (lua, plugins, _) = load(script, source, &shared, &imports, &log)
             .map_err(|error| anyhow::anyhow!("{error}"))?;
         let stamps = RefCell::new(watch_stamps(script, &imports));
         Ok(Self {
@@ -182,7 +215,7 @@ impl Host {
             &self.imports,
             &self.log,
         ) {
-            Ok((lua, plugins)) => {
+            Ok((lua, plugins, _)) => {
                 self.lua = lua;
                 self.plugins = plugins;
                 *self.stamps.borrow_mut() = watch_stamps(&self.script, &self.imports);

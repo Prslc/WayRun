@@ -15,7 +15,8 @@ pub use rank::{
     classify_confident,
 };
 pub use registry::{
-    host_paths, list_plugins, print_list, refresh_hosts, reload, reload_if_changed,
+    entries_for_command, host_paths, list_plugins, print_list, refresh_hosts, reload,
+    reload_if_changed,
 };
 pub use search::dispatch;
 

@@ -164,6 +164,11 @@ printf '{"jsonrpc":"2.0","method":"search","params":{"plugin":"<id>","text":"…
 
 缺少 `env` 或 `read` 声明时，错误会直接点名，把它加进插件表即可，不必反复试探。
 
+`wayrun plugin check <script.lua>` 按主机的加载方式跑一遍脚本，报告会让它跑不起来的
+地方：shebang 与执行位、脚本返回的插件表、未知的键、比启动器新的 `api`、缺失的
+`search`/`top` 或身份图标，以及 `plugins.toml` 是否登记了脚本声明的 id。有问题时以
+非零状态退出，其余只是警告。
+
 ## 模块
 
 `wayrun.import("lib/util")` 会在同一个沙箱环境里加载 `<script_dir>/lib/util.lua`

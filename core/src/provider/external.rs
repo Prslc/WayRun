@@ -1,6 +1,7 @@
 use std::env;
 use std::fs;
 use std::future::Future;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::time::Duration;
@@ -33,9 +34,9 @@ pub fn command_path(command: &str) -> Option<PathBuf> {
     resolve_command(command)
 }
 
-/// `(mtime, size)` of the resolved `command`, to validate a cached identity.
+/// `(mtime, size, mode)` of the resolved `command`, to validate a cached identity.
 /// `None` when it cannot be resolved or stat'd, so the cache is not trusted.
-pub fn command_stamp(command: &str) -> Option<(u64, u64)> {
+pub fn command_stamp(command: &str) -> Option<(u64, u64, u32)> {
     let path = resolve_command(command)?;
     let meta = fs::metadata(path).ok()?;
     let mtime = meta
@@ -44,7 +45,7 @@ pub fn command_stamp(command: &str) -> Option<(u64, u64)> {
         .duration_since(UNIX_EPOCH)
         .ok()?
         .as_secs();
-    Some((mtime, meta.len()))
+    Some((mtime, meta.len(), meta.permissions().mode()))
 }
 
 /// A plugin backed by an external JSON-RPC host declared via `command`. The core

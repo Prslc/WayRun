@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use mlua::{Function, Table};
+use mlua::{Function, Table, Value};
 
 use super::areas;
 use super::warn;
@@ -16,6 +16,31 @@ pub(super) struct Plugin {
     pub read: Vec<PathBuf>,
     pub search: Option<Function>,
     pub top: Option<Function>,
+}
+
+/// The keys a plugin table may define; `wayrun plugin check` names anything else.
+const KEYS: &[&str] = &[
+    "id",
+    "name",
+    "icon",
+    "description",
+    "api",
+    "env",
+    "exec",
+    "read",
+    "search",
+    "top",
+];
+
+pub(super) fn unknown_keys(entry: &Table) -> mlua::Result<Vec<String>> {
+    let mut unknown = Vec::new();
+    for pair in entry.pairs::<String, Value>() {
+        let (key, _) = pair?;
+        if !KEYS.contains(&key.as_str()) {
+            unknown.push(key);
+        }
+    }
+    Ok(unknown)
 }
 
 pub(super) fn read_plugins(declared: &Table, script: &str) -> mlua::Result<Vec<Plugin>> {
@@ -108,4 +133,19 @@ pub(super) fn read_plugins(declared: &Table, script: &str) -> mlua::Result<Vec<P
         )));
     }
     Ok(plugins)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_key_the_table_does_not_define_is_named() {
+        let lua = mlua::Lua::new();
+        let entry: Table = lua
+            .load(r#"return { id = "x", keyword = "y", search = function() end }"#)
+            .eval()
+            .unwrap();
+        assert_eq!(unknown_keys(&entry).unwrap(), ["keyword"]);
+    }
 }

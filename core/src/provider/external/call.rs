@@ -91,7 +91,14 @@ async fn rpc_call_streaming(
                 tries += 1;
                 tokio::time::sleep(Duration::from_millis(2)).await;
             }
-            Err(_) => return None, // command not found -> no host
+            // a missing command is the ordinary "not installed"; a permission
+            // or exec failure is worth naming over the call's silence
+            Err(error) => {
+                if error.kind() != io::ErrorKind::NotFound {
+                    eprintln!("wayrun-core: external host {command}: {error}");
+                }
+                return None;
+            }
         }
     };
 

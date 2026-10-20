@@ -65,6 +65,24 @@ fn main() -> process::ExitCode {
         return process::ExitCode::SUCCESS;
     }
 
+    if rest.first().map(String::as_str) == Some("plugin") {
+        let script = (rest.get(1).map(String::as_str) == Some("check"))
+            .then(|| rest.get(2))
+            .flatten();
+        let Some(script) = script else {
+            eprintln!("usage: wayrun plugin check <script.lua>");
+            return process::ExitCode::FAILURE;
+        };
+        return match wayrun_core::lua::check(script) {
+            Ok(true) => process::ExitCode::SUCCESS,
+            Ok(false) => process::ExitCode::FAILURE,
+            Err(error) => {
+                eprintln!("wayrun: {error:#}");
+                process::ExitCode::FAILURE
+            }
+        };
+    }
+
     if let Some(verb) = rest.first()
         && matches!(verb.as_str(), "open" | "close" | "toggle" | "status")
     {

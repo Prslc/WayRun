@@ -1,4 +1,5 @@
 mod areas;
+mod check;
 mod crypto;
 mod fuzzy;
 mod host;
@@ -11,6 +12,7 @@ mod sandbox;
 mod sdk;
 mod sqlite;
 
+pub use check::run as check;
 pub use host::run;
 
 pub(super) fn warn(script: &str, message: &str) {

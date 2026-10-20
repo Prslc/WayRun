@@ -182,6 +182,12 @@ printf '{"jsonrpc":"2.0","method":"search","params":{"plugin":"<id>","text":"…
 A missing `env` or `read` declaration is named in the error, so add it to the
 plugin table instead of probing for it.
 
+`wayrun plugin check <script.lua>` loads the script the way the host does and
+reports what would keep it from working: the shebang and the exec bit, the
+plugin tables it returns, unknown keys, an `api` newer than the launcher's, a
+missing `search`/`top` or identity icon, and whether `plugins.toml` registers
+the ids it declares. Problems fail the command; the rest are warnings.
+
 ## Modules
 
 `wayrun.import("lib/util")` loads `<script_dir>/lib/util.lua` (the `.lua` is

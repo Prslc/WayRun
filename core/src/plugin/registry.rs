@@ -2,6 +2,7 @@ mod config;
 mod hosts;
 
 use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -99,6 +100,23 @@ pub fn host_paths() -> Vec<PathBuf> {
     paths.sort();
     paths.dedup();
     paths
+}
+
+/// The `plugins.toml` entries pointing at `command`, as `(id, keyword, enabled)`,
+/// so `wayrun plugin check` can compare a script with its registration.
+pub fn entries_for_command(command: &str) -> Vec<(String, String, bool)> {
+    // The exec bit stays out of it: a script that lost it is still registered.
+    let wanted = fs::canonicalize(command).unwrap_or_else(|_| PathBuf::from(command));
+    load_or_default()
+        .plugins
+        .into_iter()
+        .filter(|entry| {
+            entry.command.as_deref().is_some_and(|configured| {
+                fs::canonicalize(configured).unwrap_or_else(|_| PathBuf::from(configured)) == wanted
+            })
+        })
+        .map(|entry| (entry.id, entry.keyword, entry.enabled))
+        .collect()
 }
 
 /// Rebuild the registry when a host file changed, then ask only those hosts
