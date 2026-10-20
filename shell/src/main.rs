@@ -17,7 +17,7 @@ use clap::Parser;
 use wayland_client::Connection;
 use wayland_client::globals::registry_queue_init;
 
-use crate::cli::{Cli, Command, PluginAction};
+use crate::cli::{Cli, Command, ConfigAction, PluginAction};
 use crate::session::{backend, ipc};
 use crate::wayland::Shell;
 use wayrun_ui::render;
@@ -52,6 +52,7 @@ fn main() -> process::ExitCode {
     }
 
     match cli.command {
+        Some(Command::Config { action }) => return config(action),
         Some(Command::Plugin { action }) => return plugin(action),
         Some(Command::Bench) => {
             render::bench();
@@ -123,6 +124,32 @@ fn plugin(action: PluginAction) -> process::ExitCode {
     }
 }
 
+fn config(action: ConfigAction) -> process::ExitCode {
+    use wayrun_core::config::edit;
+    match action {
+        ConfigAction::List => match edit::list() {
+            Ok(entries) => {
+                for (key, value) in entries {
+                    println!("{key} = {value}");
+                }
+                process::ExitCode::SUCCESS
+            }
+            Err(error) => fail(error),
+        },
+        ConfigAction::Get { key } => match edit::get(&key) {
+            Ok(value) => {
+                println!("{value}");
+                process::ExitCode::SUCCESS
+            }
+            Err(error) => fail(error),
+        },
+        ConfigAction::Set { key, value } => {
+            outcome(edit::set(&key, &value).map(|()| println!("set {key}")))
+        }
+        ConfigAction::Unset { key } => outcome(edit::unset(&key).map(|()| println!("unset {key}"))),
+    }
+}
+
 fn add(script: &str, keyword: Option<String>, resident: bool) -> process::ExitCode {
     let result = (|| -> anyhow::Result<()> {
         let plugins = wayrun_core::lua::plugin_ids(script)?;
@@ -143,11 +170,13 @@ fn add(script: &str, keyword: Option<String>, resident: bool) -> process::ExitCo
 fn outcome(result: anyhow::Result<()>) -> process::ExitCode {
     match result {
         Ok(()) => process::ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("wayrun: {error:#}");
-            process::ExitCode::FAILURE
-        }
+        Err(error) => fail(error),
     }
+}
+
+fn fail(error: anyhow::Error) -> process::ExitCode {
+    eprintln!("wayrun: {error:#}");
+    process::ExitCode::FAILURE
 }
 
 fn run() -> Result<(), Box<dyn Error>> {

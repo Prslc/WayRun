@@ -26,10 +26,38 @@ pub enum Command {
     Status,
     /// Run the rasteriser micro-benchmark; no Wayland.
     Bench,
+    /// Read and write config.toml.
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
     /// Inspect plugins and their registration.
     Plugin {
         #[command(subcommand)]
         action: PluginAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ConfigAction {
+    /// Print every effective setting.
+    List,
+    /// Print one setting.
+    Get {
+        /// A dotted key, e.g. ui.locale.
+        key: String,
+    },
+    /// Set one key.
+    Set {
+        /// A dotted key, e.g. files.index.
+        key: String,
+        /// A TOML value; a bare string works for text keys.
+        value: String,
+    },
+    /// Drop a key, so its default applies again.
+    Unset {
+        /// A dotted key, e.g. icon.theme.
+        key: String,
     },
 }
 
@@ -114,6 +142,37 @@ mod tests {
             parse(&["wayrun", "status"]).command,
             Some(Command::Status)
         ));
+    }
+
+    #[test]
+    fn the_config_commands_parse() {
+        assert!(matches!(
+            parse(&["wayrun", "config", "list"]).command,
+            Some(Command::Config {
+                action: ConfigAction::List
+            })
+        ));
+        match parse(&["wayrun", "config", "get", "ui.locale"]).command {
+            Some(Command::Config {
+                action: ConfigAction::Get { key },
+            }) => assert_eq!(key, "ui.locale"),
+            _ => panic!("config get did not parse"),
+        }
+        match parse(&["wayrun", "config", "set", "files.index", "false"]).command {
+            Some(Command::Config {
+                action: ConfigAction::Set { key, value },
+            }) => {
+                assert_eq!(key, "files.index");
+                assert_eq!(value, "false");
+            }
+            _ => panic!("config set did not parse"),
+        }
+        match parse(&["wayrun", "config", "unset", "icon.theme"]).command {
+            Some(Command::Config {
+                action: ConfigAction::Unset { key },
+            }) => assert_eq!(key, "icon.theme"),
+            _ => panic!("config unset did not parse"),
+        }
     }
 
     #[test]

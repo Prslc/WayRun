@@ -4,6 +4,16 @@
 WayRun 的设置。首次运行会生成一份带注释的模板，并监听该文件；修改后无需重启即可生效。
 所有键都是可选的：文件或键缺失时，使用下面列出的内置默认值。
 
+## 命令行编辑
+
+`wayrun config list` 打印全部生效设置（默认值加你的文件），`wayrun config get <键>`
+打印其中一项；`wayrun config set <键> <值>` 与 `wayrun config unset <键>` 直接修改
+`config.toml`，保留文件里的注释，写入前重新解析校验。键用点号分隔（`ui.locale`、
+`files.exclude`）；文本值通常不需要引号，只有当它看起来像别的 TOML 类型时才需要，例如
+`config set files.index false`、`config set files.exclude '["node_modules", "target"]'`
+都可以。`locale` 与 `font.family` 在启动时读取，修改后需要
+`systemctl --user restart wayrun-launcher`；其余设置通过监听器即时生效。
+
 ## `[ui]`
 
 | 键 | 默认 | 含义 |

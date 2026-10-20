@@ -6,6 +6,18 @@ first run as a commented template and is watched, so an edit is picked up withou
 restarting. Every key is optional: a missing file or key keeps the built-in
 default shown here.
 
+## From the command line
+
+`wayrun config list` prints every effective setting (defaults plus your file),
+`wayrun config get <key>` one of them, and `wayrun config set <key> <value>` /
+`wayrun config unset <key>` edit `config.toml` in place, keeping its comments
+and re-parsing the result before writing. Keys are dotted (`ui.locale`,
+`files.exclude`); a text value needs no quotes unless it looks like another TOML
+type, so `config set files.index false` and
+`config set files.exclude '["node_modules", "target"]'` both work. `locale` and
+`font.family` are read at startup, so a change needs
+`systemctl --user restart wayrun-launcher`; the rest applies through the watcher.
+
 ## `[ui]`
 
 | Key | Default | Meaning |
