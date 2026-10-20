@@ -2,11 +2,20 @@
 
 `$XDG_CONFIG_HOME/wayrun/plugins.toml` (default
 `~/.config/wayrun/plugins.toml`) is the plugin registry. It is generated on the
-first run as a commented template and is watched, so an edit is picked up without
-restarting.
+first run from the shipped defaults and is watched, so an edit is picked up
+without restarting.
 
 `wayrun plugin list` prints the effective registry — ids, names, keywords, icons
 and any disabled entry — with the user file already merged over the built-ins.
+
+`wayrun plugin add <script.lua> [--keyword K] [--resident]` registers a Lua host:
+it loads the script, refuses a missing shebang or exec bit, an id already
+configured, or a keyword another enabled entry owns, then appends the entry (the
+keyword defaults to the plugin id). `wayrun plugin enable|disable <id>` writes or
+edits the user entry for an id, a built-in included, and `wayrun plugin remove
+<id>` drops a user entry, leaving a built-in at its shipped default. Edits keep
+the file's comments and are written at once; a running launcher picks the file
+up through its watcher.
 
 ## Entry fields
 

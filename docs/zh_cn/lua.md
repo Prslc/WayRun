@@ -248,6 +248,9 @@ local strings = wayrun.json.decode(text or "{}")
 可执行文件名，字段见 [plugins.md](plugins.md#条目字段)，契约见
 [jsonrpc.md](jsonrpc.md)。脚本首行必须是 `#!/usr/bin/env -S wayrun --lua-host`。
 
+`wayrun plugin add <script.lua> --keyword <k>` 会先加载脚本再写入条目：缺 shebang 或
+执行位时直接失败，不会登记半个插件。
+
 编辑器补全：把 [`lua/wayrun.lua`](../../lua/wayrun.lua) 加入 LuaLS 的
 `Lua.workspace.library`，它声明了同一张 `wayrun` 表。
 

@@ -19,6 +19,7 @@ compositor-hyprland = ["wayrun-core/compositor-hyprland"]
 [dependencies]
 wayrun-core = { path = "../core", default-features = false }
 wayrun-ui = { path = "../ui" }
+anyhow = "1.0.102"
 calloop = "0.14"
 calloop-wayland-source = "0.4"
 clap = { version = "4", features = ["derive"] }

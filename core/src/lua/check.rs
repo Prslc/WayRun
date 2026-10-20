@@ -4,7 +4,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use super::host::{inspect, strip_shebang};
+use super::host::{Inspected, inspect, strip_shebang};
 use super::manifest::Plugin;
 use crate::wire::PLUGIN_API;
 
@@ -13,21 +13,8 @@ const SHEBANG: &str = "#!/usr/bin/env -S wayrun --lua-host";
 /// `wayrun plugin check <script.lua>`: load the script the way the host does
 /// and report what keeps it from working; `Ok(false)` when a check failed.
 pub fn run(script: &str) -> Result<bool> {
-    let source =
-        fs::read_to_string(script).with_context(|| format!("reading lua script {script}"))?;
-    let meta = fs::metadata(script).with_context(|| format!("reading lua script {script}"))?;
-
-    let mut problems = Vec::new();
+    let (mut problems, checked) = load(script)?;
     let mut notes = Vec::new();
-    if source.lines().next() != Some(SHEBANG) {
-        problems.push(format!("first line must be `{SHEBANG}`"));
-    }
-    if meta.permissions().mode() & 0o111 == 0 {
-        problems.push("file is not executable (chmod +x)".to_string());
-    }
-
-    let checked = inspect(script, strip_shebang(&source))
-        .with_context(|| format!("loading lua script {script}"))?;
 
     println!("{script}");
     for (plugin, unknown) in checked.plugins.iter().zip(&checked.unknown) {
@@ -43,6 +30,37 @@ pub fn run(script: &str) -> Result<bool> {
     }
     println!("{}", if problems.is_empty() { "ok" } else { "failed" });
     Ok(problems.is_empty())
+}
+
+/// The plugins a Lua script declares, refusing one the host could not run.
+pub fn plugin_ids(script: &str) -> Result<Vec<(String, String)>> {
+    let (problems, checked) = load(script)?;
+    if !problems.is_empty() {
+        anyhow::bail!("{}", problems.join("; "));
+    }
+    Ok(checked
+        .plugins
+        .iter()
+        .map(|plugin| (plugin.id.clone(), plugin.name.clone()))
+        .collect())
+}
+
+/// The script's own fatal problems and its loaded plugin tables.
+fn load(script: &str) -> Result<(Vec<String>, Inspected)> {
+    let source =
+        fs::read_to_string(script).with_context(|| format!("reading lua script {script}"))?;
+    let meta = fs::metadata(script).with_context(|| format!("reading lua script {script}"))?;
+
+    let mut problems = Vec::new();
+    if source.lines().next() != Some(SHEBANG) {
+        problems.push(format!("first line must be `{SHEBANG}`"));
+    }
+    if meta.permissions().mode() & 0o111 == 0 {
+        problems.push("file is not executable (chmod +x)".to_string());
+    }
+    let checked = inspect(script, strip_shebang(&source))
+        .with_context(|| format!("loading lua script {script}"))?;
+    Ok((problems, checked))
 }
 
 fn report(plugin: &Plugin, unknown: &[String], notes: &mut Vec<String>) {

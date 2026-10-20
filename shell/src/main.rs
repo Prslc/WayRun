@@ -106,6 +106,47 @@ fn plugin(action: PluginAction) -> process::ExitCode {
                 process::ExitCode::FAILURE
             }
         },
+        PluginAction::Add {
+            script,
+            keyword,
+            resident,
+        } => add(&script, keyword, resident),
+        PluginAction::Enable { id } => {
+            outcome(wayrun_core::plugins::set_enabled(&id, true).map(|()| println!("enabled {id}")))
+        }
+        PluginAction::Disable { id } => outcome(
+            wayrun_core::plugins::set_enabled(&id, false).map(|()| println!("disabled {id}")),
+        ),
+        PluginAction::Remove { id } => {
+            outcome(wayrun_core::plugins::remove_plugin(&id).map(|()| println!("removed {id}")))
+        }
+    }
+}
+
+fn add(script: &str, keyword: Option<String>, resident: bool) -> process::ExitCode {
+    let result = (|| -> anyhow::Result<()> {
+        let plugins = wayrun_core::lua::plugin_ids(script)?;
+        let [(id, name)] = plugins.as_slice() else {
+            anyhow::bail!(
+                "{script} declares {} plugins; register each one by hand",
+                plugins.len()
+            );
+        };
+        let keyword = keyword.unwrap_or_else(|| id.clone());
+        wayrun_core::plugins::add_plugin(id, &keyword, Path::new(script), resident)?;
+        println!("added {id} ({name}), keyword {keyword:?}");
+        Ok(())
+    })();
+    outcome(result)
+}
+
+fn outcome(result: anyhow::Result<()>) -> process::ExitCode {
+    match result {
+        Ok(()) => process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("wayrun: {error:#}");
+            process::ExitCode::FAILURE
+        }
     }
 }
 

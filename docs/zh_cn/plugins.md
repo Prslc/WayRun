@@ -1,11 +1,17 @@
 # 插件
 
 `$XDG_CONFIG_HOME/wayrun/plugins.toml`（默认 `~/.config/wayrun/plugins.toml`）
-是插件注册表。首次运行时会生成一份带注释的模板；该文件会被监听，修改后无需重启
-即可生效。
+是插件注册表。首次运行时会按随附的默认项生成；该文件会被监听，修改后无需重启即可
+生效。
 
 `wayrun plugin list` 打印合并后的生效注册表：id、名称、关键词、图标与被禁用的条目，
 用户文件已经覆盖在内置条目之上。
+
+`wayrun plugin add <script.lua> [--keyword K] [--resident]` 登记一个 Lua 主机：先加载
+脚本，缺 shebang 或执行位、id 已存在、关键词被另一个启用的条目占用都会被拒绝，然后
+追加条目（关键词默认取插件 id）。`wayrun plugin enable|disable <id>` 写入或修改该 id
+的用户条目（内置插件亦然），`wayrun plugin remove <id>` 删除用户条目，内置插件回到
+随附的默认状态。编辑会保留文件里的注释并一次写入；运行中的启动器通过监听器读到改动。
 
 ## 条目字段
 

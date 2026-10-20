@@ -281,6 +281,10 @@ register it like any host — a single executable token, with the fields in
 [jsonrpc.md](jsonrpc.md). The first line of the script must be
 `#!/usr/bin/env -S wayrun --lua-host`.
 
+`wayrun plugin add <script.lua> --keyword <k>` writes that entry for you after
+loading the script, so a missing shebang or exec bit fails before anything is
+registered.
+
 For editor completion, point LuaLS's `Lua.workspace.library` at
 [`lua/wayrun.lua`](../../lua/wayrun.lua); it declares the same `wayrun` table.
 

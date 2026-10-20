@@ -42,6 +42,32 @@ pub enum PluginAction {
         /// The script to check.
         script: String,
     },
+    /// Register a Lua host in plugins.toml.
+    Add {
+        /// The script to register.
+        script: String,
+        /// The routing keyword; defaults to the plugin id.
+        #[arg(long)]
+        keyword: Option<String>,
+        /// Keep the host process alive across calls.
+        #[arg(long)]
+        resident: bool,
+    },
+    /// Enable a plugin entry.
+    Enable {
+        /// The plugin id.
+        id: String,
+    },
+    /// Disable a plugin entry.
+    Disable {
+        /// The plugin id.
+        id: String,
+    },
+    /// Drop the user entry for a plugin.
+    Remove {
+        /// The plugin id.
+        id: String,
+    },
 }
 
 #[cfg(test)]
@@ -103,6 +129,45 @@ mod tests {
                 action: PluginAction::Check { script },
             }) => assert_eq!(script, "/tmp/a.lua"),
             _ => panic!("plugin check did not parse"),
+        }
+        match parse(&[
+            "wayrun",
+            "plugin",
+            "add",
+            "/tmp/a.lua",
+            "--keyword",
+            "a",
+            "--resident",
+        ])
+        .command
+        {
+            Some(Command::Plugin {
+                action:
+                    PluginAction::Add {
+                        script,
+                        keyword,
+                        resident,
+                    },
+            }) => {
+                assert_eq!(script, "/tmp/a.lua");
+                assert_eq!(keyword.as_deref(), Some("a"));
+                assert!(resident);
+            }
+            _ => panic!("plugin add did not parse"),
+        }
+        for verb in ["enable", "disable", "remove"] {
+            match parse(&["wayrun", "plugin", verb, "note"]).command {
+                Some(Command::Plugin { action }) => {
+                    let id = match action {
+                        PluginAction::Enable { id }
+                        | PluginAction::Disable { id }
+                        | PluginAction::Remove { id } => id,
+                        _ => panic!("{verb} parsed as another action"),
+                    };
+                    assert_eq!(id, "note");
+                }
+                _ => panic!("plugin {verb} did not parse"),
+            }
         }
     }
 }

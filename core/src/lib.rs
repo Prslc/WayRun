@@ -56,3 +56,8 @@ pub fn print_plugins() -> Result<()> {
     runtime()?.block_on(plugin::print_list())?;
     Ok(())
 }
+
+/// The user-file edits behind `wayrun plugin add|enable|disable|remove`.
+pub mod plugins {
+    pub use crate::plugin::{add_plugin, remove_plugin, set_enabled};
+}

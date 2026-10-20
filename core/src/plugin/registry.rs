@@ -1,4 +1,5 @@
 mod config;
+mod edit;
 mod hosts;
 
 use std::collections::HashMap;
@@ -11,6 +12,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use self::config::{Config, load_or_default};
 use self::hosts::HostCache;
 use crate::provider::external::HostMeta;
+
+pub use self::edit::{add_plugin, remove_plugin, set_enabled};
 
 #[derive(Clone)]
 pub struct PendingHost {

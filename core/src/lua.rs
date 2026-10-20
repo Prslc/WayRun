@@ -12,6 +12,7 @@ mod sandbox;
 mod sdk;
 mod sqlite;
 
+pub use check::plugin_ids;
 pub use check::run as check;
 pub use host::run;
 
