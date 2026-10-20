@@ -12,7 +12,7 @@ PartOf=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/home/you/.local/bin/wayrun
+ExecStart=/home/you/.local/bin/wayrun run
 # 关闭启动器属于正常退出，因此不能用 on-failure
 Restart=always
 RestartSec=2
@@ -42,9 +42,9 @@ systemctl --user enable --now wayrun-launcher
 ```
 
 命令 `open` / `close` / `toggle` / `status` 都发给常驻实例持有的这个 socket；`status`
-打印 `visible` 或 `hidden`。不设 `WAYRUN_RESIDENT=1` 时，直接运行 `wayrun` 会弹出、
-关闭即退出。恢复：`systemctl --user disable --now wayrun-launcher`，并还原绑定的启动
-方式。
+打印 `visible` 或 `hidden`。不设 `WAYRUN_RESIDENT=1` 时，`wayrun run` 会弹出、关闭即
+退出；在终端里裸 `wayrun` 打印命令列表，而没有终端的调用（热键、unit、脚本）仍然运行
+启动器。恢复：`systemctl --user disable --now wayrun-launcher`，并还原绑定的启动方式。
 
 启动器打开的应用各自运行在自己的瞬时 systemd scope 中（`systemd-run --user --scope`）：
 单元的内存与 CPU 统计只算启动器自身，重启不会影响正在运行的应用，`systemd-oomd`

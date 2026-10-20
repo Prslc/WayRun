@@ -107,7 +107,7 @@ compositor-specific (niri and Hyprland examples are in
 [resident mode](docs/en/resident.md)):
 
 ```bash
-wayrun
+wayrun run
 ```
 
 The launcher is a full-screen overlay with a dimmed backdrop and a centered card.

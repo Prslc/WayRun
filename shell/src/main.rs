@@ -6,6 +6,7 @@ mod wayland;
 
 use std::env;
 use std::error::Error;
+use std::io::{self, IsTerminal};
 use std::path::Path;
 use std::process;
 use std::time::Instant;
@@ -13,7 +14,7 @@ use std::time::Instant;
 use calloop::EventLoop;
 use calloop::channel::Event as ChannelEvent;
 use calloop_wayland_source::WaylandSource;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use wayland_client::Connection;
 use wayland_client::globals::registry_queue_init;
 
@@ -52,6 +53,7 @@ fn main() -> process::ExitCode {
     }
 
     match cli.command {
+        Some(Command::Run) => {}
         Some(Command::Config { action }) => return config(action),
         Some(Command::Plugin { action }) => return plugin(action),
         Some(Command::Bench) => {
@@ -62,7 +64,14 @@ fn main() -> process::ExitCode {
         Some(Command::Close) => return ipc::client("close"),
         Some(Command::Toggle) => return ipc::client("toggle"),
         Some(Command::Status) => return ipc::client("status"),
-        None => {}
+        None => {
+            // A terminal gets the command list; a keybind, unit or script has
+            // no terminal and keeps the bare form that runs the launcher.
+            if io::stdin().is_terminal() {
+                let _ = Cli::command().print_help();
+                return process::ExitCode::SUCCESS;
+            }
+        }
     }
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
@@ -71,6 +80,12 @@ fn main() -> process::ExitCode {
         Ok(()) => process::ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("wayrun: {error}");
+            if error
+                .downcast_ref::<io::Error>()
+                .is_some_and(|error| error.kind() == io::ErrorKind::AddrInUse)
+            {
+                eprintln!("hint: the launcher is already running; `wayrun toggle` shows it");
+            }
             process::ExitCode::FAILURE
         }
     }

@@ -13,7 +13,7 @@ PartOf=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/home/you/.local/bin/wayrun
+ExecStart=/home/you/.local/bin/wayrun run
 # dismissing the launcher is a clean exit, so "on-failure" would be wrong
 Restart=always
 RestartSec=2
@@ -47,9 +47,10 @@ systemctl --user enable --now wayrun-launcher
 
 The commands are `open` / `close` / `toggle` / `status`, spoken to the socket the
 resident instance owns; `status` prints `visible` or `hidden`. Without
-`WAYRUN_RESIDENT=1`, a plain `wayrun` shows on launch and quits on dismiss. To
-revert, `systemctl --user disable --now wayrun-launcher` and restore the
-spawn-per-hotkey binding.
+`WAYRUN_RESIDENT=1`, `wayrun run` shows on launch and quits on dismiss. A bare
+`wayrun` prints the command list in a terminal; spawned without one — a keybind,
+a unit, a script — it runs the launcher. To revert, `systemctl --user disable
+--now wayrun-launcher` and restore the spawn-per-hotkey binding.
 
 Apps you launch run in their own transient systemd scope
 (`systemd-run --user --scope`), so the unit's memory and CPU stay the launcher's

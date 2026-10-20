@@ -16,6 +16,8 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Run the launcher.
+    Run,
     /// Show the launcher.
     Open,
     /// Hide the launcher.
@@ -126,6 +128,10 @@ mod tests {
 
     #[test]
     fn the_ipc_verbs_parse() {
+        assert!(matches!(
+            parse(&["wayrun", "run"]).command,
+            Some(Command::Run)
+        ));
         assert!(matches!(
             parse(&["wayrun", "open"]).command,
             Some(Command::Open)

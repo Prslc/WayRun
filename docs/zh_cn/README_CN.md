@@ -95,7 +95,7 @@ codegen，编译更快、体积略大。
 niri 与 Hyprland 的示例见[常驻模式](resident.md)：
 
 ```bash
-wayrun
+wayrun run
 ```
 
 启动器以全屏覆盖打开，带调暗背景与居中卡片。默认的热键拉起方式下，`Esc` 或点击卡片
