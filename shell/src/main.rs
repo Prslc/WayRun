@@ -1,4 +1,5 @@
 mod app;
+mod cli;
 mod config;
 mod session;
 mod wayland;
@@ -12,23 +13,31 @@ use std::time::Instant;
 use calloop::EventLoop;
 use calloop::channel::Event as ChannelEvent;
 use calloop_wayland_source::WaylandSource;
+use clap::Parser;
 use wayland_client::Connection;
 use wayland_client::globals::registry_queue_init;
 
+use crate::cli::{Cli, Command, PluginAction};
 use crate::session::{backend, ipc};
 use crate::wayland::Shell;
 use wayrun_ui::render;
 
 fn main() -> process::ExitCode {
-    wayrun_core::locale::init();
     let mut args = env::args();
     let invoked_as = args.next().unwrap_or_default();
-    let rest: Vec<String> = args.collect();
 
-    // The Lua plugin host: the VM lives in this same binary, never in the
-    // core's process, and the script path follows the flag.
-    if let Some(at) = rest.iter().position(|arg| arg == "--lua-host") {
-        let script = rest.get(at + 1).map(String::as_str).unwrap_or_default();
+    // A `wayrun-core` symlink keeps the documented stdin/JSON-RPC entry working.
+    if Path::new(&invoked_as)
+        .file_name()
+        .is_some_and(|name| name == "wayrun-core")
+    {
+        return core();
+    }
+
+    let cli = Cli::parse();
+    wayrun_core::locale::init();
+
+    if let Some(script) = cli.lua_host.as_deref() {
         return match wayrun_core::lua::run(script) {
             Ok(()) => process::ExitCode::SUCCESS,
             Err(error) => {
@@ -38,56 +47,24 @@ fn main() -> process::ExitCode {
             }
         };
     }
+    if cli.core {
+        return core();
+    }
 
-    // The shell re-execs this binary with `--core`; a `wayrun-core` symlink
-    // keeps the documented stdin/JSON-RPC entry point working.
-    let as_core = Path::new(&invoked_as)
-        .file_name()
-        .is_some_and(|name| name == "wayrun-core");
-    if as_core
-        || rest
-            .iter()
-            .any(|arg| arg == "--core" || arg == "--list-plugins")
-    {
-        return match wayrun_core::run() {
-            Ok(()) => process::ExitCode::SUCCESS,
-            Err(error) => {
-                eprintln!("wayrun: {error}");
-                process::ExitCode::FAILURE
-            }
-        };
+    match cli.command {
+        Some(Command::Plugin { action }) => return plugin(action),
+        Some(Command::Bench) => {
+            render::bench();
+            return process::ExitCode::SUCCESS;
+        }
+        Some(Command::Open) => return ipc::client("open"),
+        Some(Command::Close) => return ipc::client("close"),
+        Some(Command::Toggle) => return ipc::client("toggle"),
+        Some(Command::Status) => return ipc::client("status"),
+        None => {}
     }
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
-
-    if rest.first().map(String::as_str) == Some("bench") {
-        render::bench();
-        return process::ExitCode::SUCCESS;
-    }
-
-    if rest.first().map(String::as_str) == Some("plugin") {
-        let script = (rest.get(1).map(String::as_str) == Some("check"))
-            .then(|| rest.get(2))
-            .flatten();
-        let Some(script) = script else {
-            eprintln!("usage: wayrun plugin check <script.lua>");
-            return process::ExitCode::FAILURE;
-        };
-        return match wayrun_core::lua::check(script) {
-            Ok(true) => process::ExitCode::SUCCESS,
-            Ok(false) => process::ExitCode::FAILURE,
-            Err(error) => {
-                eprintln!("wayrun: {error:#}");
-                process::ExitCode::FAILURE
-            }
-        };
-    }
-
-    if let Some(verb) = rest.first()
-        && matches!(verb.as_str(), "open" | "close" | "toggle" | "status")
-    {
-        return ipc::client(verb);
-    }
 
     match run() {
         Ok(()) => process::ExitCode::SUCCESS,
@@ -95,6 +72,40 @@ fn main() -> process::ExitCode {
             eprintln!("wayrun: {error}");
             process::ExitCode::FAILURE
         }
+    }
+}
+
+fn core() -> process::ExitCode {
+    match wayrun_core::run() {
+        Ok(()) => process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("wayrun: {error}");
+            process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn list_plugins() -> process::ExitCode {
+    match wayrun_core::print_plugins() {
+        Ok(()) => process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("wayrun: {error}");
+            process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn plugin(action: PluginAction) -> process::ExitCode {
+    match action {
+        PluginAction::List => list_plugins(),
+        PluginAction::Check { script } => match wayrun_core::lua::check(&script) {
+            Ok(true) => process::ExitCode::SUCCESS,
+            Ok(false) => process::ExitCode::FAILURE,
+            Err(error) => {
+                eprintln!("wayrun: {error:#}");
+                process::ExitCode::FAILURE
+            }
+        },
     }
 }
 

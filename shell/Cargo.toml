@@ -21,6 +21,7 @@ wayrun-core = { path = "../core", default-features = false }
 wayrun-ui = { path = "../ui" }
 calloop = "0.14"
 calloop-wayland-source = "0.4"
+clap = { version = "4", features = ["derive"] }
 env_logger = { version = "0.11", default-features = false }
 libc = "0.2"
 notify = "8.2"

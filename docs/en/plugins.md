@@ -5,6 +5,9 @@
 first run as a commented template and is watched, so an edit is picked up without
 restarting.
 
+`wayrun plugin list` prints the effective registry — ids, names, keywords, icons
+and any disabled entry — with the user file already merged over the built-ins.
+
 ## Entry fields
 
 ```toml

@@ -3,6 +3,7 @@ mod hosts;
 
 use std::collections::HashMap;
 use std::fs;
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -313,13 +314,27 @@ async fn resolve_pending_filtered(keyword: Option<&str>, commands: Option<&[Stri
     }
 }
 
-/// Print the registry table (`--list-plugins`).
-pub async fn print_list() {
-    println!(
+/// Print the registry table for `plugin list`; a reader that closes the pipe
+/// early (`| head`) ends the listing quietly.
+pub async fn print_list() -> io::Result<()> {
+    let mut out = io::stdout().lock();
+    match table(&mut out).await {
+        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        other => other,
+    }
+}
+
+async fn table(out: &mut impl Write) -> io::Result<()> {
+    writeln!(
+        out,
         "{:<24} {:<24} {:<12} {:<24} STATUS",
         "ID", "NAME", "KEYWORD", "ICON"
-    );
-    println!("{:-<24} {:-<24} {:-<12} {:-<24} {:-<8}", "", "", "", "", "");
+    )?;
+    writeln!(
+        out,
+        "{:-<24} {:-<24} {:-<12} {:-<24} {:-<8}",
+        "", "", "", "", ""
+    )?;
     for (id, name, icon, keyword, enabled) in list_plugins().await {
         let kw = if keyword.is_empty() {
             "(default)"
@@ -327,8 +342,9 @@ pub async fn print_list() {
             &keyword
         };
         let status = if enabled { "" } else { "[disabled]" };
-        println!("{id:<24} {name:<24} {kw:<12} {icon:<24}{status}");
+        writeln!(out, "{id:<24} {name:<24} {kw:<12} {icon:<24}{status}")?;
     }
+    Ok(())
 }
 
 pub async fn list_plugins() -> Vec<(String, String, String, String, bool)> {
