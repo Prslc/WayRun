@@ -11,8 +11,9 @@ WayRun 的设置。首次运行会生成一份带注释的模板，并监听该�
 `config.toml`，保留文件里的注释，写入前重新解析校验。键用点号分隔（`ui.locale`、
 `files.exclude`）；文本值通常不需要引号，只有当它看起来像别的 TOML 类型时才需要，例如
 `config set files.index false`、`config set files.exclude '["node_modules", "target"]'`
-都可以。`locale` 与 `font.family` 在启动时读取，修改后需要
-`systemctl --user restart wayrun-launcher`；其余设置通过监听器即时生效。
+都可以。`locale` 在启动时读取，修改后需要
+`systemctl --user restart wayrun-launcher`；其余设置（包括 `font.family`）通过监听器
+即时生效。
 
 ## `[ui]`
 
@@ -30,9 +31,8 @@ WayRun 的设置。首次运行会生成一份带注释的模板，并监听该�
 | --- | --- | --- |
 | `family` | `sans-serif` | 主文本字体族，或通用名（`serif`、`sans-serif`、`monospace`）。 |
 
-启动时读取，修改后需下次启动生效（`systemctl --user restart wayrun-launcher`）。
-字体族缺少的字形会回退到系统字体。界面字号在 `theme.toml` 的 `[font].size`，可实时
-生效。
+实时生效：文件变化后用新的字体族重新排版。字体族缺少的字形会回退到系统字体。界面字号
+在 `theme.toml` 的 `[font].size`，同样实时生效。
 
 ## `[icon]`
 

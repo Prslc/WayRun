@@ -81,6 +81,15 @@ impl TextEngine {
         release_font_pages(&self.font_system);
     }
 
+    /// Point shaping at a new family; the cached lines were shaped with the old one.
+    pub fn set_family(&mut self, family: String) {
+        if self.family == family {
+            return;
+        }
+        self.family = family;
+        self.lines.clear();
+    }
+
     /// Shape one unwrapped line, cached by text/size/weight; every later frame
     /// that draws it is a hash lookup.
     pub fn shape(&mut self, text: &str, size: f32, weight: Weight) -> Rc<Shaped> {
@@ -382,6 +391,20 @@ mod tests {
         engine.clear_cache();
         let after = engine.shape("Firefox", 14.0, Weight::BOLD);
         assert!(!Rc::ptr_eq(&first, &after));
+    }
+
+    #[test]
+    fn a_font_change_drops_the_shaped_lines() {
+        let mut engine = TextEngine::with_family("Source Han Sans CN".to_string());
+        let first = engine.shape("Firefox", 14.0, Weight::NORMAL);
+        engine.set_family("Noto Sans".to_string());
+        let after = engine.shape("Firefox", 14.0, Weight::NORMAL);
+        assert!(!Rc::ptr_eq(&first, &after));
+
+        // the same family again keeps the cache
+        engine.set_family("Noto Sans".to_string());
+        let same = engine.shape("Firefox", 14.0, Weight::NORMAL);
+        assert!(Rc::ptr_eq(&after, &same));
     }
 
     #[test]

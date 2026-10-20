@@ -59,6 +59,23 @@ pub fn watch(tx: calloop::channel::Sender<AppearanceConfig>) -> Option<notify::R
     })
 }
 
+/// Watch `config.toml` for a font-family change; the theme file's size already
+/// applies live and the family is the other half.
+pub fn watch_family(tx: calloop::channel::Sender<String>) -> Option<notify::RecommendedWatcher> {
+    // The core writes the template on the first config read.
+    let mut last = wayrun_core::config::get().font.family.clone();
+    let path = wayrun_core::config::path()?;
+    watch_file(&path, move || {
+        wayrun_core::config::reload();
+        let family = wayrun_core::config::get().font.family.clone();
+        if family == last {
+            return;
+        }
+        last = family.clone();
+        let _ = tx.send(family);
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

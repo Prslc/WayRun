@@ -1,4 +1,5 @@
 use std::fs;
+use std::mem;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
@@ -31,7 +32,7 @@ pub fn set(key: &str, raw: &str) -> anyhow::Result<()> {
     let default = lookup(&defaults, key).with_context(|| unknown(key, &defaults))?;
     let input =
         parse_input(raw, default).with_context(|| format!("{key} takes {}", describe(default)))?;
-    if std::mem::discriminant(&input) != std::mem::discriminant(default) {
+    if mem::discriminant(&input) != mem::discriminant(default) {
         bail!("{key} takes {}", describe(default));
     }
     let (path, mut doc) = load_doc()?;
@@ -46,6 +47,12 @@ pub fn unset(key: &str) -> anyhow::Result<()> {
     let (path, mut doc) = load_doc()?;
     remove(&mut doc, key);
     save(&path, &doc)
+}
+
+/// `ui.locale` pins `LANGUAGE` for glib before threads start, so it is the one
+/// key a watcher cannot apply.
+pub fn restart_needed(key: &str) -> bool {
+    key == "ui.locale"
 }
 
 fn effective() -> anyhow::Result<toml::Value> {
@@ -224,6 +231,13 @@ mod tests {
         assert!(text.contains("exclude = []"));
         remove(&mut doc, "files.index");
         remove(&mut doc, "nope.path");
+    }
+
+    #[test]
+    fn the_locale_is_the_only_key_that_needs_a_restart() {
+        assert!(restart_needed("ui.locale"));
+        assert!(!restart_needed("font.family"));
+        assert!(!restart_needed("files.index"));
     }
 
     #[test]

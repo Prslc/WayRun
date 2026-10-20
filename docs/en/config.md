@@ -14,9 +14,10 @@ default shown here.
 and re-parsing the result before writing. Keys are dotted (`ui.locale`,
 `files.exclude`); a text value needs no quotes unless it looks like another TOML
 type, so `config set files.index false` and
-`config set files.exclude '["node_modules", "target"]'` both work. `locale` and
-`font.family` are read at startup, so a change needs
-`systemctl --user restart wayrun-launcher`; the rest applies through the watcher.
+`config set files.exclude '["node_modules", "target"]'` both work. `locale` is
+read at startup, so a change needs
+`systemctl --user restart wayrun-launcher`; the rest, `font.family` included,
+applies through the watchers.
 
 ## `[ui]`
 
@@ -36,10 +37,9 @@ and a blank value is the same as leaving the key out.
 | --- | --- | --- |
 | `family` | `sans-serif` | Primary shaping family, or a generic name (`serif`, `sans-serif`, `monospace`). |
 
-Read at startup, so a change takes effect on the next launch
-(`systemctl --user restart wayrun-launcher`). Glyphs the family lacks fall back
-to the system fonts. The interface size is `theme.toml`'s `[font].size` and
-applies live.
+Applies live: the launcher re-shapes with the new family when the file changes.
+Glyphs the family lacks fall back to the system fonts. The interface size is
+`theme.toml`'s `[font].size` and applies live too.
 
 ## `[icon]`
 

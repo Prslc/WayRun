@@ -4,7 +4,7 @@
 # locale = "zh_cn"             # interface language; omitted follows the session locale
 
 [font]
-# family = "sans-serif"        # primary shaping family; a change needs a restart
+# family = "sans-serif"        # primary shaping family; applies live
 
 [icon]
 # theme = "Adwaita"             # icon theme; omitted follows the desktop setting

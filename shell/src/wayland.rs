@@ -374,6 +374,14 @@ impl Shell {
         self.redraw();
     }
 
+    /// `config.toml`'s font family changed; every cached line was shaped with
+    /// the old one.
+    pub fn on_font_family(&mut self, family: String) {
+        self.text.set_family(family);
+        self.needs_full = true;
+        self.redraw();
+    }
+
     /// A clipboard read came back from its worker thread: insert it at the
     /// caret and search, like any other query change.
     pub fn on_paste(&mut self, generation: u64, text: Option<String>) {
