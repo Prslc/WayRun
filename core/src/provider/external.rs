@@ -139,6 +139,21 @@ impl Plugin for External {
         let resident = self.resident;
         Box::pin(async move { query_default(&command, resident, &plugin, &icon).await })
     }
+
+    fn command<'a>(
+        &'a self,
+        action: &'a str,
+        payload: Option<&'a serde_json::Value>,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        let command = self.command.clone();
+        let plugin = self.meta.id.to_string();
+        let action = action.to_string();
+        let payload = payload.cloned();
+        let resident = self.resident;
+        Box::pin(async move {
+            call::query_command(&command, resident, &plugin, &action, payload.as_ref()).await
+        })
+    }
 }
 
 /// Ceiling for one host call: a stalled host must cost seconds, never the

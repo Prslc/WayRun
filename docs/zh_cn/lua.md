@@ -25,6 +25,7 @@ return {
       }
     end,
     top = function() end,                -- 可选：空查询视图
+    command = function(action, payload) end, -- 可选：行上的插件动作
   },
 }
 ```
@@ -65,6 +66,10 @@ GIF 与 BMP。
 路径。子进程在 `$HOME` 下启动，只保留会话的 `PATH`、`HOME`、XDG、D-Bus 与 Wayland
 变量，加上插件在 `env` 里声明过的名字；启动器环境中的其他变量不会传入。
 
+`command` 接收行上 `{ type = "plugin", … }` 动作的 `action` 与 `payload`（见
+[动作](#动作action)）。它在插件自己的作用域里运行，`fs.write`、`env`、`exec` 与搜索
+时一样可用；执行时启动器已经在收起，所以失败只进日志、不进列表，返回值会被忽略。
+
 ## 动作（Action）
 
 `on_click` 与行上 `actions` 里的每一项都是命令：带 `type` 标签的普通表，形状见
@@ -83,6 +88,15 @@ actions = {
 ```
 
 没有 `on_click` 的行是纯展示行；它照样可以带 `actions`。
+
+`{ type = "plugin", … }` 动作把只有插件自己才能完成的事交回脚本，而不是由启动器
+执行：
+
+```lua
+on_click = { type = "plugin", plugin = "my-plugin", action = "new",
+             payload = { title = "购物清单" } },
+-- command = function(action, payload) ... end 直接写文件，不需要 shell
+```
 
 ## `wayrun` 表
 

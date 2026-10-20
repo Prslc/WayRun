@@ -255,6 +255,33 @@ pub(super) async fn query_default(
     Ok(parse_result_items(response, plugin, icon))
 }
 
+/// One `command` call: the host runs a named plugin command and answers null.
+pub(super) async fn query_command(
+    command: &str,
+    resident: bool,
+    plugin: &str,
+    action: &str,
+    payload: Option<&serde_json::Value>,
+) -> Result<()> {
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "command",
+        "params": { "plugin": plugin, "action": action, "payload": payload },
+        "id": next_id(),
+    });
+    let Some(response) = host_call(command, resident, &request, HOST_TIMEOUT).await else {
+        anyhow::bail!("{command} did not answer command {action:?}");
+    };
+    if let Some(error) = response.get("error") {
+        let message = error
+            .get("message")
+            .and_then(|message| message.as_str())
+            .unwrap_or("the host refused the command");
+        anyhow::bail!("{message}");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

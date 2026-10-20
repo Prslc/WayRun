@@ -316,11 +316,36 @@ impl Host {
                 } else {
                     None
                 };
-                self.call(plugin, "search", plugin.search.as_ref(), text, emit)
+                let returned = self.call(plugin, "search", plugin.search.as_ref(), text, emit)?;
+                Ok(rows_json(&self.lua, &self.script, &plugin.id, returned))
             }
             Some("top") => {
                 let plugin = self.plugin(params)?;
-                self.call(plugin, "top", plugin.top.as_ref(), (), None)
+                let returned = self.call(plugin, "top", plugin.top.as_ref(), (), None)?;
+                Ok(rows_json(&self.lua, &self.script, &plugin.id, returned))
+            }
+            Some("command") => {
+                let plugin = self.plugin(params)?;
+                let action = params
+                    .and_then(|params| params.get("action"))
+                    .and_then(|action| action.as_str())
+                    .ok_or((-32602, "missing action".to_string()))?;
+                let payload = params
+                    .and_then(|params| params.get("payload"))
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                let payload = self
+                    .lua
+                    .to_value(&payload)
+                    .map_err(|error| (-32000, format!("payload: {error}")))?;
+                self.call(
+                    plugin,
+                    "command",
+                    plugin.command.as_ref(),
+                    (action, payload),
+                    None,
+                )?;
+                Ok(serde_json::Value::Null)
             }
             Some(other) => Err((-32601, format!("unknown method {other:?}"))),
             None => Err((-32600, "missing method".to_string())),
@@ -350,7 +375,7 @@ impl Host {
         function: Option<&Function>,
         arg: A,
         emit: Option<(Function, Rc<Cell<bool>>)>,
-    ) -> std::result::Result<serde_json::Value, (i64, String)> {
+    ) -> std::result::Result<Value, (i64, String)> {
         let Some(function) = function else {
             return Err((
                 -32601,
@@ -372,14 +397,13 @@ impl Host {
         if let Some(active) = active {
             active.set(false);
         }
-        let returned: Value = returned.map_err(|error| {
+        returned.map_err(|error| {
             warn(
                 &self.script,
                 &format!("plugin {} {method}: {error}", plugin.id),
             );
             (-32000, format!("{method} failed: {error}"))
-        })?;
-        Ok(rows_json(&self.lua, &self.script, &plugin.id, returned))
+        })
     }
 
     /// The `emit` a streaming search receives: one `partial` line per call, with
@@ -617,6 +641,54 @@ mod tests {
             .unwrap();
         assert_eq!(rows[0]["title"], "nil");
         assert!(buffer.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_command_answers_null() {
+        let (host, _buffer) =
+            host_with_sink(r#"return { { id = "demo", command = function() end } }"#);
+        let reply = call(
+            &host,
+            "command",
+            json!({ "plugin": "demo", "action": "new" }),
+        )
+        .unwrap();
+        assert_eq!(reply, serde_json::Value::Null);
+    }
+
+    #[test]
+    fn a_command_runs_in_its_plugins_scope() {
+        let (host, _buffer) = host_with_sink(
+            r#"
+            return { { id = "demo", env = { "HOME" }, command = function(action, payload)
+                assert(wayrun.env("HOME") ~= nil, "the plugin scope is not active")
+                error(action .. ":" .. payload.title)
+            end } }
+            "#,
+        );
+        let Err((code, message)) = call(
+            &host,
+            "command",
+            json!({ "plugin": "demo", "action": "new", "payload": { "title": "hi" } }),
+        ) else {
+            panic!("the handler raised");
+        };
+        assert_eq!(code, -32000);
+        assert!(message.contains("new:hi"), "{message}");
+    }
+
+    #[test]
+    fn a_plugin_without_a_command_answers_32601() {
+        let (host, _buffer) =
+            host_with_sink(r#"return { { id = "demo", search = function() return {} end } }"#);
+        let Err((code, _)) = call(
+            &host,
+            "command",
+            json!({ "plugin": "demo", "action": "new" }),
+        ) else {
+            panic!("no handler, so the call fails");
+        };
+        assert_eq!(code, -32601);
     }
 
     #[test]

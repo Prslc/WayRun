@@ -40,6 +40,14 @@ pub enum Action {
         desktop_id: String,
         uri: String,
     },
+    /// Hand a named command back to its plugin's host, with a payload only the
+    /// plugin interprets; the host runs it in the plugin's own sandbox.
+    Plugin {
+        plugin: String,
+        action: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        payload: Option<serde_json::Value>,
+    },
 }
 
 impl Action {
@@ -158,6 +166,35 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn a_plugin_action_carries_its_payload_and_omits_an_absent_one() {
+        let action = Action::Plugin {
+            plugin: "note".into(),
+            action: "new".into(),
+            payload: Some(json!({ "title": "x" })),
+        };
+        assert_eq!(
+            serde_json::to_value(&action).unwrap(),
+            json!({
+                "type": "plugin",
+                "plugin": "note",
+                "action": "new",
+                "payload": { "title": "x" },
+            })
+        );
+
+        let bare = Action::Plugin {
+            plugin: "note".into(),
+            action: "new".into(),
+            payload: None,
+        };
+        let value = serde_json::to_value(&bare).unwrap();
+        assert_eq!(
+            value,
+            json!({ "type": "plugin", "plugin": "note", "action": "new" })
+        );
+    }
 
     #[test]
     fn a_row_omits_an_unset_icon_shape() {

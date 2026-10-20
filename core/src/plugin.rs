@@ -16,7 +16,7 @@ pub use rank::{
 };
 pub use registry::{
     entries_for_command, host_paths, list_plugins, print_list, refresh_hosts, reload,
-    reload_if_changed,
+    reload_if_changed, run_command,
 };
 pub use search::dispatch;
 
@@ -81,6 +81,16 @@ pub trait Plugin: Send + Sync {
     /// panel; the core leads the panel with the row's own command.
     fn actions(&self, _item: &ResultItem) -> Vec<crate::wire::ActionItem> {
         Vec::new()
+    }
+
+    /// Run one `Action::Plugin` command; a host forwards it to its own handler,
+    /// and a built-in has none.
+    fn command<'a>(
+        &'a self,
+        _action: &'a str,
+        _payload: Option<&'a serde_json::Value>,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
+        Box::pin(async { anyhow::bail!("the plugin has no command handler") })
     }
 }
 

@@ -59,6 +59,11 @@ what a row runs. It is the params of the `command` method, the type of a result'
 | `open_with` | `desktop_id`, `uri` | open a URI with one named handler instead of the default |
 | `reveal` | `uri` | show a file in the file manager (panel-only) |
 | `terminal` | `uri` | open a terminal in the URI's directory, its parent for a file (panel-only) |
+| `plugin` | `plugin`, `action`, `payload` | hand a named command and its payload to that plugin's host |
+
+`plugin`'s payload is an arbitrary JSON value the named plugin interprets; the
+core only routes it, and the host runs it in the plugin's own scope (see
+[Commands](#commands)).
 
 `run`'s `cmd` is a whole shell line, and nothing in it is rewritten: a
 `%u`-style field code reaches the shell as typed, since only `launch` and
@@ -139,6 +144,23 @@ state.
 The core translates its own strings (action titles, the launcher's help line);
 whatever a host sends is relayed as it is, so a host owns the language of its
 identity and its rows.
+
+## Commands
+
+A row whose `on_click` (or action) is `{"type":"plugin","plugin":"todo", …}`
+sends the named command back to its host instead of running anything on the
+core's side:
+
+```sh
+printf '%s\n' '{"jsonrpc":"2.0","method":"command","params":{"plugin":"todo","action":"done","payload":{"id":7}},"id":1}' | /path/to/todo/main.py
+# -> {"jsonrpc":"2.0","result":null,"id":1}
+```
+
+The action name and payload are the plugin's own; the core routes them and runs
+the handler in the plugin's scope, so a Lua script's `fs.write`, `env` and
+`exec` work as they do in a search. The launcher is already dismissing when the
+command runs, so a failure reaches the journal, not the list; the reply itself
+is ignored.
 
 ## Streaming searches
 

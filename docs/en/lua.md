@@ -26,6 +26,7 @@ return {
       }
     end,
     top = function() end,                -- optional: the empty-query view
+    command = function(action, payload) end, -- optional: a row's plugin action
   },
 }
 ```
@@ -73,6 +74,12 @@ with `wayrun.exec`. The child starts in `$HOME` and keeps the session's `PATH`,
 `HOME`, XDG, D-Bus and Wayland variables plus the plugin's declared `env` names;
 nothing else from the launcher's environment is inherited.
 
+`command` receives the `action` and `payload` of a row's
+`{ type = "plugin", … }` action (see [Actions](#actions)). It runs in the
+plugin's own scope, so `fs.write`, `env` and `exec` work as they do in a search,
+and the launcher is already dismissing by then: a failure reaches the journal
+rather than the list, and the return value is ignored.
+
 ## Actions
 
 `on_click` and every entry of a row's `actions` are commands: plain tables
@@ -92,6 +99,15 @@ actions = {
 ```
 
 A row with no `on_click` is display-only; it can still carry `actions`.
+
+A `{ type = "plugin", … }` action commits something only the plugin can do. The
+launcher hands it back to the script's `command` handler instead of running it:
+
+```lua
+on_click = { type = "plugin", plugin = "my-plugin", action = "new",
+             payload = { title = "Shopping list" } },
+-- command = function(action, payload) ... end writes the file, no shell needed
+```
 
 ## The `wayrun` table
 

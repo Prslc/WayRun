@@ -279,6 +279,8 @@ pub fn execute(command: &crate::wire::Action) {
         Action::Terminal { uri } => open_terminal(uri),
         Action::Open { uri } => open_uri(uri),
         Action::OpenWith { desktop_id, uri } => open_with(desktop_id, uri),
+        // The RPC layer hands this one to the plugin's host; nothing runs here.
+        Action::Plugin { .. } => {}
     }
 }
 

@@ -158,9 +158,27 @@ pub async fn handle(
             let tx = tx.clone();
             pending.retain(|handle| !handle.is_finished());
             pending.push(tokio::spawn(async move {
-                let execute =
-                    tokio::task::spawn_blocking(move || crate::system::executor::execute(&command));
-                let _ = execute.await;
+                // A plugin action goes to its host instead of the executor, so
+                // the sandbox that raised the row is the one that commits it.
+                match command {
+                    Action::Plugin {
+                        plugin,
+                        action,
+                        payload,
+                    } => {
+                        if let Err(error) =
+                            crate::plugin::run_command(&plugin, &action, payload.as_ref()).await
+                        {
+                            eprintln!("wayrun-core: plugin {plugin} command {action}: {error:#}");
+                        }
+                    }
+                    command => {
+                        let execute = tokio::task::spawn_blocking(move || {
+                            crate::system::executor::execute(&command)
+                        });
+                        let _ = execute.await;
+                    }
+                }
                 if has_id {
                     respond(&tx, id, Ok(Value::Null)).await;
                 }
@@ -506,6 +524,16 @@ mod tests {
     async fn a_command_with_a_target_returns_null() {
         let msgs = run(
             r#"{"jsonrpc":"2.0","method":"command","params":{"type":"open","uri":"file:///no/such"},"id":4}"#,
+        )
+        .await;
+        let v: Value = serde_json::from_str(&msgs[0]).unwrap();
+        assert_eq!(v["result"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn a_plugin_command_answers_null() {
+        let msgs = run(
+            r#"{"jsonrpc":"2.0","method":"command","params":{"type":"plugin","plugin":"nope","action":"x"},"id":5}"#,
         )
         .await;
         let v: Value = serde_json::from_str(&msgs[0]).unwrap();

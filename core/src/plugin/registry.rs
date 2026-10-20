@@ -119,6 +119,24 @@ pub fn entries_for_command(command: &str) -> Vec<(String, String, bool)> {
         .collect()
 }
 
+/// Run one `Action::Plugin` command on the host that serves `id`; the action name
+/// and payload are the plugin's own.
+pub async fn run_command(
+    id: &str,
+    action: &str,
+    payload: Option<&serde_json::Value>,
+) -> anyhow::Result<()> {
+    ensure_loaded().await;
+    let reg = REGISTRY.read().await;
+    let Some(entry) = reg
+        .iter()
+        .find(|entry| entry.plugin.meta().id.as_ref() == id)
+    else {
+        anyhow::bail!("no plugin {id:?} in the registry");
+    };
+    entry.plugin.command(action, payload).await
+}
+
 /// Rebuild the registry when a host file changed, then ask only those hosts
 /// for their identity again.
 pub async fn refresh_hosts() {

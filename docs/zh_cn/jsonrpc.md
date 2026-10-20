@@ -55,6 +55,10 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 | `open_with` | `desktop_id`、`uri` | 用指定的应用打开 URI，而不是系统默认应用 |
 | `reveal` | `uri` | 在文件管理器中定位文件（仅面板可见） |
 | `terminal` | `uri` | 在 URI 所在目录打开终端，文件则用其父目录（仅面板可见） |
+| `plugin` | `plugin`、`action`、`payload` | 把一条命名命令连同参数交回该插件的主机 |
+
+`plugin` 的 `payload` 是任意 JSON，由点名插件自行解释；后端只负责路由，主机在插件
+自己的作用域里执行（见[命令](#命令)）。
 
 `run` 的 `cmd` 是整条 shell 行，内容不会被改写：`%u` 这类字段码原样交给 shell，
 因为只有 `launch` 与 `desktop_action` 会读 `.desktop` 的字段码；后两者的 id 不加
@@ -123,6 +127,20 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"top","params":{"plugin":"todo"},"id":1
 
 后端自己的文案（动作名、启动器的说明行）会按界面语言翻译；主机发来的字符串原样
 透传，所以主机的身份与结果行用什么语言，由主机自己决定。
+
+## 命令
+
+结果行的 `on_click`（或面板动作）若是 `{"type":"plugin","plugin":"todo", …}`，后端
+不会自己执行，而是把这条命名命令交回对应主机：
+
+```sh
+printf '%s\n' '{"jsonrpc":"2.0","method":"command","params":{"plugin":"todo","action":"done","payload":{"id":7}},"id":1}' | /path/to/todo/main.py
+# -> {"jsonrpc":"2.0","result":null,"id":1}
+```
+
+命令名和参数由插件自己定义；后端只做路由，并在插件的作用域里运行处理函数，所以 Lua
+脚本里的 `fs.write`、`env`、`exec` 与搜索时一样可用。命令执行时启动器已经在收起，
+因此失败只进日志、不进列表；回复内容本身会被忽略。
 
 ## 流式搜索
 

@@ -16,6 +16,7 @@ pub(super) struct Plugin {
     pub read: Vec<PathBuf>,
     pub search: Option<Function>,
     pub top: Option<Function>,
+    pub command: Option<Function>,
 }
 
 /// The keys a plugin table may define; `wayrun plugin check` names anything else.
@@ -30,6 +31,7 @@ const KEYS: &[&str] = &[
     "read",
     "search",
     "top",
+    "command",
 ];
 
 pub(super) fn unknown_keys(entry: &Table) -> mlua::Result<Vec<String>> {
@@ -125,6 +127,7 @@ pub(super) fn read_plugins(declared: &Table, script: &str) -> mlua::Result<Vec<P
             read,
             search: entry.get("search")?,
             top: entry.get("top")?,
+            command: entry.get("command")?,
         });
     }
     if plugins.is_empty() {
