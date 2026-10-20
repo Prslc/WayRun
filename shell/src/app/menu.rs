@@ -147,21 +147,21 @@ impl State {
         if action.default {
             return Some((plugin?, None));
         }
-        if let Some(id) = action.id.as_deref() {
-            return Some((plugin?, Some(id)));
-        }
         let row = self.rows.get(menu.parent)?;
-        if !is_row_command(row, action) {
-            return None;
+        // The row's own command is the implicit default, so picking it under any
+        // title drops what the row remembered — whichever plugin's scope did.
+        if is_row_command(row, action) {
+            return row
+                .actions
+                .iter()
+                .find(|action| action.default)
+                .and_then(|action| action.plugin.as_deref())
+                .or(plugin)
+                .map(|scope| (scope, None));
         }
-        // The row's own command is the implicit default, so picking it drops what
-        // the row remembered — whichever plugin's scope remembered it.
-        row.actions
-            .iter()
-            .find(|action| action.default)
-            .and_then(|action| action.plugin.as_deref())
-            .or(plugin)
-            .map(|scope| (scope, None))
+        plugin
+            .zip(action.id.as_deref())
+            .map(|(scope, id)| (scope, Some(id)))
     }
 
     /// The title of the row the panel belongs to, for its header.
@@ -299,6 +299,31 @@ mod tests {
         assert_eq!(
             remember(&mut state, 2),
             Some(("file-search".to_string(), None))
+        );
+    }
+
+    #[test]
+    fn an_action_equal_to_the_row_command_clears_instead_of_remembering() {
+        let mut state = state();
+        let copy = Action::Copy {
+            text: "name".to_string(),
+        };
+        let mut row = item("name", None, Some(copy.clone()), None);
+        row.actions = vec![ActionItem {
+            title: "Copy name".to_string(),
+            action: copy,
+            icon: None,
+            id: Some("copy_name".to_string()),
+            plugin: Some("icons".to_string()),
+            default: false,
+        }];
+        state.apply_results(vec![row], Instant::now());
+        assert!(state.open_actions());
+
+        assert_eq!(
+            state.selected_default(),
+            Some(("icons", None)),
+            "an action that is the row's command takes the default back"
         );
     }
 
