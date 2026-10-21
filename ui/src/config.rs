@@ -282,6 +282,8 @@ struct ThemeFile {
     motion: MotionFile,
     #[serde(default)]
     preview: PreviewFile,
+    #[serde(default)]
+    footer: FooterFile,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -314,6 +316,11 @@ struct PreviewFile {
     enabled: Option<bool>,
 }
 
+#[derive(serde::Deserialize, Default)]
+struct FooterFile {
+    enabled: Option<bool>,
+}
+
 impl AppearanceConfig {
     /// The file's contents as a config, or `None` when unparseable: a reload
     /// keeps the applied config instead of resetting to defaults.
@@ -333,6 +340,7 @@ impl AppearanceConfig {
             font,
             motion,
             preview,
+            footer,
         } = file;
 
         self.colors = colors;
@@ -340,6 +348,7 @@ impl AppearanceConfig {
 
         assign!(self.blur, blur.enabled);
         assign!(self.preview, preview.enabled);
+        assign!(self.layout.footer, footer.enabled);
         assign!(self.font.size, font.size.and_then(|v| positive(v, 96.0)));
 
         assign!(
@@ -415,6 +424,9 @@ mod tests {
             [preview]
             enabled = false
 
+            [footer]
+            enabled = false
+
             [layout]
             radius = 20.0
             width = 800.0
@@ -432,6 +444,7 @@ mod tests {
         assert_eq!(config.colors.shared.fg, None);
         assert!(!config.blur);
         assert!(!config.preview);
+        assert!(!config.layout.footer);
         assert_eq!(config.layout.radius, 20.0);
         assert_eq!(config.surfaces.shared.hairline.unwrap().width, Some(2.0));
         assert_eq!(config.layout.width, 800.0);

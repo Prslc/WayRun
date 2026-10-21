@@ -123,8 +123,10 @@ pub fn draw(
     }
     mark("list");
 
-    footer::draw_footer(&canvas, pixmap, frame, text);
-    mark("footer");
+    if layout.footer {
+        footer::draw_footer(&canvas, pixmap, frame, text);
+        mark("footer");
+    }
 
     // A growing payload lays rows out immediately while the height animates, so
     // the band below the card's bottom belongs to the backdrop.
@@ -166,6 +168,46 @@ mod tests {
     fn idle_icons() -> IconCache {
         let (jobs, _queued) = mpsc::channel();
         IconCache::new(jobs)
+    }
+
+    fn render(frame: &Frame<'_>) -> Pixmap {
+        let mut pixmap = Pixmap::new(frame.surface.0, frame.surface.1).unwrap();
+        let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
+        let mut icons = idle_icons();
+        draw(
+            &mut pixmap,
+            frame,
+            &mut text,
+            &mut icons,
+            Instant::now(),
+            true,
+        );
+        pixmap
+    }
+
+    #[test]
+    fn a_hidden_footer_draws_no_hints() {
+        use crate::geom::{FOOTER_H, PAD};
+
+        let mut frame = test_frame((1600, 1080));
+        frame.card_h = frame.layout.content_h(0);
+        frame.content_h = frame.card_h;
+        frame.footer.rows = 3;
+        frame.footer.query_empty = false;
+
+        let layout = frame.layout;
+        let x = (layout.card_x(frame.surface) + PAD + 3.0) as u32;
+        let top = layout.card_top(frame.surface) + frame.card_h - PAD - FOOTER_H;
+        let y = (top + FOOTER_H / 2.0) as u32;
+
+        let shown = render(&frame).pixel(x, y).unwrap();
+        frame.layout.footer = false;
+        let hidden = render(&frame).pixel(x, y).unwrap();
+        assert_ne!(
+            (shown.red(), shown.green(), shown.blue()),
+            (hidden.red(), hidden.green(), hidden.blue()),
+            "the footer's keycap chip goes with it"
+        );
     }
 
     #[test]

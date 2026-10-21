@@ -44,6 +44,8 @@ pub struct Layout {
     pub radius: f32,
     pub max_rows: usize,
     pub panel_header_h: f32,
+    /// Whether the hint bar is drawn; hiding it gives its band back to the card.
+    pub footer: bool,
     /// The entrance's remaining rise, in logical pixels: a frame draws with a
     /// shifted copy and the configured layout stays at rest.
     pub offset_y: f32,
@@ -58,6 +60,7 @@ impl Default for Layout {
             radius: 16.0,
             max_rows: 5,
             panel_header_h: 28.0,
+            footer: true,
             offset_y: 0.0,
         }
     }
@@ -148,11 +151,17 @@ impl Layout {
         (rows as f32 * ROW_H).min(self.max_rows as f32 * ROW_H)
     }
 
-    /// `pad + search + gap + footer + pad`, plus a second gap and the list when
-    /// rows exist. The list is capped at `max_rows`, so the card needs no cap.
+    /// The card without its list band: both paddings, the field, and the
+    /// footer's band when it is drawn; a hidden footer takes the band with it.
+    fn base_h(&self) -> f32 {
+        PAD + SEARCH_H + if self.footer { GAP + FOOTER_H } else { 0.0 } + PAD
+    }
+
+    /// The card's height for `rows` results, capped at `max_rows`; with no rows
+    /// it holds the field and the footer band alone.
     pub fn content_h(&self, rows: usize) -> f32 {
         if rows == 0 {
-            PAD + SEARCH_H + GAP + FOOTER_H + PAD
+            self.base_h()
         } else {
             self.content_h_for(self.list_h(rows))
         }
@@ -160,7 +169,7 @@ impl Layout {
 
     /// The card's height for an explicit body height, split view included.
     pub fn content_h_for(&self, body_h: f32) -> f32 {
-        PAD + SEARCH_H + GAP + FOOTER_H + PAD + GAP + body_h
+        self.base_h() + GAP + body_h
     }
 
     /// The split body's height: an image needs room for a thumbnail, text a
@@ -181,8 +190,7 @@ impl Layout {
     /// The card height with the action panel open: like `content_h`, but the
     /// list band holds the actions under a header instead of the results.
     pub fn panel_h(&self, actions: usize) -> f32 {
-        let base = PAD + SEARCH_H + GAP + FOOTER_H + PAD;
-        base + GAP + self.panel_header_h + self.list_h(actions)
+        self.base_h() + GAP + self.panel_header_h + self.list_h(actions)
     }
 
     /// The y of the first action row: the panel header sits where the first
@@ -469,6 +477,23 @@ mod tests {
         // a narrower output shrinks the card to fit its padding
         assert_eq!(l.card_w((1920, 1080)), 730.0);
         assert_eq!(l.card_w((720, 1080)), 692.0);
+    }
+
+    #[test]
+    fn a_hidden_footer_gives_its_band_back_to_the_card() {
+        let l = Layout {
+            footer: false,
+            ..Layout::default()
+        };
+        // a no-result card rests where the pristine card does
+        assert_eq!(l.content_h(0), l.empty_h());
+        let band = GAP + FOOTER_H;
+        assert_eq!(l.content_h(5) + band, Layout::default().content_h(5));
+        assert_eq!(
+            l.panel_h(3) + band,
+            Layout::default().panel_h(3),
+            "the panel loses the band too"
+        );
     }
 
     #[test]

@@ -177,6 +177,12 @@ layerrule = blur, WayRun
 | --- | --- | --- | --- |
 | `enabled` | bool | `true` | Show the split preview column for the selected row. `false` keeps the list full width; plugin previews are ignored. |
 
+### `[footer]`
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `enabled` | bool | `true` | Show the hint bar under the results: keys, result count and search status. `false` hides it and gives its band back to the card. |
+
 ### `[layout]`
 
 | Key | Type | Default | Range | Meaning |

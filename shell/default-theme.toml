@@ -37,6 +37,9 @@
 [preview]
 # enabled = true             # show the split preview column for a selected row
 
+[footer]
+# enabled = true             # show the hint bar under the results
+
 [layout]
 # width = 730.0              # card width in pixels; a narrower output shrinks it
 # radius = 16.0              # card corner radius; 0 is square corners
