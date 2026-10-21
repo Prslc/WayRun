@@ -10,8 +10,9 @@
 `wayrun plugin add <script.lua> [--keyword K] [--resident]` 登记一个 Lua 主机：先加载
 脚本，缺 shebang 或执行位、id 已存在、关键词被另一个启用的条目占用都会被拒绝，然后
 追加条目（关键词默认取插件 id）。`wayrun plugin enable|disable <id>` 写入或修改该 id
-的用户条目（内置插件亦然），`wayrun plugin remove <id>` 删除用户条目，内置插件回到
-随附的默认状态。编辑会保留文件里的注释并一次写入；运行中的启动器通过监听器读到改动。
+的用户条目（内置插件亦然）；`wayrun plugin set-keyword <id> <keyword>` 以同样方式修改
+路由关键词，关键词留空即加入默认链。`wayrun plugin remove <id>` 删除用户条目，内置插件
+回到随附的默认状态。编辑会保留文件里的注释并一次写入；运行中的启动器通过监听器读到改动。
 
 ## 条目字段
 

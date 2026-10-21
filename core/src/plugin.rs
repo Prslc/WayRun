@@ -16,7 +16,7 @@ pub use rank::{
 };
 pub use registry::{
     add_plugin, entries_for_command, host_paths, list_plugins, print_list, refresh_hosts, reload,
-    reload_if_changed, remove_plugin, run_command, set_enabled,
+    reload_if_changed, remove_plugin, run_command, set_enabled, set_keyword,
 };
 pub use search::dispatch;
 

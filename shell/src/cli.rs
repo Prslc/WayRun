@@ -93,6 +93,13 @@ pub enum PluginAction {
         /// The plugin id.
         id: String,
     },
+    /// Change a plugin's routing keyword.
+    SetKeyword {
+        /// The plugin id.
+        id: String,
+        /// The new keyword; empty joins the default chain.
+        keyword: String,
+    },
     /// Drop the user entry for a plugin.
     Remove {
         /// The plugin id.
@@ -219,6 +226,15 @@ mod tests {
                 assert!(resident);
             }
             _ => panic!("plugin add did not parse"),
+        }
+        match parse(&["wayrun", "plugin", "set-keyword", "web-search", "ws"]).command {
+            Some(Command::Plugin {
+                action: PluginAction::SetKeyword { id, keyword },
+            }) => {
+                assert_eq!(id, "web-search");
+                assert_eq!(keyword, "ws");
+            }
+            _ => panic!("plugin set-keyword did not parse"),
         }
         for verb in ["enable", "disable", "remove"] {
             match parse(&["wayrun", "plugin", verb, "note"]).command {

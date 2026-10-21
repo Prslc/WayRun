@@ -57,7 +57,7 @@ pub fn print_plugins() -> Result<()> {
     Ok(())
 }
 
-/// The user-file edits behind `wayrun plugin add|enable|disable|remove`.
+/// The user-file edits behind `wayrun plugin add|enable|disable|remove|set-keyword`.
 pub mod plugins {
-    pub use crate::plugin::{add_plugin, remove_plugin, set_enabled};
+    pub use crate::plugin::{add_plugin, remove_plugin, set_enabled, set_keyword};
 }

@@ -133,6 +133,10 @@ fn plugin(action: PluginAction) -> process::ExitCode {
         PluginAction::Disable { id } => outcome(
             wayrun_core::plugins::set_enabled(&id, false).map(|()| println!("disabled {id}")),
         ),
+        PluginAction::SetKeyword { id, keyword } => outcome(
+            wayrun_core::plugins::set_keyword(&id, &keyword)
+                .map(|()| println!("keyword {id} = {keyword:?}")),
+        ),
         PluginAction::Remove { id } => {
             outcome(wayrun_core::plugins::remove_plugin(&id).map(|()| println!("removed {id}")))
         }

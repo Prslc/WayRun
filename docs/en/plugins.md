@@ -12,10 +12,12 @@ and any disabled entry — with the user file already merged over the built-ins.
 it loads the script, refuses a missing shebang or exec bit, an id already
 configured, or a keyword another enabled entry owns, then appends the entry (the
 keyword defaults to the plugin id). `wayrun plugin enable|disable <id>` writes or
-edits the user entry for an id, a built-in included, and `wayrun plugin remove
-<id>` drops a user entry, leaving a built-in at its shipped default. Edits keep
-the file's comments and are written at once; a running launcher picks the file
-up through its watcher.
+edits the user entry for an id, a built-in included, and `wayrun plugin
+set-keyword <id> <keyword>` changes its routing keyword the same way; an empty
+keyword puts the plugin in the default chain. `wayrun plugin remove <id>` drops a
+user entry, leaving a built-in at its shipped default. Edits keep the file's
+comments and are written at once; a running launcher picks the file up through
+its watcher.
 
 ## Entry fields
 

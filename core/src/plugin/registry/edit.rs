@@ -44,6 +44,23 @@ pub fn set_enabled(id: &str, enabled: bool) -> anyhow::Result<()> {
     save(&path, &doc)
 }
 
+/// Change one entry's routing keyword; a built-in gets a user entry that
+/// overrides its shipped one.
+pub fn set_keyword(id: &str, keyword: &str) -> anyhow::Result<()> {
+    let effective = load_or_default();
+    let Some(source) = effective.plugins.iter().find(|entry| entry.id == id) else {
+        bail!("no plugin {id:?}");
+    };
+    check_keyword(&effective, id, keyword)?;
+    if source.keyword == keyword {
+        return Ok(());
+    }
+
+    let (path, mut doc) = load_doc()?;
+    write_keyword(&mut doc, id, keyword)?;
+    save(&path, &doc)
+}
+
 /// Drop the user entry for `id`; a built-in falls back to its shipped entry.
 pub fn remove_plugin(id: &str) -> anyhow::Result<()> {
     if !load_or_default().plugins.iter().any(|entry| entry.id == id) {
@@ -85,27 +102,40 @@ fn plugins(doc: &mut DocumentMut) -> anyhow::Result<&mut ArrayOfTables> {
         .context("plugins must be an array of tables")
 }
 
+/// Run `write` on the entry for `id`, creating it from `keyword` when absent.
+fn with_entry(
+    doc: &mut DocumentMut,
+    id: &str,
+    keyword: &str,
+    write: impl FnOnce(&mut Table),
+) -> anyhow::Result<()> {
+    let entries = plugins(doc)?;
+    let at = entries
+        .iter()
+        .position(|table| table.get("id").and_then(Item::as_str) == Some(id));
+    if let Some(table) = at.and_then(|at| entries.get_mut(at)) {
+        write(table);
+        return Ok(());
+    }
+    let mut table = Table::new();
+    table["id"] = value(id);
+    table["keyword"] = value(keyword);
+    write(&mut table);
+    entries.push(table);
+    Ok(())
+}
+
 fn write_enabled(
     doc: &mut DocumentMut,
     id: &str,
     keyword: &str,
     enabled: bool,
 ) -> anyhow::Result<()> {
-    let entries = plugins(doc)?;
-    let at = entries
-        .iter()
-        .position(|table| table.get("id").and_then(Item::as_str) == Some(id));
-    match at.and_then(|at| entries.get_mut(at)) {
-        Some(table) => table["enabled"] = value(enabled),
-        None => {
-            let mut table = Table::new();
-            table["id"] = value(id);
-            table["keyword"] = value(keyword);
-            table["enabled"] = value(enabled);
-            entries.push(table);
-        }
-    }
-    Ok(())
+    with_entry(doc, id, keyword, |table| table["enabled"] = value(enabled))
+}
+
+fn write_keyword(doc: &mut DocumentMut, id: &str, keyword: &str) -> anyhow::Result<()> {
+    with_entry(doc, id, keyword, |table| table["keyword"] = value(keyword))
 }
 
 /// Whether an entry was removed.
@@ -165,6 +195,37 @@ mod tests {
         assert!(text.contains("id = \"file-search\""));
         assert!(text.contains("keyword = \"f\""));
         assert!(text.contains("enabled = false"));
+    }
+
+    #[test]
+    fn a_keyword_edit_keeps_the_entry_and_its_state() {
+        let mut doc: DocumentMut =
+            "# keep me\n\n[[plugins]]\nid = \"note\"\nkeyword = \"note\"\nenabled = false\n"
+                .parse()
+                .unwrap();
+        write_keyword(&mut doc, "note", "n").unwrap();
+        let text = doc.to_string();
+        assert!(text.starts_with("# keep me"));
+        assert!(text.contains("keyword = \"n\""));
+        assert!(text.contains("enabled = false"));
+    }
+
+    #[test]
+    fn a_built_in_keyword_edit_creates_the_override() {
+        let mut doc = DocumentMut::new();
+        write_keyword(&mut doc, "file-search", "g").unwrap();
+        let text = doc.to_string();
+        assert!(text.contains("id = \"file-search\""));
+        assert!(text.contains("keyword = \"g\""));
+    }
+
+    #[test]
+    fn a_keyword_can_be_cleared_to_join_the_default_chain() {
+        let mut doc: DocumentMut = "[[plugins]]\nid = \"web-search\"\nkeyword = \"s\"\n"
+            .parse()
+            .unwrap();
+        write_keyword(&mut doc, "web-search", "").unwrap();
+        assert!(doc.to_string().contains("keyword = \"\""));
     }
 
     #[test]

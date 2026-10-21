@@ -15,7 +15,7 @@ use self::config::{Config, load_or_default};
 use self::hosts::HostCache;
 use crate::provider::external::HostMeta;
 
-pub use self::edit::{add_plugin, remove_plugin, set_enabled};
+pub use self::edit::{add_plugin, remove_plugin, set_enabled, set_keyword};
 
 #[derive(Clone)]
 pub struct PendingHost {
