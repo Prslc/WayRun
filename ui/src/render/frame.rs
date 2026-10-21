@@ -2,7 +2,6 @@ use std::time::Instant;
 
 use tiny_skia::Pixmap;
 
-use crate::geom;
 use crate::icons::IconCache;
 use crate::text::TextEngine;
 use crate::view::{Body, Frame};
@@ -69,31 +68,34 @@ pub fn draw(
     }
     mark("clear");
 
-    // The card: a translucent fill with a 1px hairline. The hairline is a *ring*,
+    // The card: a translucent fill with a hairline. The hairline is a *ring*,
     // not a base fill, which would raise the interior's alpha.
+    let border = frame.surfaces.hairline_width;
     canvas.fill_round(
         pixmap,
         Rect {
-            x: card.x + 1.0,
-            y: card.y + 1.0,
-            w: card.w - 2.0,
-            h: card.h - 2.0,
+            x: card.x + border,
+            y: card.y + border,
+            w: card.w - 2.0 * border,
+            h: card.h - 2.0 * border,
         },
-        layout.radius - 1.0,
+        layout.radius - border,
         frame.fade_rgba(frame.surfaces.card),
     );
-    canvas.stroke_round(
-        pixmap,
-        Rect {
-            x: card.x + 0.5,
-            y: card.y + 0.5,
-            w: card.w - 1.0,
-            h: card.h - 1.0,
-        },
-        layout.hairline_radius(),
-        geom::HAIRLINE_W,
-        frame.fade_rgba(frame.surfaces.hairline),
-    );
+    if border > 0.0 {
+        canvas.stroke_round(
+            pixmap,
+            Rect {
+                x: card.x + border / 2.0,
+                y: card.y + border / 2.0,
+                w: card.w - border,
+                h: card.h - border,
+            },
+            layout.hairline_radius(border),
+            border,
+            frame.fade_rgba(frame.surfaces.hairline),
+        );
+    }
 
     mark("card");
     let field_rect = Rect::field_at(card.x, card.y, card.w);
@@ -187,6 +189,34 @@ mod tests {
         let pixel = pixmap.pixel(0, 0).unwrap();
         assert_eq!(pixel.alpha(), dim_u8(), "the dim is the base");
         assert_eq!((pixel.red(), pixel.green(), pixel.blue()), (0, 0, 0));
+    }
+
+    #[test]
+    fn a_wider_hairline_paints_inside_the_card_edge() {
+        let mut frame = test_frame((1600, 1080));
+        frame.surfaces.hairline = [255, 0, 0, 255];
+        frame.surfaces.hairline_width = 4.0;
+
+        let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
+        let mut icons = idle_icons();
+        let mut pixmap = Pixmap::new(1600, 1080).unwrap();
+        draw(
+            &mut pixmap,
+            &frame,
+            &mut text,
+            &mut icons,
+            Instant::now(),
+            true,
+        );
+
+        let x = frame.layout.card_x(frame.surface);
+        let y = frame.layout.card_top(frame.surface) + frame.card_h / 2.0;
+        let edge = pixmap.pixel((x + 1.0) as u32, y as u32).unwrap();
+        assert_eq!((edge.red(), edge.green(), edge.blue()), (255, 0, 0));
+        // The fill starts where the ring ends, so the ring is not blended
+        // over the translucent card.
+        let inside = pixmap.pixel((x + 5.0) as u32, y as u32).unwrap();
+        assert_ne!((inside.red(), inside.green(), inside.blue()), (255, 0, 0));
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use crate::config::{ColorOverrides, Mode, SurfaceOverride, SurfaceOverrides};
+use crate::geom::HAIRLINE_W;
 use wayrun_core::wire::ThemeConfig;
 
 /// The three base roles every surface derives from.
@@ -75,14 +76,15 @@ const ACCENT_ALPHA: f32 = 1.0;
 pub const DEFAULT_DIM: [u8; 4] = [0, 0, 0, alpha_u8(0.3)];
 
 /// The per-surface colours the renderer draws: a base role at its shipped alpha
-/// by default, or the `theme.toml` override with its own inline alpha.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// by default, or the `theme.toml` override with its own fields.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Surfaces {
     pub card: [u8; 4],
     pub selection: [u8; 4],
     pub hover: [u8; 4],
     pub preview: [u8; 4],
     pub hairline: [u8; 4],
+    pub hairline_width: f32,
     pub muted: [u8; 4],
     pub summary: [u8; 4],
     pub footer: [u8; 4],
@@ -102,6 +104,9 @@ impl Surfaces {
         let mut surfaces = Self::derive(theme, mode);
         if let Some(color) = colors.dim {
             surfaces.dim = color;
+        }
+        if let Some(width) = overrides.hairline.and_then(|entry| entry.width) {
+            surfaces.hairline_width = width;
         }
         apply_override(&mut surfaces.card, overrides.card.as_ref());
         apply_override(&mut surfaces.selection, overrides.selection.as_ref());
@@ -131,6 +136,7 @@ impl Surfaces {
             } else {
                 [0, 0, 0, alpha_u8(HAIRLINE_ALPHA)]
             },
+            hairline_width: HAIRLINE_W,
             muted: tint(theme.fg, MUTED_ALPHA),
             summary: tint(theme.fg, SUMMARY_ALPHA),
             footer: tint(theme.fg, FOOTER_ALPHA),
@@ -307,15 +313,20 @@ mod tests {
         let overrides = SurfaceOverrides {
             card: Some(SurfaceOverride {
                 color: Some([1, 2, 3]),
-                alpha: None,
+                ..SurfaceOverride::default()
             }),
             muted: Some(SurfaceOverride {
-                color: None,
                 alpha: Some(0.25),
+                ..SurfaceOverride::default()
             }),
             dim: Some(SurfaceOverride {
                 color: Some([9, 9, 9]),
                 alpha: Some(0.5),
+                ..SurfaceOverride::default()
+            }),
+            hairline: Some(SurfaceOverride {
+                width: Some(2.5),
+                ..SurfaceOverride::default()
             }),
             ..SurfaceOverrides::default()
         };
@@ -331,5 +342,11 @@ mod tests {
         // `[surfaces]` layers over `[colors].dim`, and an unset surface derives
         assert_eq!(surfaces.dim, [9, 9, 9, alpha_u8(0.5)]);
         assert_eq!(surfaces.selection, tint(theme.primary, SELECTION_ALPHA));
+        // a width pins the edge without touching its colour
+        assert_eq!(surfaces.hairline_width, 2.5);
+        assert_eq!(
+            surfaces.hairline,
+            [255, 255, 255, alpha_u8(HAIRLINE_ALPHA_DARK)]
+        );
     }
 }

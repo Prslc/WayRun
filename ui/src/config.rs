@@ -80,6 +80,9 @@ pub struct SurfaceOverride {
     pub color: Option<[u8; 3]>,
     #[serde(default)]
     pub alpha: Option<f32>,
+    /// Only the `hairline` entry reads it; other surfaces have no width.
+    #[serde(default)]
+    pub width: Option<f32>,
 }
 
 impl SurfaceOverride {
@@ -87,6 +90,10 @@ impl SurfaceOverride {
         Self {
             color: self.color,
             alpha: self.alpha.and_then(clamp01),
+            width: self
+                .width
+                .filter(|v| v.is_finite())
+                .map(|v| v.clamp(0.0, 16.0)),
         }
     }
 }
@@ -175,6 +182,7 @@ fn layer(
         (Some(shared), Some(mode)) => Some(SurfaceOverride {
             color: mode.color.or(shared.color),
             alpha: mode.alpha.or(shared.alpha),
+            width: mode.width.or(shared.width),
         }),
         (shared, mode) => shared.or(mode),
     }
@@ -413,6 +421,9 @@ mod tests {
             max_rows = 3
             panel_header = 34.0
 
+            [surfaces]
+            hairline = { width = 2.0 }
+
             [motion]
             reduced = true
             "##,
@@ -422,6 +433,7 @@ mod tests {
         assert!(!config.blur);
         assert!(!config.preview);
         assert_eq!(config.layout.radius, 20.0);
+        assert_eq!(config.surfaces.shared.hairline.unwrap().width, Some(2.0));
         assert_eq!(config.layout.width, 800.0);
         assert_eq!(config.layout.max_rows, 3);
         assert_eq!(config.layout.panel_header_h, 34.0);
@@ -448,11 +460,15 @@ mod tests {
             [layout]
             max_rows = 99
             panel_header = -5.0
+
+            [surfaces]
+            hairline = { width = 40.0 }
             "#,
         );
         assert_eq!(config.font.size, 96.0);
         assert_eq!(config.layout.max_rows, 8);
         assert_eq!(config.layout.panel_header_h, 0.0);
+        assert_eq!(config.surfaces.shared.hairline.unwrap().width, Some(16.0));
     }
 
     #[test]
@@ -503,9 +519,11 @@ mod tests {
             [surfaces]
             card = { color = "#112233", alpha = 0.8 }
             selection = { alpha = 0.2 }
+            hairline = { width = 1.5 }
 
             [surfaces.dark]
             card = { alpha = 0.9 }
+            hairline = { width = 2.5 }
 
             [surfaces.light]
             selection = { color = "#445566" }
@@ -520,6 +538,7 @@ mod tests {
         );
         // a surface the dark table does not name keeps the shared entry
         assert_eq!(dark.selection.unwrap().alpha, Some(0.2));
+        assert_eq!(dark.hairline.unwrap().width, Some(2.5));
 
         let light = config.surfaces.for_mode(Mode::Light);
         let selection = light.selection.unwrap();
@@ -528,6 +547,7 @@ mod tests {
             (Some([0x44, 0x55, 0x66]), Some(0.2))
         );
         assert_eq!(light.card.unwrap().alpha, Some(0.8));
+        assert_eq!(light.hairline.unwrap().width, Some(1.5));
     }
 
     #[test]

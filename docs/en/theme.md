@@ -97,7 +97,9 @@ hairline = { color = "#ffffff" }        # keep the mode's shipped alpha
 ```
 
 `color` is `#rrggbb` or `#rgb`; `alpha` is 0–1 and is clamped. An unparseable
-colour is ignored. `dim` is here as well: it layers over `[colors].dim`, which
+colour is ignored. The `hairline` entry also takes `width` in logical pixels
+(0–16, default 1.0; `0` hides the edge), which layers like `color` and `alpha`.
+`dim` is here as well: it layers over `[colors].dim`, which
 keeps the plain-string spelling.
 
 | Key | Derived from | Shipped alpha |
@@ -115,14 +117,15 @@ keeps the plain-string spelling.
 
 `[surfaces]` is the shared table; `[surfaces.dark]` and `[surfaces.light]`
 take the same keys and layer on it surface by surface and field by field while
-that mode is active. A mode can change only the colour or only the alpha:
+that mode is active. A mode can change only the colour, only the alpha, or only
+the width:
 
 ```toml
 [surfaces]
 hairline = { alpha = 0.12 }
 
 [surfaces.dark]
-hairline = { color = "#ffffff" }
+hairline = { color = "#ffffff", width = 1.5 }
 
 [surfaces.light]
 hairline = { color = "#000000" }

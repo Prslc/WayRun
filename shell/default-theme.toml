@@ -18,7 +18,7 @@
 # selection = { color = "#7aa2f7", alpha = 0.15 } # selected-row tint
 # hover = { alpha = 0.08 }             # pointer hover tint
 # preview = { alpha = 0.05 }           # split view's tonal pane
-# hairline = { color = "#ffffff" }     # card edge (black at 0.10 light, white at 0.12 dark)
+# hairline = { width = 1.0 }       # card edge; 0 hides it (black at 0.10 light, white at 0.12 dark)
 # muted = { alpha = 0.55 }             # placeholder and hint text
 # summary = { alpha = 0.70 }           # a row's second line
 # footer = { alpha = 0.50 }            # footer text

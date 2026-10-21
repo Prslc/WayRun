@@ -321,6 +321,7 @@ mod tests {
         config.surfaces.dark.card = Some(crate::config::SurfaceOverride {
             color: Some([9, 8, 7]),
             alpha: Some(0.5),
+            ..crate::config::SurfaceOverride::default()
         });
         config.layout.max_rows = 2;
         present.set_system_theme(

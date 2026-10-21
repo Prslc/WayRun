@@ -82,7 +82,8 @@ hairline = { color = "#ffffff" }        # 透明度保持该模式下的默认�
 ```
 
 `color` 为 `#rrggbb` 或 `#rgb`；`alpha` 取 0–1，超出范围会被限制。无法解析的颜色会被
-忽略。`dim` 也在这里：它叠加在 `[colors].dim` 之上，后者仍保留颜色字符串写法。
+忽略。`hairline` 还接受 `width`（逻辑像素，0–16，默认 1.0；`0` 即不画），同样按模式
+分层。`dim` 也在这里：它叠加在 `[colors].dim` 之上，后者仍保留颜色字符串写法。
 
 | 键 | 派生自 | 默认透明度 |
 | --- | --- | --- |
@@ -98,14 +99,14 @@ hairline = { color = "#ffffff" }        # 透明度保持该模式下的默认�
 | `dim` | `#000000` | 0.30 |
 
 `[surfaces]` 是共享层；`[surfaces.dark]` 与 `[surfaces.light]` 接受相同的键，
-在该模式下按表面、按字段叠加。模式表可以只改颜色或只改透明度：
+在该模式下按表面、按字段叠加。模式表可以只改颜色、只改透明度，或只改宽度：
 
 ```toml
 [surfaces]
 hairline = { alpha = 0.12 }
 
 [surfaces.dark]
-hairline = { color = "#ffffff" }
+hairline = { color = "#ffffff", width = 1.5 }
 
 [surfaces.light]
 hairline = { color = "#000000" }

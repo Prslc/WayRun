@@ -313,9 +313,10 @@ impl Layout {
         first
     }
 
-    /// The card's 1px hairline, half a pixel inside the fill.
-    pub fn hairline_radius(&self) -> f32 {
-        (self.radius - 0.5).max(0.0)
+    /// The stroke's path, inset by half its width so the ring's inner edge
+    /// meets the fill's.
+    pub fn hairline_radius(&self, width: f32) -> f32 {
+        (self.radius - width / 2.0).max(0.0)
     }
 
     /// Nested radii stay inside the card: at the default 16 they are the
@@ -464,7 +465,7 @@ mod tests {
         // the pristine card drops the gap and the footer band
         assert_eq!(l.empty_h(), 80.0);
         assert_eq!(l.row_radius(), 8.0);
-        assert_eq!(l.hairline_radius(), 15.5);
+        assert_eq!(l.hairline_radius(HAIRLINE_W), 15.5);
         // a narrower output shrinks the card to fit its padding
         assert_eq!(l.card_w((1920, 1080)), 730.0);
         assert_eq!(l.card_w((720, 1080)), 692.0);
@@ -508,7 +509,12 @@ mod tests {
             ..Layout::default()
         };
         assert_eq!(l.row_radius(), 7.0);
-        assert_eq!(l.hairline_radius(), 7.5);
+        assert_eq!(l.hairline_radius(HAIRLINE_W), 7.5);
+    }
+
+    #[test]
+    fn a_wider_hairline_insets_its_path_by_half_its_width() {
+        assert_eq!(Layout::default().hairline_radius(3.0), 14.5);
     }
 
     #[test]
