@@ -18,11 +18,11 @@ pub const ROW_MOTION_MS: u64 = 200;
 pub const ROW_RISE: f32 = 4.0;
 
 /// A row's layout motion: how far from its final place it starts (positive is
-/// below), whether it also fades in, and when the motion began.
+/// below), the opacity it fades in from, and when the motion began.
 #[derive(Clone, Copy)]
 pub struct RowMotion {
     pub offset: f32,
-    pub enter: bool,
+    pub alpha: f32,
     pub started: Instant,
 }
 
@@ -33,7 +33,7 @@ impl RowMotion {
         let t = (elapsed / ROW_MOTION_MS as f32).clamp(0.0, 1.0);
         let eased = emphasized_decelerate(t);
         (
-            if self.enter { eased } else { 1.0 },
+            self.alpha + (1.0 - self.alpha) * eased,
             self.offset * (1.0 - eased),
         )
     }
