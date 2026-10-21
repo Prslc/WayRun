@@ -9,9 +9,6 @@ plugin.calculator.ready: 输入数学表达式
 plugin.app.name: 应用
 plugin.app.ready: 搜索已安装的应用
 
-plugin.clipboard.name: 剪贴板历史
-plugin.clipboard.ready: 搜索剪贴板历史
-
 plugin.file.name: 文件
 plugin.file.ready: 按名称或路径搜索文件
 

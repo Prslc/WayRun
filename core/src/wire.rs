@@ -143,7 +143,6 @@ pub struct ThemeConfig {
 pub const BUILTIN_GLYPHS: &[&str] = &[
     "app",
     "calculator",
-    "clipboard",
     "copy",
     "file",
     "folder",

@@ -33,8 +33,7 @@
 
 - **应用启动**：模糊搜索已安装应用，按桌面自身的方式启动，并逐行显示 Flatpak 应用与
   主题图标。
-- **快速搜索**：文件与路径、剪贴板历史、`$PATH` 命令、打开的窗口、系统命令，以及
-  即时计算。
+- **快速搜索**：文件与路径、`$PATH` 命令、打开的窗口、系统命令，以及即时计算。
 - **动作面板**：`Shift+Enter` 打开按类型区分的动作面板（定位文件、运行 Desktop
   Action、复制链接）。
 - **可主题化**：跟随 DankMaterialShell 的 Material You 调色板，并可用 `theme.toml`
@@ -56,13 +55,12 @@
 
 覆盖层本身，以及内置的应用、文件与计算搜索，只需要一个支持上述协议的合成器。其余
 功能各自还依赖一个可选组件；缺少时，对应前缀只返回空结果，不会报错。更多插件
-（Firefox 书签与历史、网页建议等）从
+（Firefox 书签与历史、网页建议、剪贴板历史等）从
 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区安装：
 
 | 功能 | 依赖 |
 | --- | --- |
 | `w` 打开窗口搜索 | 编译时选择 niri（默认）或 Hyprland 后端，见[合成器后端](#合成器后端) |
-| `c` 剪贴板历史 | [cliphist](https://github.com/sentriz/cliphist) 正在运行 |
 | 复制/粘贴与“复制…”动作 | `wl-clipboard`（`wl-copy` / `wl-paste`） |
 | 仅能在终端中运行的 `$PATH` 结果（`r`） | 终端模拟器（`$TERMINAL`，否则取 `PATH` 上的一个） |
 | 卡片模糊 | `ext-background-effect-v1`（niri），或由合成器按 namespace 自行模糊 |
@@ -146,7 +144,6 @@ warm 稳态（每次丢弃 3 轮 + 测量 30 轮，乱序）：
 | `path-search` | `d download` | 50 | 1.104 | 1.312 | 1.400 |
 | `path-lookup` | `~/` | 15 | 0.500 | 0.609 | 0.689 |
 | `home-fallback` | `Proj` | 1 | 0.263 | 0.345 | 0.444 |
-| `clipboard` | `c a` | 50 | 0.191 | 0.218 | 0.235 |
 | `window` | `w kitty` | 1 | 0.085 | 0.110 | 0.114 |
 
 冷启动首次调用（每次全新 `wayrun --core`，共 3 次，取第 1 次）：
@@ -162,7 +159,6 @@ warm 稳态（每次丢弃 3 轮 + 测量 30 轮，乱序）：
 | `path-search` | `d download` | 50 | 加载 | 48.7 | 40.1 |
 | `path-lookup` | `~/` | 15 | — | 23.7 | 14.7 |
 | `home-fallback` | `Proj` | 1 | — | 22.4 | 14.2 |
-| `clipboard` | `c a` | 50 | — | 33.8 | 13.2 |
 | `window` | `w kitty` | 1 | — | 24.0 | 16.5 |
 
 面板延迟（IPC open → 首帧 commit，3 次预热 + 20 次 show）：
@@ -175,14 +171,13 @@ warm 稳态（每次丢弃 3 轮 + 测量 30 轮，乱序）：
 niri 26.04、release 构建。warm 行是对同一个常驻 `--core` 的同步 `search` 调用；
 cold 行每次启动全新进程，用 GNU time 计时；面板行测的是常驻实例从 `toggle` 到首帧
 提交（`WAYRUN_TIMING`）。测试读取真实 `$HOME`，42 MB 的文件索引覆盖 11.1 万个目录、
-74.2 万个文件。`ping` 是测量程序自身的往返下限；clipboard 与 window 行命中 500 ms
-的短时缓存。
+74.2 万个文件。`ping` 是测量程序自身的往返下限；window 行命中 500 ms 的短时缓存。
 
 </details>
 
 ## 文档
 
-- [使用说明](usage.md)：前缀、按键与剪贴板。
+- [使用说明](usage.md)：前缀、按键与复制粘贴。
 - [常驻模式](resident.md)：systemd 单元与控制命令。
 - [主题](theme.md)：系统调色板与 `theme.toml`（配色、模糊、布局、字体、动效）。
 - [配置](config.md)：`config.toml`（界面语言、字体族）。

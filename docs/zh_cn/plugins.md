@@ -59,7 +59,6 @@ enabled = true
 | `runner` | `r` | 模糊匹配 `$PATH` 可执行文件；可带参数。命中已安装应用时经 GLib 启动（遵循 `Terminal=`），其余在终端中运行。 | 终端模拟器 |
 | `file-search` | `f` | 主目录下的文件，任意深度。 | — |
 | `path-search` | `d` | 主目录下的目录，任意深度。 | — |
-| `clipboard` | `c` | 剪贴板历史。 | `cliphist` 正在运行 |
 | `window` | `w` | 打开窗口（niri 或 Hyprland，取决于编译的后端）。 | 对应的合成器后端 |
 
 依赖缺失时，对应关键词返回空结果，而不是报错。

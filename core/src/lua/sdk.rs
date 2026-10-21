@@ -62,7 +62,7 @@ const EXEC_ENV: [&str; 8] = [
     "DISPLAY",
 ];
 const EXEC_TIMEOUT: Duration = Duration::from_millis(1500);
-const EXEC_STDOUT_CAP: usize = 64 * 1024;
+const EXEC_STDOUT_CAP: usize = 1024 * 1024;
 const EXEC_STDERR_CAP: usize = 8 * 1024;
 
 pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua::Result<Table> {

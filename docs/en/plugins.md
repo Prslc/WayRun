@@ -67,7 +67,6 @@ chain, so a stalled host never delays the card.
 | `runner` | `r` | Fuzzy `$PATH` executables; accepts arguments. An installed app launches through GLib (honoring `Terminal=`), anything else runs in a terminal. | a terminal emulator |
 | `file-search` | `f` | Files under the home directory, at any depth. | — |
 | `path-search` | `d` | Directories under the home directory, at any depth. | — |
-| `clipboard` | `c` | Clipboard history. | `cliphist` running |
 | `window` | `w` | Open windows (niri or Hyprland, per build). | the matching compositor backend |
 
 A keyword whose dependency is absent returns no rows instead of failing.

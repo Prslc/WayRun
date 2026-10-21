@@ -14,15 +14,14 @@ shows no rows.
 | `d <query>` | search directories by path (multi-token) |
 | `r <query>` | fuzzy-search `$PATH` executables and run one |
 | `w <query>` | switch focus to a matching open window |
-| `c <query>` | search clipboard history (cliphist) |
 | `?` | show keyword modes, default functions, hints and each plugin's remembered default action |
 | `lock` / `reboot` / `shutdown` | system commands |
 | `2 + 3` | inline calculator |
 
-Some prefixes need an optional component: `w` a compositor backend, `c`
-cliphist, and copy/paste `wl-clipboard`. Without it, the keyword returns no
-rows. Anything else a `plugins.toml` host registers — the WayRun-Plugins
-workspace's Firefox and web search among them — adds its own keyword the same
+Some prefixes need an optional component: `w` a compositor backend, and
+copy/paste `wl-clipboard`. Without it, the keyword returns no rows. Anything
+else a `plugins.toml` host registers — the WayRun-Plugins workspace's Firefox,
+web search and clipboard history among them — adds its own keyword the same
 way; the full dependency list is in the
 [README](../../README.md#feature-dependencies).
 

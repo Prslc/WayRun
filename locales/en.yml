@@ -10,9 +10,6 @@ plugin.calculator.ready: Enter a math expression
 plugin.app.name: Applications
 plugin.app.ready: Search installed applications
 
-plugin.clipboard.name: Clipboard History
-plugin.clipboard.ready: Search clipboard history
-
 plugin.file.name: Files
 plugin.file.ready: Search files by name or path
 

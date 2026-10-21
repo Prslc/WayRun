@@ -8,10 +8,6 @@ pub(super) const GLYPHS: &[(&str, &[u8])] = &[
         "calculator",
         include_bytes!("../../assets/icons/calculator.svg"),
     ),
-    (
-        "clipboard",
-        include_bytes!("../../assets/icons/clipboard.svg"),
-    ),
     ("copy", include_bytes!("../../assets/icons/copy.svg")),
     ("file", include_bytes!("../../assets/icons/file.svg")),
     ("folder", include_bytes!("../../assets/icons/folder.svg")),
