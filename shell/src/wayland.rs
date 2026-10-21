@@ -331,6 +331,9 @@ impl Shell {
         let now = Instant::now();
         if final_payload {
             self.app.apply_results(items, now);
+            if self.app.take_held_submit() {
+                self.submit(now);
+            }
         } else {
             self.app.apply_partial(items, now);
         }

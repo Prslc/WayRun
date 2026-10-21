@@ -78,6 +78,8 @@ pub struct State {
     /// When the pending wait began; keystrokes inside one wait do not move it,
     /// and the footer says "searching" once it passes `SEARCH_LOADING_DELAY`.
     pub search_started: Option<Instant>,
+    /// The query Enter was pressed for while its payload was still pending.
+    submit_held: Option<String>,
     pub dismiss_at: Option<Instant>,
 }
 
@@ -110,6 +112,7 @@ impl State {
             caret_visible: true,
             caret_at: now,
             search_started: None,
+            submit_held: None,
             dismiss_at: None,
         }
     }
@@ -286,6 +289,7 @@ impl State {
         self.hovered = None;
         self.dismiss_at = None;
         self.search_started = None;
+        self.submit_held = None;
         self.presentation.begin_show(now);
         self.presentation.snap_to(self.content_height(), now);
         self.preview_drawn = None;
@@ -297,6 +301,7 @@ impl State {
     pub fn hidden(&mut self) {
         self.dismiss_at = None;
         self.search_started = None;
+        self.submit_held = None;
         self.menu = None;
         // A reply that arrives while hidden must not resurrect the panel.
         self.panel_resume = None;

@@ -43,6 +43,12 @@ impl Shell {
             return;
         }
 
+        // The rows on screen still answer the previous query; wait for the one
+        // the field has already asked for instead of launching a stale row.
+        if self.app.hold_submit() {
+            return;
+        }
+
         let Some(launch) = self.app.selected_row() else {
             return;
         };
@@ -85,6 +91,7 @@ impl Shell {
         if self.app.preedit_active {
             return;
         }
+        self.app.cancel_held_submit();
         if self.app.open_actions() {
             self.app.retarget_height(now);
             self.app.resync_hover();

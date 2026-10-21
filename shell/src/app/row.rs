@@ -56,6 +56,29 @@ impl State {
         self.show_results(items, now, true);
     }
 
+    /// Enter while a search is pending: the rows still answer the previous
+    /// query, so the press waits for the payload instead of launching one.
+    pub fn hold_submit(&mut self) -> bool {
+        if self.search_started.is_none() {
+            return false;
+        }
+        self.submit_held = Some(self.query.clone());
+        true
+    }
+
+    /// The held press, released only by the payload for the query it was made
+    /// for; an edit in between has already made it stale.
+    pub fn take_held_submit(&mut self) -> bool {
+        self.submit_held
+            .take()
+            .is_some_and(|query| query == self.query)
+    }
+
+    /// A panel or a dismissal takes the keyboard: no held Enter may still fire.
+    pub fn cancel_held_submit(&mut self) {
+        self.submit_held = None;
+    }
+
     /// A streaming search's intermediate payload: the list updates, but the
     /// search stays pending and only the final payload resumes a held panel.
     pub fn apply_partial(&mut self, items: Vec<ResultItem>, now: Instant) {
@@ -149,6 +172,42 @@ mod tests {
     use std::time::Duration;
     use std::time::Instant;
     use wayrun_core::wire::ActionItem;
+
+    #[test]
+    fn enter_waits_for_the_payload_of_the_query_it_was_pressed_for() {
+        let mut state = state();
+        let now = Instant::now();
+        state.query = "s rust".to_string();
+        assert!(state.search_sent(now));
+
+        assert!(state.hold_submit(), "a pending search holds the press");
+        state.query.push_str(" async");
+        state.apply_results(vec![item("Search: s rust", None, None, None)], now);
+
+        assert!(
+            !state.take_held_submit(),
+            "the edit made the held query stale"
+        );
+    }
+
+    #[test]
+    fn the_held_enter_runs_once_the_payload_lands() {
+        let mut state = state();
+        let now = Instant::now();
+        state.query = "s rust".to_string();
+        assert!(state.search_sent(now));
+        assert!(state.hold_submit());
+
+        state.apply_results(vec![item("Search: s rust", None, None, None)], now);
+        assert!(state.take_held_submit(), "the payload releases the press");
+        assert!(!state.take_held_submit(), "a press is released once");
+    }
+
+    #[test]
+    fn enter_on_a_settled_list_does_not_hold() {
+        let mut state = state();
+        assert!(!state.hold_submit());
+    }
 
     #[test]
     fn a_pending_search_shows_loading_after_the_delay() {
