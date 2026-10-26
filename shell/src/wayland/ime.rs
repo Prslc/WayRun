@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use smithay_client_toolkit::dispatch2::Dispatch2;
 use wayland_client::backend::ObjectData;
@@ -11,7 +12,7 @@ use wayland_protocols::wp::text_input::zv3::client::zwp_text_input_v3::{
     self, ContentHint, ContentPurpose, ZwpTextInputV3,
 };
 
-use crate::ui::render;
+use wayrun_ui::render;
 
 use super::Shell;
 
@@ -146,7 +147,8 @@ impl Shell {
             return;
         }
 
-        let (x, y, width, height) = render::caret_rect(&self.app, &mut self.text);
+        let frame = self.app.frame(Instant::now());
+        let (x, y, width, height) = render::caret_rect(&frame, &mut self.text);
         // 4px-quantised, like the blur region: a present must not commit a
         // text-input state change of its own.
         let key = (x / 4, y / 4, width, height);

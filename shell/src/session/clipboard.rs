@@ -1,5 +1,8 @@
+use std::io;
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::sync::mpsc::Sender;
+use std::thread;
 use std::time::Duration;
 
 use calloop::channel::Sender as EventSender;
@@ -10,8 +13,8 @@ const PASTE_TIMEOUT: Duration = Duration::from_secs(1);
 /// Read the selection on one worker thread, so a held Ctrl+V queues generations
 /// instead of growing a thread per press.
 pub fn spawn(tx: EventSender<(u64, Option<String>)>) -> Sender<u64> {
-    let (jobs, queue) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
+    let (jobs, queue) = mpsc::channel();
+    thread::spawn(move || {
         while let Ok(mut generation) = queue.recv() {
             // A newer press supersedes what is queued behind it: the superseded
             // generations would be dropped on arrival anyway.
@@ -43,10 +46,10 @@ fn paste() -> Option<String> {
     // Read the pipe from a thread: a child whose output outgrows the pipe buffer
     // would otherwise block against a wait on this one.
     let mut stdout = child.stdout.take()?;
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
         let mut text = Vec::new();
-        let read = std::io::Read::read_to_end(&mut stdout, &mut text);
+        let read = io::Read::read_to_end(&mut stdout, &mut text);
         let _ = tx.send((read, text));
     });
 

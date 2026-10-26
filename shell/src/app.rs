@@ -1,3 +1,4 @@
+mod animation;
 mod appearance;
 mod complete;
 mod cursor;
@@ -7,13 +8,14 @@ mod row;
 #[cfg(test)]
 mod test_support;
 
-use std::time::Instant;
+use std::env;
+use std::time::{Duration, Instant};
 
-use crate::config::{AppearanceConfig, Mode};
-use crate::ui::theme::{Surfaces, Theme};
-use wayrun_core::wire::{Action, ResultItem};
+use wayrun_core::wire::{Action, Preview, ResultItem};
+use wayrun_ui::geom::{Layout, PreviewKind};
+use wayrun_ui::present::{Presentation, RowMotion};
+use wayrun_ui::view::{Body, FieldView, FooterView, Frame, ListView, PanelView, PreviewView};
 
-use self::appearance::ease_out_cubic;
 use self::menu::PanelKey;
 
 pub use self::cursor::{Cursor, Hover, whole_rows};
@@ -23,7 +25,8 @@ pub use self::menu::{Menu, effective_action, marked_entry};
 pub const EXIT_DELAY_MS: u64 = 150;
 /// The field's caret blink interval.
 pub const CARET_BLINK_MS: u64 = 500;
-
+/// How long a search may run before the footer says it is still working.
+pub const SEARCH_LOADING_DELAY: Duration = Duration::from_millis(150);
 pub struct State {
     pub query: String,
     /// Caret, as a byte index into `query`, always on a char boundary.
@@ -35,22 +38,16 @@ pub struct State {
     pub preedit: Option<String>,
     pub rows: Vec<ResultItem>,
     pub cursor: Cursor,
+    /// A row's layout motion: a new row enters, a reordered one slides to its
+    /// place. A row that stayed put is `None` and does not animate.
+    pub row_motion: Vec<Option<RowMotion>>,
     /// The open action panel, if any. It takes over the list and the keyboard.
     pub menu: Option<Menu>,
     /// The panel's row and entry, held across the re-emit a panel action sends,
     /// so the panel comes back where the user left it instead of dropping.
     panel_resume: Option<(Action, PanelKey)>,
-    /// The core's system theme (the DMS palette, or the fallback).
-    pub system_theme: Theme,
-    /// Which system palette is active, so `[colors.dark]`/`[colors.light]`
-    /// pick the matching table.
-    pub mode: Mode,
-    /// The `theme.toml` appearance config.
-    pub appearance: AppearanceConfig,
-    /// The effective theme: `system_theme` with `appearance.colors` on top.
-    pub theme: Theme,
-    /// The per-surface colours derived from `theme` and the colour overrides.
-    pub surfaces: Surfaces,
+    /// The appearance and motion state a frame is drawn from.
+    pub presentation: Presentation,
     /// The layer surface's logical size.
     pub surface: (u32, u32),
     /// The integer buffer scale `wl_surface` reports, used when the compositor
@@ -59,14 +56,14 @@ pub struct State {
     /// The exact ratio from `wp_fractional_scale_v1`: the buffer is
     /// `surface × this` and a viewport maps it back, so `scale` is not used.
     pub fractional: Option<f32>,
-    /// Whether the entrance animation has started on the first drawn frame; the
-    /// layer surface configures a round trip after `shown`.
-    pub entrance_started: bool,
+    /// The bottom edge of the card drawn last. A settle repaint covers only the
+    /// card, so a shrink must restore the dim over the old edge too.
+    pub last_card_bottom: f32,
+    /// What preview the last frame drew, so a kind change can retarget the
+    /// height spring when the list is short.
+    preview_drawn: Option<PreviewKind>,
     /// `WAYRUN_TIMING=1`: the per-frame draw marks and the frame-pacing logs.
     pub timing: bool,
-    /// `WAYRUN_REDUCED_MOTION`: ORed with the config's `motion.reduced`.
-    reduced_env: bool,
-    pub reduce_motion: bool,
     /// What the pointer is over, if anything.
     pub hovered: Option<Hover>,
     /// The pointer's last position over the surface, so a moving list can
@@ -78,28 +75,19 @@ pub struct State {
     pub preedit_active: bool,
     pub caret_visible: bool,
     pub caret_at: Instant,
-    shown_at: Instant,
-    card_from: f32,
-    card_to: f32,
-    card_at: Instant,
+    /// When the pending wait began; keystrokes inside one wait do not move it,
+    /// and the footer says "searching" once it passes `SEARCH_LOADING_DELAY`.
+    pub search_started: Option<Instant>,
+    /// The query Enter was pressed for while its payload was still pending.
+    submit_held: Option<String>,
     pub dismiss_at: Option<Instant>,
-    /// The bottom edge of the card drawn last. A settle repaint covers only the
-    /// card, so a shrink must restore the dim over the old edge too.
-    pub last_card_bottom: f32,
 }
 
 impl State {
     pub fn new() -> Self {
         let now = Instant::now();
-        let appearance = AppearanceConfig::default();
-        let reduced_env = std::env::var_os("WAYRUN_REDUCED_MOTION").is_some();
-        let timing = std::env::var_os("WAYRUN_TIMING").is_some();
-        let reduce_motion = reduced_env || appearance.reduced;
-        let theme = Theme::default();
-        let mode = Mode::default();
-        let colors = appearance.colors.for_mode(mode);
-        let surfaces = Surfaces::resolve(theme, &colors);
-        let card = appearance.layout.empty_h();
+        let reduced_env = env::var_os("WAYRUN_REDUCED_MOTION").is_some();
+        let timing = env::var_os("WAYRUN_TIMING").is_some();
         Self {
             query: String::new(),
             caret: 0,
@@ -107,32 +95,59 @@ impl State {
             preedit: None,
             rows: Vec::new(),
             cursor: Cursor::default(),
+            row_motion: Vec::new(),
             menu: None,
             panel_resume: None,
-            system_theme: theme,
-            mode,
-            appearance,
-            theme,
-            surfaces,
+            presentation: Presentation::new(reduced_env),
             surface: (1920, 1080),
             scale: 1,
             fractional: None,
-            entrance_started: false,
+            last_card_bottom: 0.0,
+            preview_drawn: None,
             timing,
-            reduced_env,
-            reduce_motion,
             hovered: None,
             pointer: None,
             pointer_on_card: false,
             preedit_active: false,
             caret_visible: true,
             caret_at: now,
-            shown_at: now,
-            card_from: card,
-            card_to: card,
-            card_at: now,
+            search_started: None,
+            submit_held: None,
             dismiss_at: None,
-            last_card_bottom: 0.0,
+        }
+    }
+
+    /// The geometry input and output share: config overrides with defaults.
+    pub fn layout(&self) -> Layout {
+        self.presentation.appearance.layout
+    }
+
+    /// The selected row's preview kind when the list owns the card, else none.
+    pub fn preview_kind(&self) -> Option<PreviewKind> {
+        if self.menu.is_some() || !self.presentation.appearance.preview {
+            return None;
+        }
+        match self.rows.get(self.cursor.selected)?.preview.as_ref()? {
+            Preview::Image { .. } => Some(PreviewKind::Image),
+            Preview::Text { .. } => Some(PreviewKind::Text),
+        }
+    }
+
+    pub fn split(&self) -> bool {
+        self.preview_kind().is_some()
+    }
+
+    fn selected_preview(&self) -> Option<&Preview> {
+        self.rows.get(self.cursor.selected)?.preview.as_ref()
+    }
+
+    /// A short list gains height when the preview appears or changes kind, so
+    /// the spring is retargeted then.
+    pub fn sync_split_height(&mut self, now: Instant) {
+        let kind = self.preview_kind();
+        if kind != self.preview_drawn {
+            self.preview_drawn = kind;
+            self.retarget_height(now);
         }
     }
 
@@ -151,24 +166,116 @@ impl State {
     /// The card's resting height (panel when open, the field alone while the
     /// query is untouched, else the list). The footer, blur region and reflow read it.
     pub fn content_height(&self) -> f32 {
+        let layout = self.layout();
         match &self.menu {
-            Some(menu) => self.appearance.layout.panel_h(menu.actions.len()),
-            None if self.rows.is_empty() && self.query.is_empty() => {
-                self.appearance.layout.empty_h()
-            }
-            None => self.appearance.layout.content_h(self.rows.len()),
+            Some(menu) => layout.panel_h(menu.actions.len()),
+            None if self.rows.is_empty() && self.query.is_empty() => layout.empty_h(),
+            None => match self.preview_kind() {
+                Some(kind) => layout.content_h_for(layout.split_h(self.rows.len(), kind)),
+                None => layout.content_h(self.rows.len()),
+            },
         }
     }
 
-    pub fn card_height(&self, now: Instant) -> f32 {
-        let to = self.card_to;
-        if self.reduce_motion {
-            return to;
+    /// Note a sent search: the first of a wait starts the loading clock, and a
+    /// later keystroke leaves it alone. Returns whether the clock started.
+    pub fn search_sent(&mut self, now: Instant) -> bool {
+        if self.search_started.is_some() {
+            return false;
         }
+        self.search_started = Some(now);
+        true
+    }
 
-        let elapsed = now.saturating_duration_since(self.card_at).as_secs_f32() * 1000.0;
-        let t = (elapsed / self::appearance::REFLOW_MS as f32).clamp(0.0, 1.0);
-        self.card_from + (to - self.card_from) * ease_out_cubic(t)
+    pub fn card_height(&self) -> f32 {
+        self.presentation.card_height()
+    }
+
+    /// The frame's complete input: content borrowed from the state, appearance
+    /// and motion resolved, so the renderer never reads the state machine.
+    pub fn frame(&self, now: Instant) -> Frame<'_> {
+        let field = FieldView {
+            query: &self.query,
+            caret: self.caret,
+            selection: self.selection(),
+            preedit: self.preedit.as_deref(),
+            caret_visible: self.caret_visible,
+        };
+        let (hovered_row, hovered_action) = match self.hovered {
+            Some(Hover::Row(index)) => (Some(index), None),
+            Some(Hover::Action(index)) => (None, Some(index)),
+            None => (None, None),
+        };
+        let preview = if self.split() {
+            self.selected_preview().map(|preview| match preview {
+                Preview::Image { path } => PreviewView::Image { path },
+                Preview::Text { text } => PreviewView::Text { text },
+            })
+        } else {
+            None
+        };
+        let body = match &self.menu {
+            Some(menu) => Body::Panel(PanelView {
+                parent_title: self.menu_parent_title(),
+                actions: &menu.actions,
+                first: menu.cursor.first,
+                selected: menu.cursor.selected,
+                hovered: hovered_action,
+                marked: self.rows.get(menu.parent).and_then(marked_entry),
+            }),
+            None => Body::List(ListView {
+                rows: &self.rows,
+                motion: &self.row_motion,
+                first: self.cursor.first,
+                selected: self.cursor.selected,
+                hovered: hovered_row,
+                preview,
+            }),
+        };
+
+        let selected_row = self.rows.get(self.cursor.selected);
+        let panel = self.menu.is_some();
+        let loading = self
+            .search_started
+            .is_some_and(|started| now.saturating_duration_since(started) >= SEARCH_LOADING_DELAY);
+        let footer = FooterView {
+            rows: self.rows.len(),
+            action_count: self.menu.as_ref().map_or(0, |menu| menu.actions.len()),
+            query_empty: self.query.is_empty(),
+            panel,
+            loading,
+            has_actions: selected_row.is_some_and(|row| !row.actions.is_empty()),
+            can_default: self.selected_default().is_some(),
+            is_default: self
+                .menu
+                .as_ref()
+                .and_then(Menu::selected_action)
+                .is_some_and(|action| action.default),
+            effective_label: if panel {
+                None
+            } else {
+                selected_row
+                    .and_then(effective_action)
+                    .map(|action| action.title.as_str())
+            },
+        };
+
+        Frame {
+            surface: self.surface,
+            scale: self.scale_factor(),
+            timing: self.timing,
+            layout: self.presentation.frame_layout(now),
+            card_h: self.presentation.card_height(),
+            content_h: self.content_height(),
+            last_card_bottom: self.last_card_bottom,
+            opacity: self.presentation.entrance(now),
+            theme: self.presentation.theme,
+            surfaces: self.presentation.surfaces,
+            font: self.presentation.appearance.font,
+            field,
+            body,
+            footer,
+        }
     }
 
     pub fn shown(&mut self, now: Instant) {
@@ -181,18 +288,20 @@ impl State {
         self.menu = None;
         self.hovered = None;
         self.dismiss_at = None;
-        self.shown_at = now;
-        self.card_at = now;
-        self.card_from = self.content_height();
-        self.card_to = self.card_from;
+        self.search_started = None;
+        self.submit_held = None;
+        self.presentation.begin_show(now);
+        self.presentation.snap_to(self.content_height(), now);
+        self.preview_drawn = None;
         self.contain();
         self.caret_visible = true;
         self.caret_at = now;
-        self.entrance_started = false;
     }
 
     pub fn hidden(&mut self) {
         self.dismiss_at = None;
+        self.search_started = None;
+        self.submit_held = None;
         self.menu = None;
         // A reply that arrives while hidden must not resurrect the panel.
         self.panel_resume = None;
@@ -201,11 +310,13 @@ impl State {
         self.preedit_active = false;
         // A show starts from an empty list: an empty query fetches nothing.
         self.rows = Vec::new();
+        self.row_motion.clear();
+        self.preview_drawn = None;
     }
 
     /// Keep the selection inside the `max_rows` window, minimally.
     pub fn contain(&mut self) {
-        self.cursor.contain(self.rows.len(), self.appearance.layout);
+        self.cursor.contain(self.rows.len(), self.layout());
         self.resync_hover();
     }
 }
@@ -230,5 +341,98 @@ mod tests {
         // fractional ratio and 3072 through the integer scale
         assert_eq!((1536.0 * state.scale_factor()).round() as u32, 1920);
         assert_eq!((1536.0 * 2.0) as u32, 3072);
+    }
+
+    #[test]
+    fn a_preview_row_switches_the_card_into_the_split_layout() {
+        use crate::app::test_support::{item, state};
+        use wayrun_core::wire::Preview;
+
+        let mut state = state();
+        let now = Instant::now();
+        let mut picture = item(
+            "picture",
+            None,
+            Some(Action::Run {
+                cmd: "true".to_string(),
+            }),
+            None,
+        );
+        picture.preview = Some(Preview::Image {
+            path: "/tmp/p.png".to_string(),
+        });
+        state.apply_results(vec![picture, item("plain", None, None, None)], now);
+
+        assert!(state.split());
+        let kind = state.preview_kind().unwrap();
+        let split_height = state
+            .layout()
+            .content_h_for(state.layout().split_h(state.rows.len(), kind));
+        assert_eq!(state.content_height(), split_height);
+        {
+            let frame = state.frame(now);
+            match &frame.body {
+                Body::List(list) => match &list.preview {
+                    Some(PreviewView::Image { path }) => assert_eq!(*path, "/tmp/p.png"),
+                    Some(PreviewView::Text { .. }) => panic!("expected an image preview"),
+                    None => panic!("the selected row has a preview"),
+                },
+                Body::Panel(_) => panic!("the list owns the card"),
+            }
+        }
+
+        state.cursor.selected = 1;
+        assert!(!state.split());
+        assert_eq!(state.content_height(), state.layout().content_h(2));
+    }
+
+    #[test]
+    fn a_text_preview_uses_the_text_column() {
+        use crate::app::test_support::{item, state};
+        use wayrun_core::wire::Preview;
+
+        let mut state = state();
+        let now = Instant::now();
+        let mut row = item("note", None, None, None);
+        row.preview = Some(Preview::Text {
+            text: "first line\nsecond line".to_string(),
+        });
+        state.apply_results(vec![row], now);
+
+        assert_eq!(state.preview_kind(), Some(PreviewKind::Text));
+        match &state.frame(now).body {
+            Body::List(list) => match &list.preview {
+                Some(PreviewView::Text { text }) => {
+                    assert_eq!(*text, "first line\nsecond line")
+                }
+                _ => panic!("the selected row has a text preview"),
+            },
+            Body::Panel(_) => panic!("the list owns the card"),
+        }
+        assert_eq!(
+            state.content_height(),
+            state
+                .layout()
+                .content_h_for(state.layout().split_h(1, PreviewKind::Text))
+        );
+    }
+
+    #[test]
+    fn disabling_previews_keeps_the_list_full_width() {
+        use crate::app::test_support::{item, state};
+        use wayrun_core::wire::Preview;
+
+        let mut state = state();
+        state.presentation.appearance.preview = false;
+        let now = Instant::now();
+        let mut row = item("picture", None, None, None);
+        row.preview = Some(Preview::Image {
+            path: "/tmp/p.png".to_string(),
+        });
+        state.apply_results(vec![row], now);
+
+        assert_eq!(state.preview_kind(), None);
+        assert!(!state.split());
+        assert_eq!(state.content_height(), state.layout().content_h(1));
     }
 }

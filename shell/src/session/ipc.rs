@@ -1,11 +1,14 @@
-use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::env;
+use std::fs::{self, File};
+use std::io::{self, BufRead, BufReader, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
+use std::thread;
 use std::time::Duration;
 
 use calloop::channel::Sender;
@@ -42,15 +45,15 @@ const ACCEPT_BACKOFF: Duration = Duration::from_millis(50);
 /// `$XDG_RUNTIME_DIR/wayrun.sock`, the single-instance guard, bound before
 /// Wayland; a missing value is an error, not a shared `/tmp` path.
 pub fn socket_path() -> Option<PathBuf> {
-    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from)?;
+    let dir = env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from)?;
     dir.is_absolute().then(|| dir.join("wayrun.sock"))
 }
 
 /// Bind the listener (also the single-instance guard) and spawn the accept loop.
-pub fn serve(tx: Sender<Command>) -> std::io::Result<()> {
+pub fn serve(tx: Sender<Command>) -> io::Result<()> {
     let Some(path) = socket_path() else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
             "XDG_RUNTIME_DIR is not set; the launcher socket has no safe location",
         ));
     };
@@ -58,26 +61,26 @@ pub fn serve(tx: Sender<Command>) -> std::io::Result<()> {
     // launcher; the lock makes the check race-free.
     lock_instance(&path)?;
     if UnixStream::connect(&path).is_ok() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::AddrInUse,
+        return Err(io::Error::new(
+            io::ErrorKind::AddrInUse,
             format!("another wayrun is listening on {}", path.display()),
         ));
     }
-    let _ = std::fs::remove_file(&path);
+    let _ = fs::remove_file(&path);
     let listener = UnixListener::bind(&path)?;
     // `UnixListener::bind` honours the umask, which can leave the launcher
     // toggleable by other local users.
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
 
-    std::thread::spawn(move || {
+    thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(stream) = stream else {
                 // A persistent accept error must not spin the CPU.
-                std::thread::sleep(ACCEPT_BACKOFF);
+                thread::sleep(ACCEPT_BACKOFF);
                 continue;
             };
             let tx = tx.clone();
-            std::thread::spawn(move || handle(stream, tx));
+            thread::spawn(move || handle(stream, tx));
         }
     });
 
@@ -89,7 +92,7 @@ pub fn serve(tx: Sender<Command>) -> std::io::Result<()> {
 static INSTANCE_LOCK: Mutex<Option<File>> = Mutex::new(None);
 
 /// Take the lock beside the socket, or refuse when another daemon holds it.
-fn lock_instance(path: &Path) -> std::io::Result<()> {
+fn lock_instance(path: &Path) -> io::Result<()> {
     let file = File::options()
         .read(true)
         .write(true)
@@ -98,12 +101,12 @@ fn lock_instance(path: &Path) -> std::io::Result<()> {
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
         .open(path.with_extension("lock"))?;
-    let _ = file.set_permissions(std::fs::Permissions::from_mode(0o600));
+    let _ = file.set_permissions(fs::Permissions::from_mode(0o600));
     // SAFETY: `flock` takes an owned fd and a flag word; the file outlives it.
     let taken = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0;
     if !taken {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::AddrInUse,
+        return Err(io::Error::new(
+            io::ErrorKind::AddrInUse,
             format!("another wayrun holds {}", path.display()),
         ));
     }
@@ -144,54 +147,58 @@ fn handle(stream: UnixStream, tx: Sender<Command>) {
 }
 
 /// The client end: `wayrun open|close|toggle|status`.
-pub fn client(verb: &str) -> std::process::ExitCode {
+pub fn client(verb: &str) -> process::ExitCode {
     let Some(path) = socket_path() else {
         eprintln!("wayrun: XDG_RUNTIME_DIR is not set; no daemon can be reached");
-        return std::process::ExitCode::FAILURE;
+        return process::ExitCode::FAILURE;
     };
     let Ok(mut stream) = UnixStream::connect(&path) else {
         eprintln!("wayrun: no daemon listening on {}", path.display());
-        return std::process::ExitCode::FAILURE;
+        return process::ExitCode::FAILURE;
     };
 
     let _ = stream.set_read_timeout(Some(TIMEOUT));
     let _ = stream.set_write_timeout(Some(TIMEOUT));
     if stream.write_all(verb.as_bytes()).is_err() || stream.write_all(b"\n").is_err() {
-        return std::process::ExitCode::FAILURE;
+        return process::ExitCode::FAILURE;
     }
 
     let mut response = String::new();
     if BufReader::new(&stream).read_line(&mut response).is_err() {
-        return std::process::ExitCode::FAILURE;
+        return process::ExitCode::FAILURE;
     }
     print!("{response}");
 
     if response.trim_start().starts_with("error") {
-        std::process::ExitCode::FAILURE
+        process::ExitCode::FAILURE
     } else {
-        std::process::ExitCode::SUCCESS
+        process::ExitCode::SUCCESS
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+    use std::fs;
+    use std::io;
     use std::os::unix::fs::PermissionsExt;
+    use std::process;
 
     use super::{Command, lock_instance, parse_request};
 
     #[test]
     fn a_second_instance_lock_is_refused() {
-        let dir = std::env::temp_dir().join(format!("wayrun-lock-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = env::temp_dir().join(format!("wayrun-lock-{}", process::id()));
+        fs::create_dir_all(&dir).unwrap();
         let path = dir.join("wayrun.sock");
 
         lock_instance(&path).unwrap();
-        let lock = std::fs::metadata(path.with_extension("lock")).unwrap();
+        let lock = fs::metadata(path.with_extension("lock")).unwrap();
         assert_eq!(lock.permissions().mode() & 0o777, 0o600);
         let refused = lock_instance(&path).unwrap_err();
-        assert_eq!(refused.kind(), std::io::ErrorKind::AddrInUse);
+        assert_eq!(refused.kind(), io::ErrorKind::AddrInUse);
 
-        std::fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

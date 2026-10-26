@@ -1,7 +1,10 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::io::{BufRead, Write};
+use std::fs;
+use std::io::{self, BufRead, Write};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::UNIX_EPOCH;
 
 use anyhow::{Context, Result};
 use mlua::{Function, Lua, LuaOptions, LuaSerdeExt, StdLib, Table, Value};
@@ -9,9 +12,9 @@ use serde_json::json;
 
 use crate::wire::ResultItem;
 
-use super::manifest::{Plugin, read_plugins};
+use super::manifest::{self, Plugin, read_plugins};
 use super::sandbox::script_env;
-use super::{areas, kv, sdk, warn};
+use super::{kv, log::Log, module, sdk, warn};
 
 /// `wayrun --lua-host <script.lua>`: answer the external-host JSON-RPC
 /// contract from one Lua script, with the VM living in a process of its own.
@@ -20,19 +23,134 @@ pub fn run(script: &str) -> Result<()> {
         anyhow::bail!("usage: wayrun --lua-host <script.lua>");
     }
     let source =
-        std::fs::read_to_string(script).with_context(|| format!("reading lua script {script}"))?;
-    let host = Host::new(script, strip_shebang(&source))
+        fs::read_to_string(script).with_context(|| format!("reading lua script {script}"))?;
+    let mut host = Host::new(script, strip_shebang(&source))
         .with_context(|| format!("loading lua script {script}"))?;
     host.serve()
 }
 
 /// A script launched by its shebang keeps the `#!` line; Lua's own interpreter
 /// skips it, and `lua.load` does not.
-fn strip_shebang(source: &str) -> &str {
+pub(super) fn strip_shebang(source: &str) -> &str {
     match source.strip_prefix("#!") {
         Some(rest) => rest.split_once('\n').map(|(_, body)| body).unwrap_or(""),
         None => source,
     }
+}
+
+/// Where the host writes its replies: stdout in `serve`, a capture in tests.
+type Sink = Rc<RefCell<Box<dyn Write>>>;
+
+/// Evaluate `source` in a fresh VM and register the plugin table's scopes.
+fn load(
+    script: &str,
+    source: &str,
+    shared: &sdk::Shared,
+    imports: &module::Imports,
+    log: &Log,
+) -> mlua::Result<(Lua, Vec<Plugin>, Table)> {
+    let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::default())?;
+    let wayrun = sdk::build(&lua, script, shared, log.clone())?;
+    let env = script_env(&lua, &wayrun, script, log.clone(), imports)?;
+    let declared: Table = lua
+        .load(source)
+        .set_name(script)
+        .set_environment(env)
+        .eval()?;
+    let plugins = read_plugins(&declared, script)?;
+    fill_scopes(shared, &plugins);
+    Ok((lua, plugins, declared))
+}
+
+fn scopes(active: &kv::Active) -> sdk::Shared {
+    sdk::Shared {
+        active: Rc::clone(active),
+        kv_paths: Rc::new(RefCell::new(HashMap::new())),
+        env_scope: Rc::new(RefCell::new(HashMap::new())),
+        exec_scope: Rc::new(RefCell::new(HashMap::new())),
+        read_areas: Rc::new(RefCell::new(HashMap::new())),
+    }
+}
+
+/// One fresh load for `wayrun plugin check`: the plugin tables, and per plugin
+/// the keys the table does not define.
+pub(super) struct Inspected {
+    pub plugins: Vec<Plugin>,
+    pub unknown: Vec<Vec<String>>,
+    /// A `Plugin` carries the table's functions, so the VM stays alive beside them.
+    _lua: Lua,
+}
+
+pub(super) fn inspect(script: &str, source: &str) -> Result<Inspected> {
+    let active: kv::Active = Rc::new(RefCell::new(None));
+    let log = Log::new(script, Rc::clone(&active));
+    let shared = scopes(&active);
+    let imports: module::Imports = Rc::new(RefCell::new(Vec::new()));
+    let (lua, plugins, declared) = load(script, source, &shared, &imports, &log)
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+    let mut unknown = Vec::new();
+    for entry in declared.sequence_values::<Table>() {
+        let entry = entry.map_err(|error| anyhow::anyhow!("{error}"))?;
+        let keys = manifest::unknown_keys(&entry).map_err(|error| anyhow::anyhow!("{error}"))?;
+        unknown.push(keys);
+    }
+    Ok(Inspected {
+        plugins,
+        unknown,
+        _lua: lua,
+    })
+}
+
+/// The declared ids are known only after evaluation; the kv paths, the readable
+/// env names and the read areas fill here.
+fn fill_scopes(shared: &sdk::Shared, plugins: &[Plugin]) {
+    let mut paths = HashMap::new();
+    let mut envs = HashMap::new();
+    let mut execs = HashMap::new();
+    let mut areas = HashMap::new();
+    for plugin in plugins {
+        envs.insert(plugin.id.clone(), plugin.env.clone());
+        execs.insert(plugin.id.clone(), plugin.exec.clone());
+        areas.insert(plugin.id.clone(), plugin.read.clone());
+        if let Some(dir) = sdk::plugin_dir(&plugin.id) {
+            paths.insert(plugin.id.clone(), dir.join("kv.db"));
+        }
+    }
+    *shared.kv_paths.borrow_mut() = paths;
+    *shared.env_scope.borrow_mut() = envs;
+    *shared.exec_scope.borrow_mut() = execs;
+    *shared.read_areas.borrow_mut() = areas;
+}
+
+/// A watched file's `(mtime_ns, size)`; `None` when it is missing.
+type Stamp = Option<(i64, u64)>;
+
+/// The script plus the files it imported, with the stamps they had at load.
+fn watch_stamps(script: &str, imports: &module::Imports) -> Vec<(PathBuf, Stamp)> {
+    let mut files = vec![PathBuf::from(script)];
+    for file in imports.borrow().iter() {
+        if !files.contains(file) {
+            files.push(file.clone());
+        }
+    }
+    files
+        .into_iter()
+        .map(|path| {
+            let stamp = file_stamp(&path);
+            (path, stamp)
+        })
+        .collect()
+}
+
+fn file_stamp(path: &Path) -> Stamp {
+    let meta = fs::metadata(path).ok()?;
+    let mtime = meta
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_nanos() as i64;
+    Some((mtime, meta.len()))
 }
 
 struct Host {
@@ -40,76 +158,109 @@ struct Host {
     script: String,
     plugins: Vec<Plugin>,
     active: kv::Active,
+    log: Log,
+    out: Sink,
+    shared: sdk::Shared,
+    imports: module::Imports,
+    stamps: RefCell<Vec<(PathBuf, Stamp)>>,
 }
 
 impl Host {
     fn new(script: &str, source: &str) -> Result<Self> {
+        let out: Sink = Rc::new(RefCell::new(Box::new(io::stdout())));
+        Self::with_sink(script, source, out)
+    }
+
+    fn with_sink(script: &str, source: &str, out: Sink) -> Result<Self> {
         // mlua's error carries no Send bound, so it converts here, once.
-        let scope: sdk::Scope = Rc::new(RefCell::new(Vec::new()));
         let active: kv::Active = Rc::new(RefCell::new(None));
-        let kv_paths: kv::Paths = Rc::new(RefCell::new(HashMap::new()));
-        let env_scope: sdk::EnvScope = Rc::new(RefCell::new(HashMap::new()));
-        let read_areas: areas::Areas = Rc::new(RefCell::new(HashMap::new()));
-        let load = || -> mlua::Result<(Lua, Vec<Plugin>)> {
-            let lua = Lua::new_with(StdLib::ALL_SAFE, LuaOptions::default())?;
-            let wayrun = sdk::build(
-                &lua,
-                script,
-                Rc::clone(&scope),
-                Rc::clone(&active),
-                Rc::clone(&kv_paths),
-                Rc::clone(&env_scope),
-                Rc::clone(&read_areas),
-            )?;
-            let env = script_env(&lua, &wayrun)?;
-            let declared: Table = lua
-                .load(source)
-                .set_name(script)
-                .set_environment(env)
-                .eval()?;
-            let plugins = read_plugins(&declared, script)?;
-            Ok((lua, plugins))
-        };
-        let (lua, plugins) = load().map_err(|error| anyhow::anyhow!("{error}"))?;
-        // The declared ids are known only now; the read scope, the kv paths,
-        // the readable env names and the read areas fill here.
-        let mut roots = Vec::new();
-        let mut paths = HashMap::new();
-        let mut envs = HashMap::new();
-        let mut areas = HashMap::new();
-        for plugin in &plugins {
-            envs.insert(plugin.id.clone(), plugin.env.clone());
-            areas.insert(plugin.id.clone(), plugin.read.clone());
-            if let Some(dir) = sdk::plugin_dir(&plugin.id) {
-                paths.insert(plugin.id.clone(), dir.join("kv.db"));
-                roots.push(dir);
-            }
-        }
-        *scope.borrow_mut() = roots;
-        *kv_paths.borrow_mut() = paths;
-        *env_scope.borrow_mut() = envs;
-        *read_areas.borrow_mut() = areas;
+        let log = Log::new(script, Rc::clone(&active));
+        let shared = scopes(&active);
+        let imports: module::Imports = Rc::new(RefCell::new(Vec::new()));
+        let (lua, plugins, _) = load(script, source, &shared, &imports, &log)
+            .map_err(|error| anyhow::anyhow!("{error}"))?;
+        let stamps = RefCell::new(watch_stamps(script, &imports));
         Ok(Self {
             lua,
             script: script.to_string(),
             plugins,
             active,
+            log,
+            out,
+            shared,
+            imports,
+            stamps,
         })
     }
 
-    fn serve(&self) -> Result<()> {
-        let stdin = std::io::stdin();
-        let mut out = std::io::stdout();
+    /// Reload the script and its imports when a watched file changed; a failed
+    /// reload keeps the last good VM serving until the next change.
+    fn refresh(&mut self) -> bool {
+        if !self.stale() {
+            return false;
+        }
+        let source = match fs::read_to_string(&self.script) {
+            Ok(source) => source,
+            Err(error) => {
+                warn(&self.script, &format!("reload failed: {error}"));
+                *self.stamps.borrow_mut() = watch_stamps(&self.script, &self.imports);
+                return false;
+            }
+        };
+        self.imports.borrow_mut().clear();
+        match load(
+            &self.script,
+            strip_shebang(&source),
+            &self.shared,
+            &self.imports,
+            &self.log,
+        ) {
+            Ok((lua, plugins, _)) => {
+                self.lua = lua;
+                self.plugins = plugins;
+                *self.stamps.borrow_mut() = watch_stamps(&self.script, &self.imports);
+                true
+            }
+            Err(error) => {
+                warn(&self.script, &format!("reload failed: {error}"));
+                *self.stamps.borrow_mut() = watch_stamps(&self.script, &self.imports);
+                false
+            }
+        }
+    }
+
+    fn stale(&self) -> bool {
+        self.stamps
+            .borrow()
+            .iter()
+            .any(|(path, stamp)| file_stamp(path) != *stamp)
+    }
+
+    /// Imports can also run lazily inside a search; a file first seen there
+    /// joins the watch list with the stamp it had when it loaded.
+    fn track_imports(&self) {
+        let imports = self.imports.borrow();
+        let mut stamps = self.stamps.borrow_mut();
+        for file in imports.iter() {
+            if !stamps.iter().any(|(path, _)| path == file) {
+                stamps.push((file.clone(), file_stamp(file)));
+            }
+        }
+    }
+
+    fn serve(&mut self) -> Result<()> {
+        let stdin = io::stdin();
         for line in stdin.lock().lines() {
             let line = line?;
             if line.trim().is_empty() {
                 continue;
             }
+            self.refresh();
             let request: serde_json::Value = match serde_json::from_str(&line) {
                 Ok(request) => request,
                 Err(error) => {
                     respond_error(
-                        &mut out,
+                        &mut *self.out.borrow_mut(),
                         &json!(null),
                         -32700,
                         &format!("parse error: {error}"),
@@ -118,9 +269,11 @@ impl Host {
                 }
             };
             let id = request.get("id").cloned().unwrap_or(json!(null));
-            match self.dispatch(&request) {
-                Ok(result) => respond(&mut out, &id, result)?,
-                Err((code, message)) => respond_error(&mut out, &id, code, &message)?,
+            let outcome = self.dispatch(&request);
+            let mut out = self.out.borrow_mut();
+            match outcome {
+                Ok(result) => respond(&mut *out, &id, result)?,
+                Err((code, message)) => respond_error(&mut *out, &id, code, &message)?,
             }
         }
         Ok(())
@@ -131,6 +284,11 @@ impl Host {
         request: &serde_json::Value,
     ) -> std::result::Result<serde_json::Value, (i64, String)> {
         let params = request.get("params");
+        let id = request.get("id").cloned().unwrap_or(json!(null));
+        let stream = params
+            .and_then(|params| params.get("stream"))
+            .and_then(|stream| stream.as_bool())
+            .unwrap_or(false);
         match request.get("method").and_then(|method| method.as_str()) {
             Some("list_plugins") => Ok(json!(
                 self.plugins
@@ -150,11 +308,44 @@ impl Host {
                     .and_then(|params| params.get("text"))
                     .and_then(|text| text.as_str())
                     .unwrap_or("");
-                self.call(plugin, "search", plugin.search.as_ref(), text)
+                let emit = if stream {
+                    Some(
+                        self.emitter(plugin, &id)
+                            .map_err(|error| (-32000, error.to_string()))?,
+                    )
+                } else {
+                    None
+                };
+                let returned = self.call(plugin, "search", plugin.search.as_ref(), text, emit)?;
+                Ok(rows_json(&self.lua, &self.script, &plugin.id, returned))
             }
             Some("top") => {
                 let plugin = self.plugin(params)?;
-                self.call(plugin, "top", plugin.top.as_ref(), ())
+                let returned = self.call(plugin, "top", plugin.top.as_ref(), (), None)?;
+                Ok(rows_json(&self.lua, &self.script, &plugin.id, returned))
+            }
+            Some("command") => {
+                let plugin = self.plugin(params)?;
+                let action = params
+                    .and_then(|params| params.get("action"))
+                    .and_then(|action| action.as_str())
+                    .ok_or((-32602, "missing action".to_string()))?;
+                let payload = params
+                    .and_then(|params| params.get("payload"))
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                let payload = self
+                    .lua
+                    .to_value(&payload)
+                    .map_err(|error| (-32000, format!("payload: {error}")))?;
+                self.call(
+                    plugin,
+                    "command",
+                    plugin.command.as_ref(),
+                    (action, payload),
+                    None,
+                )?;
+                Ok(serde_json::Value::Null)
             }
             Some(other) => Err((-32601, format!("unknown method {other:?}"))),
             None => Err((-32600, "missing method".to_string())),
@@ -183,7 +374,8 @@ impl Host {
         method: &str,
         function: Option<&Function>,
         arg: A,
-    ) -> std::result::Result<serde_json::Value, (i64, String)> {
+        emit: Option<(Function, Rc<Cell<bool>>)>,
+    ) -> std::result::Result<Value, (i64, String)> {
         let Some(function) = function else {
             return Err((
                 -32601,
@@ -191,52 +383,98 @@ impl Host {
             ));
         };
         *self.active.borrow_mut() = Some(plugin.id.clone());
-        let returned: Value = function.call(arg).map_err(|error| {
+        self.log.reset();
+        let (emit, active) = match emit {
+            Some((emit, active)) => (Value::Function(emit), Some(active)),
+            None => (Value::Nil, None),
+        };
+        let mut args = arg
+            .into_lua_multi(&self.lua)
+            .map_err(|error| (-32000, format!("{method} failed: {error}")))?;
+        args.push_back(emit);
+        let returned = function.call(args);
+        self.track_imports();
+        if let Some(active) = active {
+            active.set(false);
+        }
+        returned.map_err(|error| {
             warn(
                 &self.script,
                 &format!("plugin {} {method}: {error}", plugin.id),
             );
             (-32000, format!("{method} failed: {error}"))
-        })?;
-        Ok(self.rows_json(plugin, returned))
+        })
     }
 
-    /// A returned table as the wire shape: every row is deserialized into the
-    /// core's own [`ResultItem`], and one bad row is dropped, never the answer.
-    fn rows_json(&self, plugin: &Plugin, returned: Value) -> serde_json::Value {
-        let table = match returned {
-            Value::Nil => return json!([]),
-            Value::Table(table) => table,
-            other => {
-                warn(
-                    &self.script,
-                    &format!(
-                        "plugin {} returned {other:?}, not a table of rows",
-                        plugin.id
-                    ),
-                );
-                return json!([]);
+    /// The `emit` a streaming search receives: one `partial` line per call, with
+    /// the request's own id. The flag stops a saved function after its search.
+    fn emitter(
+        &self,
+        plugin: &Plugin,
+        id: &serde_json::Value,
+    ) -> mlua::Result<(Function, Rc<Cell<bool>>)> {
+        let out = Rc::clone(&self.out);
+        let script = self.script.clone();
+        let plugin = plugin.id.clone();
+        let id = id.clone();
+        let active = Rc::new(Cell::new(true));
+        let alive = Rc::clone(&active);
+        let emit = self.lua.create_function(move |lua, rows: Value| {
+            if !alive.get() {
+                return Err(mlua::Error::RuntimeError(
+                    "emit outside the search that received it".to_string(),
+                ));
             }
-        };
-        let mut rows = Vec::new();
-        for value in table.sequence_values::<Value>() {
-            let Ok(value) = value else { continue };
-            match self.lua.from_value::<ResultItem>(value) {
-                Ok(item) => {
-                    rows.push(serde_json::to_value(item).unwrap_or(serde_json::Value::Null))
-                }
-                Err(error) => warn(
-                    &self.script,
-                    &format!("plugin {} dropped a row: {error}", plugin.id),
-                ),
-            }
-        }
-        json!(rows)
+            let rows = rows_json(lua, &script, &plugin, rows);
+            respond_partial(&mut *out.borrow_mut(), &id, rows)
+                .map_err(|error| mlua::Error::RuntimeError(format!("partial: {error}")))
+        })?;
+        Ok((emit, active))
     }
+}
+
+/// A returned table as the wire shape: every row is deserialized into the
+/// core's own [`ResultItem`], and one bad row is dropped, never the answer.
+fn rows_json(lua: &Lua, script: &str, plugin: &str, returned: Value) -> serde_json::Value {
+    let table = match returned {
+        Value::Nil => return json!([]),
+        Value::Table(table) => table,
+        other => {
+            warn(
+                script,
+                &format!("plugin {plugin} returned {other:?}, not a table of rows"),
+            );
+            return json!([]);
+        }
+    };
+    let mut rows = Vec::new();
+    for value in table.sequence_values::<Value>() {
+        let Ok(value) = value else { continue };
+        match lua.from_value::<ResultItem>(value) {
+            Ok(item) => rows.push(serde_json::to_value(item).unwrap_or(serde_json::Value::Null)),
+            Err(error) => warn(script, &format!("plugin {plugin} dropped a row: {error}")),
+        }
+    }
+    json!(rows)
 }
 
 fn respond(out: &mut impl Write, id: &serde_json::Value, result: serde_json::Value) -> Result<()> {
     let line = json!({ "jsonrpc": "2.0", "result": result, "id": id });
+    writeln!(out, "{line}")?;
+    out.flush()?;
+    Ok(())
+}
+
+fn respond_partial(
+    out: &mut impl Write,
+    id: &serde_json::Value,
+    rows: serde_json::Value,
+) -> Result<()> {
+    let line = json!({
+        "jsonrpc": "2.0",
+        "method": "partial",
+        "params": { "id": id, "rows": rows },
+    });
     writeln!(out, "{line}")?;
     out.flush()?;
     Ok(())
@@ -262,6 +500,223 @@ mod tests {
         Host::new("/test/script.lua", source).unwrap()
     }
 
+    struct Capture(Rc<RefCell<Vec<u8>>>);
+
+    impl Write for Capture {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.borrow_mut().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn host_with_sink(source: &str) -> (Host, Rc<RefCell<Vec<u8>>>) {
+        let buffer = Rc::new(RefCell::new(Vec::new()));
+        let out: Sink = Rc::new(RefCell::new(Box::new(Capture(Rc::clone(&buffer)))));
+        let host = Host::with_sink("/test/script.lua", source, out).unwrap();
+        (host, buffer)
+    }
+
+    /// A script on disk, so a reload re-reads the real file.
+    fn file_host(dir: &tempfile::TempDir, source: &str) -> (Host, Rc<RefCell<Vec<u8>>>) {
+        let path = dir.path().join("main.lua");
+        fs::write(&path, source).unwrap();
+        fs::write(dir.path().join("util.lua"), "return { value = 'one' }").unwrap();
+        let buffer = Rc::new(RefCell::new(Vec::new()));
+        let out: Sink = Rc::new(RefCell::new(Box::new(Capture(Rc::clone(&buffer)))));
+        let host = Host::with_sink(path.to_str().unwrap(), source, out).unwrap();
+        (host, buffer)
+    }
+
+    const IMPORTING_SCRIPT: &str = r#"
+        local util = wayrun.import("util")
+        return { { id = "demo", search = function()
+            return { { title = util.value } }
+        end } }
+    "#;
+
+    /// The same import made lazily, inside the search rather than at load.
+    const LAZY_IMPORT_SCRIPT: &str = r#"
+        return { { id = "demo", search = function()
+            return { { title = wayrun.import("util").value } }
+        end } }
+    "#;
+
+    #[test]
+    fn an_edited_import_reloads_before_the_next_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut host, _buffer) = file_host(&dir, LAZY_IMPORT_SCRIPT);
+        assert_eq!(search(&host, "demo", "x")[0]["title"], "one");
+        assert!(!host.refresh(), "an unchanged script is not reloaded");
+
+        fs::write(dir.path().join("util.lua"), "return { value = 'two!' }").unwrap();
+        assert!(host.refresh(), "the imported file changed");
+        assert_eq!(search(&host, "demo", "x")[0]["title"], "two!");
+    }
+
+    #[test]
+    fn a_failed_reload_keeps_the_last_good_vm() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut host, _buffer) = file_host(&dir, IMPORTING_SCRIPT);
+        assert_eq!(search(&host, "demo", "x")[0]["title"], "one");
+
+        fs::write(dir.path().join("util.lua"), "this is not lua").unwrap();
+        assert!(!host.refresh(), "the reload failed");
+        assert_eq!(
+            search(&host, "demo", "x")[0]["title"],
+            "one",
+            "the last good VM still answers"
+        );
+
+        fs::write(dir.path().join("util.lua"), "return { value = 'three' }").unwrap();
+        assert!(host.refresh(), "a later fix is picked up");
+        assert_eq!(search(&host, "demo", "x")[0]["title"], "three");
+    }
+
+    #[test]
+    fn an_edited_script_reloads_the_same_way() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut host, _buffer) = file_host(&dir, IMPORTING_SCRIPT);
+        let rewritten = r#"
+            return { { id = "demo", search = function()
+                return { { title = "rewritten" } }
+            end } }
+        "#;
+        fs::write(dir.path().join("main.lua"), rewritten).unwrap();
+        assert!(host.refresh(), "the script itself changed");
+        assert_eq!(search(&host, "demo", "x")[0]["title"], "rewritten");
+    }
+
+    #[test]
+    fn a_streaming_search_emits_partial_rows() {
+        let (host, buffer) = host_with_sink(
+            r#"
+            return { { id = "demo", search = function(text, emit)
+                assert(type(emit) == "function", "a streaming search has no emit")
+                emit({ { title = "first" }, { title = 5 } })
+                return { { title = "final" } }
+            end } }
+            "#,
+        );
+        let rows = host
+            .dispatch(&json!({
+                "method": "search",
+                "params": { "plugin": "demo", "text": "x", "stream": true },
+                "id": 17,
+            }))
+            .unwrap();
+        assert_eq!(rows[0]["title"], "final");
+
+        let out = String::from_utf8(buffer.borrow().clone()).unwrap();
+        let lines: Vec<serde_json::Value> = out
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0]["method"], "partial");
+        assert_eq!(lines[0]["params"]["id"], 17);
+        // one bad row is dropped, never the partial
+        assert_eq!(lines[0]["params"]["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(lines[0]["params"]["rows"][0]["title"], "first");
+    }
+
+    #[test]
+    fn a_plain_search_gets_no_emitter() {
+        let (host, buffer) = host_with_sink(
+            r#"
+            return { { id = "demo", search = function(text, emit)
+                return { { title = tostring(emit) } }
+            end } }
+            "#,
+        );
+        let rows = host
+            .dispatch(&json!({
+                "method": "search",
+                "params": { "plugin": "demo", "text": "x" },
+                "id": 1,
+            }))
+            .unwrap();
+        assert_eq!(rows[0]["title"], "nil");
+        assert!(buffer.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_command_answers_null() {
+        let (host, _buffer) =
+            host_with_sink(r#"return { { id = "demo", command = function() end } }"#);
+        let reply = call(
+            &host,
+            "command",
+            json!({ "plugin": "demo", "action": "new" }),
+        )
+        .unwrap();
+        assert_eq!(reply, serde_json::Value::Null);
+    }
+
+    #[test]
+    fn a_command_runs_in_its_plugins_scope() {
+        let (host, _buffer) = host_with_sink(
+            r#"
+            return { { id = "demo", env = { "HOME" }, command = function(action, payload)
+                assert(wayrun.env("HOME") ~= nil, "the plugin scope is not active")
+                error(action .. ":" .. payload.title)
+            end } }
+            "#,
+        );
+        let Err((code, message)) = call(
+            &host,
+            "command",
+            json!({ "plugin": "demo", "action": "new", "payload": { "title": "hi" } }),
+        ) else {
+            panic!("the handler raised");
+        };
+        assert_eq!(code, -32000);
+        assert!(message.contains("new:hi"), "{message}");
+    }
+
+    #[test]
+    fn a_plugin_without_a_command_answers_32601() {
+        let (host, _buffer) =
+            host_with_sink(r#"return { { id = "demo", search = function() return {} end } }"#);
+        let Err((code, _)) = call(
+            &host,
+            "command",
+            json!({ "plugin": "demo", "action": "new" }),
+        ) else {
+            panic!("no handler, so the call fails");
+        };
+        assert_eq!(code, -32601);
+    }
+
+    #[test]
+    fn a_saved_emitter_stops_after_its_search() {
+        let (host, _buffer) = host_with_sink(
+            r#"
+            local saved
+            return { { id = "demo", search = function(text, emit)
+                if text == "save" then
+                    saved = emit
+                    return {}
+                end
+                saved({ { title = "late" } })
+                return {}
+            end } }
+            "#,
+        );
+        let request = |text: &str| {
+            json!({
+                "method": "search",
+                "params": { "plugin": "demo", "text": text, "stream": true },
+                "id": 1,
+            })
+        };
+        assert!(host.dispatch(&request("save")).is_ok());
+        assert!(host.dispatch(&request("later")).is_err());
+    }
+
     fn call(
         host: &Host,
         method: &str,
@@ -275,17 +730,83 @@ mod tests {
     }
 
     #[test]
-    fn os_io_package_load_and_print_are_unreachable() {
+    fn os_io_package_and_load_are_unreachable() {
         host(
             r#"
             assert(os == nil, "os leaked")
             assert(io == nil, "io leaked")
             assert(package == nil, "package leaked")
             assert(load == nil, "load leaked")
-            assert(print == nil, "print leaked")
             return { { id = "demo", search = function() return {} end } }
             "#,
         );
+    }
+
+    #[test]
+    fn exec_runs_a_declared_program_with_argv() {
+        let host = host(
+            r#"
+            return { { id = "demo", exec = { "sh" }, search = function()
+                local out = wayrun.exec("sh", { "-c", "printf out; printf err >&2; exit 3" })
+                return { { title = out.stdout, summary = out.stderr .. " " .. out.code } }
+            end } }
+            "#,
+        );
+        let rows = search(&host, "demo", "x");
+        assert_eq!(rows[0]["title"], "out");
+        assert_eq!(rows[0]["summary"], "err 3");
+    }
+
+    #[test]
+    fn exec_refuses_an_undeclared_program() {
+        let host = host(
+            r#"
+            return { { id = "demo", search = function()
+                wayrun.exec("sh", { "-c", "true" })
+                return {}
+            end } }
+            "#,
+        );
+        assert!(call(&host, "search", json!({ "plugin": "demo", "text": "x" })).is_err());
+    }
+
+    #[test]
+    fn exec_declarations_are_program_names() {
+        let error = Host::new(
+            "/test/script.lua",
+            r#"return { { id = "demo", exec = { "/bin/sh" }, search = function() return {} end } }"#,
+        )
+        .err()
+        .expect("a path is not a program name");
+        assert!(error.to_string().contains("program name"), "{error}");
+    }
+
+    #[test]
+    fn print_writes_to_the_journal() {
+        host(
+            r#"
+            print("debug", 1)
+            return { { id = "demo", search = function() return {} end } }
+            "#,
+        );
+    }
+
+    #[test]
+    fn import_loads_a_module_next_to_the_script() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("util.lua"), "return { answer = 42 }").unwrap();
+        let script = dir.path().join("main.lua");
+        fs::write(
+            &script,
+            r#"return { { id = "demo", search = function()
+                local util = wayrun.import("util")
+                return { { title = tostring(util.answer) } }
+            end } }"#,
+        )
+        .unwrap();
+        let source = fs::read_to_string(&script).unwrap();
+        let host = Host::new(script.to_str().unwrap(), &source).unwrap();
+        assert_eq!(search(&host, "demo", "x")[0]["title"], "42");
     }
 
     #[test]
@@ -464,7 +985,7 @@ mod tests {
     #[test]
     fn a_declared_area_serves_list_stat_and_snapshot() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("note.txt"), "hi").unwrap();
+        fs::write(dir.path().join("note.txt"), "hi").unwrap();
         {
             let connection = rusqlite::Connection::open(dir.path().join("data.sqlite")).unwrap();
             connection

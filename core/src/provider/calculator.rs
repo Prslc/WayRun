@@ -1,3 +1,6 @@
+use std::f64::consts::E;
+use std::f64::consts::PI;
+use std::f64::consts::TAU;
 use std::future::Future;
 use std::pin::Pin;
 
@@ -99,9 +102,9 @@ fn do_search(expr: &str) -> Vec<ResultItem> {
                 }
             }
             _ if args.is_empty() => match name.as_str() {
-                "pi" => Some(std::f64::consts::PI),
-                "tau" => Some(std::f64::consts::TAU),
-                "e" => Some(std::f64::consts::E),
+                "pi" => Some(PI),
+                "tau" => Some(TAU),
+                "e" => Some(E),
                 _ => None,
             },
             _ => None,
@@ -127,7 +130,9 @@ fn do_search(expr: &str) -> Vec<ResultItem> {
                 summary: Some(expr.to_string()),
                 on_click: None,
                 icon: resolve("builtin:calculator"),
+                icon_shape: None,
                 actions: Vec::new(),
+                preview: None,
             }]
         }
         Err(_) => vec![],

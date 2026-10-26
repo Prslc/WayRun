@@ -50,10 +50,12 @@ An unparseable value is skipped and the default stays.
 per mode (see below).
 
 Every other surface derives from a role at a shipped alpha: the card fill is
-`container` at 0.72, the selected row's tint `primary` at 0.15, the placeholder
-and hints `fg` at 0.55, and so on. An unset key keeps following the system
+`container` at 0.72 (0.85 in dark mode) and the hairline is black at 0.10 in
+light mode (white at 0.12 in dark mode), the selected row's tint `primary` at
+0.15, the placeholder and hints `fg` at 0.55, and so on. An unset key keeps following the system
 palette, so a matugen/DMS change still recolours the rest live; setting a key
-pins that one value.
+pins that one value. Any derived surface can also be pinned on its own in
+`[surfaces]`, below.
 
 A role you set stops following the system palette, while an unset role keeps
 tracking it. Omitting the section is the same as a pure dynamic theme.
@@ -79,6 +81,55 @@ fg = "#1f2430"
 The active mode follows the system palette (`dark` when there is none), so the
 tables follow a live light/dark switch with no restart. A key the active table
 does not set keeps the `[colors]` value.
+
+### `[surfaces]`
+
+The surfaces the renderer draws are derived from the base roles, and each one
+can be pinned directly. An entry sets `color`, `alpha`, or both; an omitted
+field keeps deriving, so a `[colors]` change or a live palette change still
+reaches it.
+
+```toml
+[surfaces]
+card = { alpha = 0.90 }                 # keep following container, more opaque
+selection = { color = "#7aa2f7", alpha = 0.20 }
+hairline = { color = "#ffffff" }        # keep the mode's shipped alpha
+```
+
+`color` is `#rrggbb` or `#rgb`; `alpha` is 0–1 and is clamped. An unparseable
+colour is ignored. The `hairline` entry also takes `width` in logical pixels
+(0–16, default 1.0; `0` hides the edge), which layers like `color` and `alpha`.
+`dim` is here as well: it layers over `[colors].dim`, which
+keeps the plain-string spelling.
+
+| Key | Derived from | Shipped alpha |
+| --- | --- | --- |
+| `card` | `container` | 0.72 (0.85 dark) |
+| `selection` | `primary` | 0.15 |
+| `hover` | `primary` | 0.08 |
+| `preview` | `primary` | 0.05 |
+| `hairline` | black in light, white in dark | 0.10 (0.12 dark) |
+| `muted` | `fg` | 0.55 |
+| `summary` | `fg` | 0.70 |
+| `footer` | `fg` | 0.50 |
+| `accent` | `primary` | 1.00 |
+| `dim` | `#000000` | 0.30 |
+
+`[surfaces]` is the shared table; `[surfaces.dark]` and `[surfaces.light]`
+take the same keys and layer on it surface by surface and field by field while
+that mode is active. A mode can change only the colour, only the alpha, or only
+the width:
+
+```toml
+[surfaces]
+hairline = { alpha = 0.12 }
+
+[surfaces.dark]
+hairline = { color = "#ffffff", width = 1.5 }
+
+[surfaces.light]
+hairline = { color = "#000000" }
+```
 
 ### `[blur]`
 
@@ -120,13 +171,25 @@ layerrule = blur, WayRun
 | --- | --- | --- | --- |
 | `enabled` | bool | `true` | Declare the blur region. `false` declares nothing, so the backdrop stays sharp; the card's translucent fill is unchanged. |
 
+### `[preview]`
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `enabled` | bool | `true` | Show the split preview column for the selected row. `false` keeps the list full width; plugin previews are ignored. |
+
+### `[footer]`
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `enabled` | bool | `true` | Show the hint bar under the results: keys, result count and search status. `false` hides it and gives its band back to the card. |
+
 ### `[layout]`
 
 | Key | Type | Default | Range | Meaning |
 | --- | --- | --- | --- | --- |
 | `width` | float | `730.0` | > 0 | Card width in logical pixels; a narrower output shrinks it to fit. |
 | `radius` | float | `16.0` | ≥ 0 | Card corner radius; `0` gives square corners, and the inner radii shrink with it. |
-| `top_ratio` | float | `0.28` | 0–1 | Card top as a fraction of the output height. |
+| `top_ratio` | float | `0.20` | 0–1 | Card top as a fraction of the output height. |
 | `align` | string | `center` | `left`/`center`/`right` | Horizontal anchor on the output. |
 | `max_rows` | int | `5` | 1–8 | Visible result rows. |
 | `panel_header` | float | `28.0` | ≥ 0 | Action panel header band above the actions. |

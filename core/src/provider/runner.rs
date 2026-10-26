@@ -1,3 +1,5 @@
+use std::env;
+use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -78,8 +80,8 @@ fn binaries() -> Arc<Vec<Binary>> {
 }
 
 fn path_roots() -> Vec<PathBuf> {
-    let path = std::env::var("PATH").unwrap_or_default();
-    let home = std::env::var("HOME").ok();
+    let path = env::var("PATH").unwrap_or_default();
+    let home = env::var("HOME").ok();
     split_path(&path, home.as_deref())
 }
 
@@ -99,14 +101,14 @@ fn scan_path() -> Vec<Binary> {
     let mut out = Vec::new();
 
     for dir in path_roots() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
+        let Ok(entries) = fs::read_dir(&dir) else {
             continue;
         };
         for entry in entries.flatten() {
             let path = entry.path();
             // `std::fs::metadata` follows symlinks: PATH entries are often
             // symlinks to the real binary, so the target's exec bit decides.
-            let Ok(meta) = std::fs::metadata(&path) else {
+            let Ok(meta) = fs::metadata(&path) else {
                 continue;
             };
             if !meta.is_file() || meta.permissions().mode() & 0o111 == 0 {
@@ -197,6 +199,8 @@ fn row_for(binary: &Binary, args: &str) -> ResultItem {
             run_cmd,
         )),
         icon: None,
+        icon_shape: None,
+        preview: None,
         actions: Vec::new(),
     }
 }

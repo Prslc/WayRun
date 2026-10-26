@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use std::env;
+use std::process;
 
 use super::{Compositor, Window};
 use crate::system::process::{DEADLINE, output_within};
@@ -20,13 +22,13 @@ struct RawWindow {
 
 impl Compositor for Niri {
     fn available(&self) -> bool {
-        std::env::var_os("NIRI_SOCKET").is_some()
-            || std::env::var("XDG_CURRENT_DESKTOP")
+        env::var_os("NIRI_SOCKET").is_some()
+            || env::var("XDG_CURRENT_DESKTOP")
                 .is_ok_and(|desktop| desktop.split(':').any(|d| d.eq_ignore_ascii_case("niri")))
     }
 
     fn windows(&self) -> Result<Vec<Window>> {
-        let mut command = std::process::Command::new("niri");
+        let mut command = process::Command::new("niri");
         command.args(["msg", "-j", "windows"]);
         let output = output_within(command, DEADLINE)
             .context("`niri msg -j windows` did not answer within the deadline")?;

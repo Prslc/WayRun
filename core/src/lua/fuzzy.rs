@@ -1,4 +1,5 @@
 use mlua::{Lua, Table};
+use std::cmp::Reverse;
 
 use crate::plugin::{Match, classify_ci};
 
@@ -15,7 +16,7 @@ pub(super) fn lib(lua: &Lua) -> mlua::Result<Table> {
                     hits.push((kind.weight(), at, kind));
                 }
             }
-            hits.sort_by_key(|hit| std::cmp::Reverse(hit.0));
+            hits.sort_by_key(|hit| Reverse(hit.0));
 
             let reply = lua.create_table()?;
             for (at, (_, index, kind)) in hits.into_iter().enumerate() {

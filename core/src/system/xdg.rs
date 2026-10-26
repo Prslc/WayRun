@@ -1,4 +1,5 @@
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 /// `$XDG_DATA_HOME`, or `~/.local/share` when unset.
@@ -50,6 +51,19 @@ fn data_subdirs(subdir: &str) -> Vec<PathBuf> {
 /// `.desktop` roots in precedence order.
 pub fn desktop_dirs() -> Vec<PathBuf> {
     data_subdirs("applications")
+}
+
+/// The `mimeapps.list` overrides that add or pin a content type's handlers; the
+/// copies under an applications directory come with [`desktop_dirs`].
+pub fn mimeapps_files() -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    if let Some(config) = dirs::config_dir() {
+        push_unique(&mut files, config.join("mimeapps.list"));
+    }
+    for config in config_dirs() {
+        push_unique(&mut files, config.join("mimeapps.list"));
+    }
+    files
 }
 
 /// Theme roots a named icon may live under, user first.
@@ -112,7 +126,7 @@ pub fn icon_settings_files() -> Vec<PathBuf> {
 pub fn settings_icon_theme() -> Option<String> {
     icon_settings_files()
         .iter()
-        .find_map(|path| icon_theme_name(&std::fs::read_to_string(path).ok()?))
+        .find_map(|path| icon_theme_name(&fs::read_to_string(path).ok()?))
 }
 
 fn icon_theme_name(text: &str) -> Option<String> {

@@ -1,7 +1,9 @@
+use std::env;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{ChildStdin, Command, Stdio};
-use std::sync::mpsc::{Sender as StdSender, channel};
+use std::sync::mpsc::{self, Sender as StdSender, channel};
 use std::sync::{LazyLock, Mutex, PoisonError};
+use std::thread;
 
 use calloop::channel::Sender;
 use serde_json::{Value, json};
@@ -11,6 +13,10 @@ use wayrun_core::wire::{Action, ResultItem, ThemeConfig};
 pub enum BackendEvent {
     Theme(ThemeConfig),
     Results(Vec<ResultItem>),
+    /// A streaming search's intermediate payload; the search stays pending.
+    ResultsPartial(Vec<ResultItem>),
+    /// A background image fetch wrote its file; the cached miss must be dropped.
+    ImageReady(String),
     /// The core's stdout closed: nothing can be searched or launched anymore.
     CoreExited,
 }
@@ -65,7 +71,7 @@ pub fn default(scope: &str, action_id: Option<&str>) {
 pub fn start(tx: Sender<BackendEvent>) {
     // Re-exec this same binary in core mode; stderr is inherited so the core's
     // warnings land in the unit's journal.
-    let spawned = std::env::current_exe().and_then(|exe| {
+    let spawned = env::current_exe().and_then(|exe| {
         let mut command = Command::new(exe);
         command
             .arg("--core")
@@ -96,11 +102,11 @@ pub fn start(tx: Sender<BackendEvent>) {
     if let Some(stdin) = stdin {
         let (sender, receiver) = channel::<String>();
         *OUTBOX.lock().unwrap_or_else(PoisonError::into_inner) = Some(sender);
-        std::thread::spawn(move || drain(stdin, receiver));
+        thread::spawn(move || drain(stdin, receiver));
     }
 
     if let Some(stdout) = stdout {
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 let Ok(line) = line else { break };
                 if let Some(event) = parse(&line)
@@ -119,7 +125,7 @@ pub fn start(tx: Sender<BackendEvent>) {
     search("a");
 }
 
-fn drain(mut stdin: ChildStdin, receiver: std::sync::mpsc::Receiver<String>) {
+fn drain(mut stdin: ChildStdin, receiver: mpsc::Receiver<String>) {
     while let Ok(line) = receiver.recv() {
         if stdin.write_all(line.as_bytes()).is_err() || stdin.write_all(b"\n").is_err() {
             break;
@@ -135,6 +141,15 @@ fn drain(mut stdin: ChildStdin, receiver: std::sync::mpsc::Receiver<String>) {
 enum Notification {
     Theme(ThemeConfig),
     Results(Vec<ResultItem>),
+    #[serde(rename = "results_partial")]
+    ResultsPartial(Vec<ResultItem>),
+    #[serde(rename = "image_ready")]
+    ImageReady(ImageReady),
+}
+
+#[derive(serde::Deserialize)]
+struct ImageReady {
+    path: String,
 }
 
 /// Parse one JSON-RPC 2.0 line into the event the shell renders; a line it does
@@ -144,6 +159,8 @@ fn parse(line: &str) -> Option<BackendEvent> {
     Some(match notification {
         Notification::Theme(config) => BackendEvent::Theme(config),
         Notification::Results(items) => BackendEvent::Results(items),
+        Notification::ResultsPartial(items) => BackendEvent::ResultsPartial(items),
+        Notification::ImageReady(ready) => BackendEvent::ImageReady(ready.path),
     })
 }
 
@@ -162,6 +179,22 @@ mod tests {
         match results {
             BackendEvent::Results(items) => assert_eq!(items[0].title, "a"),
             other => panic!("expected results, got {other:?}"),
+        }
+
+        let partial =
+            parse(r#"{"jsonrpc":"2.0","method":"results_partial","params":[{"title":"b"}]}"#)
+                .unwrap();
+        match partial {
+            BackendEvent::ResultsPartial(items) => assert_eq!(items[0].title, "b"),
+            other => panic!("expected results_partial, got {other:?}"),
+        }
+
+        let ready =
+            parse(r#"{"jsonrpc":"2.0","method":"image_ready","params":{"path":"/tmp/a.png"}}"#)
+                .unwrap();
+        match ready {
+            BackendEvent::ImageReady(path) => assert_eq!(path, "/tmp/a.png"),
+            other => panic!("expected image_ready, got {other:?}"),
         }
     }
 

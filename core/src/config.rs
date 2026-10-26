@@ -1,11 +1,14 @@
+use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock, RwLock};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+pub mod edit;
 
 /// Core behaviour loaded from `$XDG_CONFIG_HOME/wayrun/config.toml`, whose
 /// types are also the file's; every field defaults to the compiled-in constant.
-#[derive(serde::Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
 pub struct Config {
     pub ui: Ui,
@@ -14,7 +17,7 @@ pub struct Config {
     pub files: Files,
 }
 
-#[derive(serde::Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
 pub struct Ui {
     /// Interface language: a `locales/<locale>.yml` stem such as `zh_cn`; empty
@@ -23,7 +26,7 @@ pub struct Ui {
     pub locale: String,
 }
 
-#[derive(serde::Deserialize, Clone, Debug, PartialEq)]
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Font {
     /// The family the UI shapes with; missing glyphs fall back to the system, so
@@ -32,7 +35,7 @@ pub struct Font {
     pub family: String,
 }
 
-#[derive(serde::Deserialize, Clone, Debug, Default, PartialEq)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
 pub struct Icon {
     /// Icon theme name; empty follows the desktop's own setting.
@@ -40,7 +43,7 @@ pub struct Icon {
     pub theme: String,
 }
 
-#[derive(serde::Deserialize, Clone, Debug, PartialEq)]
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
 #[serde(default)]
 pub struct Files {
     /// Index `$HOME` so `f`/`d` match at any depth; the cost is one cache file.
@@ -99,7 +102,7 @@ impl Config {
     /// reload keeps what is applied rather than resetting to defaults.
     fn load_checked() -> Option<Self> {
         let path = path()?;
-        let text = std::fs::read_to_string(path).ok()?;
+        let text = fs::read_to_string(path).ok()?;
         toml::from_str(&text).ok()
     }
 

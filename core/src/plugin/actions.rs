@@ -2,6 +2,7 @@ use super::registry::{Entry, REGISTRY, ensure_loaded};
 use crate::system::icon::find_icon_spec;
 use crate::wire::{ActionItem, ResultItem};
 use rust_i18n::t;
+use std::collections::HashMap;
 
 /// Attach each row's action panel.
 pub async fn decorate(items: Vec<ResultItem>) -> Vec<ResultItem> {
@@ -46,7 +47,7 @@ fn plugin_actions(entries: &[Entry], item: &ResultItem) -> (Option<String>, Vec<
 /// own command leading.
 fn attach_actions(
     item: &mut ResultItem,
-    defaults: &std::collections::HashMap<String, String>,
+    defaults: &HashMap<String, String>,
     plugin_actions: (Option<String>, Vec<ActionItem>),
 ) {
     let Some(on_click) = item.on_click.clone() else {
@@ -77,9 +78,10 @@ fn attach_actions(
             .is_some_and(|id| action.id.as_deref() == Some(id.as_str()));
     }
 
-    // The row's own command leads the panel: Enter runs it while no default is
-    // remembered; re-picking takes the default back, and a lone command shows no panel.
-    if !actions.is_empty() {
+    // The row's own command leads the panel when no plugin action already names
+    // it; re-picking it takes the default back, and a lone command shows none.
+    let named = actions.iter().any(|action| action.action == on_click);
+    if !actions.is_empty() && !named {
         actions.insert(
             0,
             ActionItem {
@@ -151,6 +153,30 @@ mod tests {
         assert_eq!(
             titles,
             [t!("action.open"), "Reveal in file manager".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_plugin_action_naming_the_row_command_leads_the_panel() {
+        let copy = Action::Copy {
+            text: "download".to_string(),
+        };
+        let mut row = item("download", copy.clone());
+        row.actions = vec![ActionItem {
+            title: "Copy name".to_string(),
+            action: copy,
+            icon: None,
+            id: Some("copy_name".to_string()),
+            plugin: Some("icons".to_string()),
+            default: false,
+        }];
+        attach_actions(&mut row, &HashMap::new(), (None, Vec::new()));
+
+        let titles: Vec<&str> = row.actions.iter().map(|a| a.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            ["Copy name"],
+            "no second entry for the same command"
         );
     }
 

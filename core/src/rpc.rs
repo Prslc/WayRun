@@ -1,9 +1,11 @@
 use serde_json::{Value, json};
+use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
+use crate::plugin::Emit;
 use crate::protocol;
-use crate::wire::Action;
+use crate::wire::{Action, ResultItem};
 
 const PARSE_ERROR: (i64, &str) = (-32700, "Parse error");
 const INVALID_REQUEST: (i64, &str) = (-32600, "Invalid Request");
@@ -110,7 +112,7 @@ pub async fn handle(
             match search_text(params) {
                 Ok(text) if !text.is_empty() => {
                     if has_id {
-                        let results = crate::plugin::dispatch(&text).await;
+                        let results = crate::plugin::dispatch(&text, None).await;
                         respond_ok(tx, id, &results).await;
                     } else {
                         search.request(&text);
@@ -156,9 +158,27 @@ pub async fn handle(
             let tx = tx.clone();
             pending.retain(|handle| !handle.is_finished());
             pending.push(tokio::spawn(async move {
-                let execute =
-                    tokio::task::spawn_blocking(move || crate::system::executor::execute(&command));
-                let _ = execute.await;
+                // A plugin action goes to its host instead of the executor, so
+                // the sandbox that raised the row is the one that commits it.
+                match command {
+                    Action::Plugin {
+                        plugin,
+                        action,
+                        payload,
+                    } => {
+                        if let Err(error) =
+                            crate::plugin::run_command(&plugin, &action, payload.as_ref()).await
+                        {
+                            eprintln!("wayrun-core: plugin {plugin} command {action}: {error:#}");
+                        }
+                    }
+                    command => {
+                        let execute = tokio::task::spawn_blocking(move || {
+                            crate::system::executor::execute(&command)
+                        });
+                        let _ = execute.await;
+                    }
+                }
                 if has_id {
                     respond(&tx, id, Ok(Value::Null)).await;
                 }
@@ -232,7 +252,7 @@ pub async fn handle(
 }
 
 /// The streaming search's one worker: a new request supersedes the pending one,
-/// and a superseded payload is dropped instead of emitted.
+/// aborting its stale dispatch, and a superseded payload is never emitted.
 pub struct Search {
     request: watch::Sender<Option<String>>,
 }
@@ -240,28 +260,10 @@ pub struct Search {
 impl Search {
     /// Start the session's worker; it exits when the returned `Search` drops.
     pub fn spawn(tx: mpsc::Sender<String>) -> Self {
-        let (request, mut rx) = watch::channel(None::<String>);
-        tokio::spawn(async move {
-            while rx.changed().await.is_ok() {
-                let Some(query) = rx.borrow_and_update().clone() else {
-                    continue;
-                };
-                // Each query gets its own task: a panicking provider must not
-                // silence the worker that answers every later search.
-                let results = match tokio::spawn(
-                    async move { crate::plugin::dispatch(&query).await },
-                )
-                .await
-                {
-                    Ok(results) => results,
-                    Err(_) => continue,
-                };
-                // A newer request, or a cancel, supersedes this payload.
-                if !rx.has_changed().unwrap_or(true) {
-                    protocol::emit(&tx, &protocol::results_notification(&results)).await;
-                }
-            }
-        });
+        let (request, rx) = watch::channel(None::<String>);
+        tokio::spawn(run_worker(rx, tx, |query, emit| async move {
+            crate::plugin::dispatch(&query, emit).await
+        }));
         Self { request }
     }
 
@@ -273,12 +275,85 @@ impl Search {
     /// Drop the pending request, so a payload still in flight is not emitted.
     pub fn cancel(&self) {
         self.request.send_replace(None);
+        crate::system::icon::remote_supersede();
+    }
+}
+
+/// The worker behind [`Search`]: a newer query aborts the dispatch it replaces,
+/// so a slow host is not paid for twice, and only the newest payload streams.
+async fn run_worker<F, Fut>(
+    mut rx: watch::Receiver<Option<String>>,
+    tx: mpsc::Sender<String>,
+    dispatch: F,
+) where
+    F: Fn(String, Option<Emit>) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Vec<ResultItem>> + Send + 'static,
+{
+    let dispatch = Arc::new(dispatch);
+    while rx.changed().await.is_ok() {
+        let Some(mut query) = rx.borrow_and_update().clone() else {
+            continue;
+        };
+        'next: loop {
+            // Each query gets its own task: a panicking provider must not
+            // silence the worker that answers every later search.
+            let (partial_tx, mut partial_rx) = mpsc::channel(8);
+            let dispatch = Arc::clone(&dispatch);
+            let mut task = tokio::spawn({
+                let query = query.clone();
+                async move { dispatch(query, Some(partial_tx)).await }
+            });
+            loop {
+                tokio::select! {
+                    joined = &mut task => {
+                        let Ok(results) = joined else { break 'next };
+                        // A newer request, or a cancel, supersedes this payload;
+                        // nothing from it may land after the change.
+                        if !rx.has_changed().unwrap_or(true) {
+                            // A payload emitted just before the task ended still shows.
+                            while let Ok(rows) = partial_rx.try_recv() {
+                                protocol::emit(
+                                    &tx,
+                                    &protocol::results_partial_notification(&rows),
+                                )
+                                .await;
+                            }
+                            protocol::emit(&tx, &protocol::results_notification(&results)).await;
+                        }
+                        break 'next;
+                    }
+                    Some(rows) = partial_rx.recv() => {
+                        if !rx.has_changed().unwrap_or(true) {
+                            protocol::emit(
+                                &tx,
+                                &protocol::results_partial_notification(&rows),
+                            )
+                            .await;
+                        }
+                    }
+                    changed = rx.changed() => {
+                        // The stale dispatch must not keep spending a host's time;
+                        // aborting drops a forked host along with its future.
+                        task.abort();
+                        if changed.is_err() {
+                            return;
+                        }
+                        let Some(next) = rx.borrow_and_update().clone() else {
+                            break 'next;
+                        };
+                        query = next;
+                        break;
+                    }
+                }
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
     use tokio::sync::mpsc;
 
     /// Returns the messages emitted while one line is handled.
@@ -340,8 +415,71 @@ mod tests {
 
         // the cancel lands before the test yields, so the query's payload is
         // superseded: nothing may stream
-        let outcome = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await;
+        let outcome = tokio::time::timeout(Duration::from_millis(500), rx.recv()).await;
         assert!(outcome.is_err(), "the cancelled payload must not stream");
+    }
+
+    #[tokio::test]
+    async fn a_partial_payload_streams_before_the_final_one() {
+        let (tx, mut out) = mpsc::channel::<String>(8);
+        let (request, rx) = watch::channel(None::<String>);
+        let dispatch = |_query: String, emit: Option<Emit>| async move {
+            if let Some(emit) = emit {
+                let rows: Vec<ResultItem> =
+                    serde_json::from_value(json!([{ "title": "first" }])).unwrap();
+                let _ = emit.try_send(rows);
+            }
+            vec![serde_json::from_value(json!({ "title": "final" })).unwrap()]
+        };
+        tokio::spawn(run_worker(rx, tx, dispatch));
+        request.send_replace(Some("x".to_string()));
+
+        let first = tokio::time::timeout(Duration::from_secs(1), out.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let second = tokio::time::timeout(Duration::from_secs(1), out.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(first.contains("results_partial"), "{first}");
+        assert!(second.contains("results"), "{second}");
+    }
+
+    #[tokio::test]
+    async fn a_superseded_search_aborts_its_dispatch() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let finished = Arc::new(AtomicBool::new(false));
+        let (tx, mut out) = mpsc::channel::<String>(8);
+        let (request, rx) = watch::channel(None::<String>);
+        let dispatch = {
+            let finished = Arc::clone(&finished);
+            move |query: String, _emit| {
+                let finished = Arc::clone(&finished);
+                async move {
+                    if query == "slow" {
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        finished.store(true, Ordering::SeqCst);
+                    }
+                    Vec::new()
+                }
+            }
+        };
+        tokio::spawn(run_worker(rx, tx, dispatch));
+
+        request.send_replace(Some("slow".to_string()));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        request.send_replace(Some("fast".to_string()));
+
+        let line = tokio::time::timeout(Duration::from_secs(1), out.recv())
+            .await
+            .expect("the newer search answers")
+            .expect("the worker is alive");
+        assert!(line.contains("results"), "{line}");
+        // the slow dispatch is dropped, so its future never reaches its end
+        assert!(!finished.load(Ordering::SeqCst));
     }
 
     #[tokio::test]
@@ -386,6 +524,16 @@ mod tests {
     async fn a_command_with_a_target_returns_null() {
         let msgs = run(
             r#"{"jsonrpc":"2.0","method":"command","params":{"type":"open","uri":"file:///no/such"},"id":4}"#,
+        )
+        .await;
+        let v: Value = serde_json::from_str(&msgs[0]).unwrap();
+        assert_eq!(v["result"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn a_plugin_command_answers_null() {
+        let msgs = run(
+            r#"{"jsonrpc":"2.0","method":"command","params":{"type":"plugin","plugin":"nope","action":"x"},"id":5}"#,
         )
         .await;
         let v: Value = serde_json::from_str(&msgs[0]).unwrap();

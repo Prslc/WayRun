@@ -1,9 +1,8 @@
 use super::{DesktopAction, DesktopMeta, Field};
 use crate::system::desktop_action::Details;
 
-/// The scoring surfaces of one app's `.desktop` extras. `desktop_action` owns the
-/// file, its locale policy and the trimming; this only turns the text into the
-/// forms a query is scored against.
+/// The scoring surfaces of one app's `.desktop` extras: `desktop_action` owns the
+/// file, locale policy and trimming; this only shapes the text for matching.
 pub(super) fn meta(details: &Details) -> DesktopMeta {
     DesktopMeta {
         generic: details.generic.as_deref().map(Field::new),
@@ -28,9 +27,8 @@ pub(super) fn meta(details: &Details) -> DesktopMeta {
 mod tests {
     use super::*;
 
-    /// The two case rules differ and are easy to conflate: a `Field` lowercases
-    /// for matching, while a `DesktopAction` keeps its name for the panel row and
-    /// carries `name_lower` beside it.
+    /// The two case rules differ: a `Field` lowercases for matching, while a
+    /// `DesktopAction` keeps its display name and carries `name_lower` beside it.
     #[test]
     fn the_scoring_surfaces_lowercase_and_keep_the_display_name() {
         let details = Details {

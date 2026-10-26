@@ -1,15 +1,22 @@
+use std::env;
+use std::fs;
 use std::future::Future;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::time::Duration;
+use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
-use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
 
-use crate::plugin::{Meta, Plugin};
+use self::call::{host_call, next_id, query_default, query_external, query_external_streaming};
+use crate::plugin::{Emit, Meta, Plugin};
 use crate::system::icon::host_icon_spec;
 use crate::wire::ResultItem;
 use rust_i18n::t;
+
+mod call;
+mod parse;
 
 /// Identity of one plugin as described by an external host's `list_plugins`.
 /// The host owns its own name/icon/ready hint; the core just relays them.
@@ -27,18 +34,18 @@ pub fn command_path(command: &str) -> Option<PathBuf> {
     resolve_command(command)
 }
 
-/// `(mtime, size)` of the resolved `command`, to validate a cached identity.
+/// `(mtime, size, mode)` of the resolved `command`, to validate a cached identity.
 /// `None` when it cannot be resolved or stat'd, so the cache is not trusted.
-pub fn command_stamp(command: &str) -> Option<(u64, u64)> {
+pub fn command_stamp(command: &str) -> Option<(u64, u64, u32)> {
     let path = resolve_command(command)?;
-    let meta = std::fs::metadata(path).ok()?;
+    let meta = fs::metadata(path).ok()?;
     let mtime = meta
         .modified()
         .ok()?
-        .duration_since(std::time::UNIX_EPOCH)
+        .duration_since(UNIX_EPOCH)
         .ok()?
         .as_secs();
-    Some((mtime, meta.len()))
+    Some((mtime, meta.len(), meta.permissions().mode()))
 }
 
 /// A plugin backed by an external JSON-RPC host declared via `command`. The core
@@ -104,6 +111,25 @@ impl Plugin for External {
         Box::pin(async move { query_external(&command, resident, &plugin, &query, &icon).await })
     }
 
+    fn search_streaming<'a>(
+        &'a self,
+        query: &'a str,
+        full: &'a str,
+        emit: Option<Emit>,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<ResultItem>>> + Send + 'a>> {
+        if emit.is_none() {
+            return self.search(query, full);
+        }
+        let command = self.command.clone();
+        let plugin = self.meta.id.to_string();
+        let query = query.to_string();
+        let icon = self.meta.icon.to_string();
+        let resident = self.resident;
+        Box::pin(async move {
+            query_external_streaming(&command, resident, &plugin, &query, &icon, emit).await
+        })
+    }
+
     fn default_view(
         &self,
     ) -> Pin<Box<dyn Future<Output = Result<Option<Vec<ResultItem>>>> + Send + '_>> {
@@ -113,81 +139,26 @@ impl Plugin for External {
         let resident = self.resident;
         Box::pin(async move { query_default(&command, resident, &plugin, &icon).await })
     }
+
+    fn command<'a>(
+        &'a self,
+        action: &'a str,
+        payload: Option<&'a serde_json::Value>,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        let command = self.command.clone();
+        let plugin = self.meta.id.to_string();
+        let action = action.to_string();
+        let payload = payload.cloned();
+        let resident = self.resident;
+        Box::pin(async move {
+            call::query_command(&command, resident, &plugin, &action, payload.as_ref()).await
+        })
+    }
 }
 
 /// Ceiling for one host call: a stalled host must cost seconds, never the
 /// session. Discovery holds the registry's init lock until it returns.
-pub(crate) const HOST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-
-/// One call against a host: `resident` keeps the process across calls; the
-/// default spawns it fresh, so nothing a host kept outlives the call.
-async fn host_call(
-    command: &str,
-    resident: bool,
-    request: &serde_json::Value,
-    limit: std::time::Duration,
-) -> Option<serde_json::Value> {
-    if resident {
-        super::resident::call(command, request, limit).await
-    } else {
-        rpc_call_within(command, request, limit).await
-    }
-}
-
-/// One fork-per-call round trip: spawn, write, close stdin, reap, return the
-/// first parseable response line; `None` on a missing or stalled host.
-async fn rpc_call_within(
-    command: &str,
-    request: &serde_json::Value,
-    limit: std::time::Duration,
-) -> Option<serde_json::Value> {
-    let mut req_str = serde_json::to_string(request).ok()?;
-    req_str.push('\n');
-
-    let mut child = Command::new(command)
-        // The deadline drops `wait_with_output`'s future; without this the host
-        // would keep running (and keep holding whatever it is stuck on).
-        .kill_on_drop(true)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::inherit())
-        .spawn()
-        .ok()?; // command not found -> no host
-
-    // The whole exchange is bounded: a host that never reads stdin cannot block
-    // the write past the deadline.
-    let exchange = async {
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(req_str.as_bytes()).await?;
-            drop(stdin); // close stdin so the host sees EOF (one-shot)
-        }
-        // `wait_with_output` drains stdout/stderr and reaps the child in one step;
-        // reading stdout then `wait()` separately can double-poll the join handle.
-        child.wait_with_output().await
-    };
-
-    let output = match tokio::time::timeout(limit, exchange).await {
-        Ok(Ok(output)) => output,
-        Ok(Err(err)) => {
-            // The core has no logging crate; stderr reaches the unit's journal.
-            eprintln!("wayrun-core: external host {command} failed: {err}");
-            return None;
-        }
-        Err(_) => {
-            eprintln!(
-                "wayrun-core: external host {command} overran {}ms and was killed",
-                limit.as_millis()
-            );
-            return None;
-        }
-    };
-
-    let out = std::str::from_utf8(&output.stdout).unwrap_or_default();
-    out.lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .find_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-}
+pub(crate) const HOST_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Ask the host who it serves. Empty when the host is missing, stalled or not
 /// self-describing, so a query for it falls through instead of hanging.
@@ -195,7 +166,7 @@ pub async fn discover(command: &str, resident: bool) -> Vec<HostMeta> {
     let request = serde_json::json!({
         "jsonrpc": "2.0",
         "method": "list_plugins",
-        "id": 1,
+        "id": next_id(),
     });
     let Some(response) = host_call(command, resident, &request, HOST_TIMEOUT).await else {
         eprintln!(
@@ -231,284 +202,27 @@ pub async fn discover(command: &str, resident: bool) -> Vec<HostMeta> {
         .collect()
 }
 
-/// A host `result` array as rows: icons resolved and `plugin` stamped as the
-/// actions' owner; `None` if unusable. Consumes the reply, so no row is cloned.
-fn parse_result_items(
-    response: serde_json::Value,
-    plugin: &str,
-    icon: &str,
-) -> Option<Vec<ResultItem>> {
-    let serde_json::Value::Object(mut object) = response else {
-        return None;
-    };
-    let items = match object.remove("result")? {
-        serde_json::Value::Array(items) => items,
-        _ => return None,
-    };
-    let mut parsed: Vec<ResultItem> = items
-        .into_iter()
-        .filter_map(|item| serde_json::from_value(item).ok())
-        .collect();
-    let identity = host_icon_spec(icon);
-    let owner = plugin.to_string();
-    for item in &mut parsed {
-        let spec = item.icon.as_deref().unwrap_or("");
-        item.icon = resolve_item_icon(spec, identity.clone());
-        for action in &mut item.actions {
-            action.icon = action.icon.as_deref().and_then(host_icon_spec);
-            // The core owns this field; whatever the host sent is ignored.
-            action.plugin = Some(owner.clone());
-        }
-    }
-    Some(parsed)
-}
-
-async fn query_external(
-    command: &str,
-    resident: bool,
-    plugin: &str,
-    text: &str,
-    icon: &str,
-) -> Result<Vec<ResultItem>> {
-    if text.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let request = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "search",
-        "params": { "plugin": plugin, "text": text },
-        "id": 1,
-    });
-    let Some(response) = host_call(command, resident, &request, HOST_TIMEOUT).await else {
-        return Ok(Vec::new());
-    };
-    Ok(parse_result_items(response, plugin, icon).unwrap_or_default())
-}
-
-/// Ask the host for its default view (its `top` method). `Ok(None)` when it has
-/// no such method, errored, or returned nothing, so the caller shows the card.
-async fn query_default(
-    command: &str,
-    resident: bool,
-    plugin: &str,
-    icon: &str,
-) -> Result<Option<Vec<ResultItem>>> {
-    let request = serde_json::json!({
-        "jsonrpc": "2.0",
-        "method": "top",
-        "params": { "plugin": plugin },
-        "id": 1,
-    });
-    let Some(response) = host_call(command, resident, &request, HOST_TIMEOUT).await else {
-        return Ok(None);
-    };
-    if response.get("error").is_some() {
-        return Ok(None);
-    }
-    Ok(parse_result_items(response, plugin, icon))
-}
-
 /// Resolve a plugins.toml `command` the way execvp will: a name with a slash is
 /// a path; a bare name walks `$PATH`, skipping empty segments and non-executables.
 fn resolve_command(command: &str) -> Option<PathBuf> {
-    crate::system::fs::which_in(std::env::var_os("PATH").unwrap_or_default(), command)
+    crate::system::fs::which_in(env::var_os("PATH").unwrap_or_default(), command)
 }
 
-fn resolve_item_icon(icon: &str, fallback: Option<String>) -> Option<String> {
-    host_icon_spec(icon).or(fallback)
-}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wire::Action;
 
     #[test]
     fn a_command_resolves_to_an_existing_file() {
         use std::os::unix::fs::PermissionsExt;
         let temp = tempfile::tempdir().unwrap();
         let script = temp.path().join("host.sh");
-        std::fs::write(&script, "#!/bin/sh\n").unwrap();
-        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(&script, "#!/bin/sh\n").unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(command_path(script.to_str().unwrap()), Some(script.clone()));
         assert_eq!(
             command_path(temp.path().join("missing.sh").to_str().unwrap()),
             None
-        );
-    }
-
-    #[test]
-    fn empty_icon_falls_back_to_plugin_icon() {
-        assert_eq!(
-            resolve_item_icon("", Some("/x.png".into())),
-            Some("/x.png".into())
-        );
-        assert_eq!(resolve_item_icon("", None), None);
-    }
-
-    #[test]
-    fn absolute_path_passes_through() {
-        assert_eq!(
-            resolve_item_icon("/home/u/icon.svg", None),
-            Some("/home/u/icon.svg".into())
-        );
-    }
-
-    #[test]
-    fn an_unresolved_spec_prefers_the_identity_icon() {
-        assert_eq!(
-            resolve_item_icon("definitely-not-an-icon-xyz", Some("/identity.png".into())),
-            Some("/identity.png".into())
-        );
-    }
-
-    #[test]
-    fn a_theme_glyph_or_papirus_spec_is_no_icon_for_a_host() {
-        // the core resolves these for its own rows, but not for an external host
-        assert_eq!(resolve_item_icon("papirus:folder-open", None), None);
-        assert_eq!(resolve_item_icon("firefox", None), None);
-        assert_eq!(resolve_item_icon("builtin:power", None), None);
-    }
-
-    #[test]
-    fn a_hosts_action_icons_take_paths_only() {
-        let response = serde_json::json!({
-            "result": [{
-                "title": "r",
-                "on_click": {"type":"run","cmd":"x"},
-                "actions": [
-                    {"title":"a", "action":{"type":"run","cmd":"y"}, "icon": "builtin:open"},
-                    {"title":"b", "action":{"type":"run","cmd":"z"}, "icon": "/tmp/a.svg"},
-                    {"title":"c", "action":{"type":"run","cmd":"w"}, "icon": "firefox"},
-                ],
-            }]
-        });
-        let items = parse_result_items(response, "system-search", "").unwrap();
-        assert_eq!(
-            items[0].actions[0].plugin.as_deref(),
-            Some("system-search"),
-            "the host owns the actions it attaches"
-        );
-        assert!(
-            items[0].actions[0].icon.is_none(),
-            "a glyph is no host icon"
-        );
-        assert_eq!(items[0].actions[1].icon.as_deref(), Some("/tmp/a.svg"));
-        assert!(
-            items[0].actions[2].icon.is_none(),
-            "a theme name is no host icon"
-        );
-    }
-
-    /// The golden corpus the Python SDK pins on its side (WayRun-Plugin,
-    /// `tests/test_golden.py`); both ends accept the same shapes.
-    #[test]
-    fn every_command_variant_parses_from_a_host() {
-        let response = serde_json::json!({
-            "result": [
-                {"title": "run", "on_click": {"type": "run", "cmd": "echo hi"}},
-                {"title": "terminal run", "on_click": {"type": "run_in_terminal", "cmd": "htop"}},
-                {"title": "open", "on_click": {"type": "open", "uri": "https://example.com"}},
-                {"title": "copy", "on_click": {"type": "copy", "text": "x"}},
-                {"title": "launch", "on_click": {"type": "launch", "desktop_id": "firefox.desktop"}},
-                {"title": "desktop action", "on_click": {"type": "desktop_action", "desktop_id": "firefox.desktop", "action_id": "new-private-window"}},
-                {"title": "reveal", "on_click": {"type": "reveal", "uri": "file:///home/u"}},
-                {"title": "terminal", "on_click": {"type": "terminal", "uri": "file:///home/u"}},
-                {"title": "ephemeral", "ephemeral": true},
-                {"title": "nulls", "summary": null, "on_click": null, "icon": null},
-            ]
-        });
-        let items = parse_result_items(response, "golden", "/opt/identity.svg").unwrap();
-        assert_eq!(items.len(), 10, "every corpus row survives");
-        assert_eq!(
-            items[0].on_click,
-            Some(Action::Run {
-                cmd: "echo hi".to_string()
-            })
-        );
-        assert_eq!(
-            items[1].on_click,
-            Some(Action::RunInTerminal {
-                cmd: "htop".to_string()
-            })
-        );
-        assert_eq!(
-            items[2].on_click,
-            Some(Action::Open {
-                uri: "https://example.com".to_string()
-            })
-        );
-        assert_eq!(
-            items[3].on_click,
-            Some(Action::Copy {
-                text: "x".to_string()
-            })
-        );
-        assert_eq!(
-            items[4].on_click,
-            Some(Action::Launch {
-                desktop_id: "firefox.desktop".to_string()
-            })
-        );
-        assert_eq!(
-            items[5].on_click,
-            Some(Action::DesktopAction {
-                desktop_id: "firefox.desktop".to_string(),
-                action_id: "new-private-window".to_string()
-            })
-        );
-        assert_eq!(
-            items[6].on_click,
-            Some(Action::Reveal {
-                uri: "file:///home/u".to_string()
-            })
-        );
-        assert_eq!(
-            items[7].on_click,
-            Some(Action::Terminal {
-                uri: "file:///home/u".to_string()
-            })
-        );
-        assert_eq!(
-            items[8].title, "ephemeral",
-            "a stale field an old host sends is ignored"
-        );
-        assert!(items[9].summary.is_none() && items[9].on_click.is_none());
-        assert_eq!(
-            items[9].icon.as_deref(),
-            Some("/opt/identity.svg"),
-            "an unset icon falls back to the identity"
-        );
-    }
-
-    #[tokio::test]
-    async fn an_empty_query_never_reaches_the_host() {
-        // No host is contacted: an empty text is not a search.
-        let items = query_external("/nonexistent/host", false, "p", "", "")
-            .await
-            .unwrap();
-        assert!(items.is_empty());
-    }
-
-    /// A host that never answers must cost the deadline, not the session.
-    #[tokio::test]
-    async fn a_stalled_host_is_given_up_on() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("stall.sh");
-        std::fs::write(&path, "#!/bin/sh\ncat >/dev/null\nexec sleep 600\n").unwrap();
-        let mut perms = std::fs::metadata(&path).unwrap().permissions();
-        std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
-        std::fs::set_permissions(&path, perms).unwrap();
-
-        let request = serde_json::json!({"jsonrpc": "2.0", "method": "search", "id": 1});
-        let limit = std::time::Duration::from_millis(200);
-        let started = std::time::Instant::now();
-        let reply = rpc_call_within(&path.display().to_string(), &request, limit).await;
-        assert!(reply.is_none(), "a stalled host has no answer");
-        assert!(
-            started.elapsed() < std::time::Duration::from_secs(3),
-            "gave up on the deadline, not on the host: {:?}",
-            started.elapsed()
         );
     }
 }

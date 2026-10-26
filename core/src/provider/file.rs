@@ -1,16 +1,20 @@
 use std::collections::BinaryHeap;
 use std::ffi::OsStr;
+use std::ffi::OsString;
+use std::fs;
 use std::future::Future;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use anyhow::Result;
 use gio::prelude::FileExt;
 
 use crate::plugin::{Meta, Plugin};
 use crate::system::fs::get_home;
-use crate::system::icon::{content_type_icon, resolve};
+use crate::system::handlers::{self, Handler};
+use crate::system::icon::{content_type_icon, gio_icon_path, resolve};
 use crate::wire::{Action, ActionItem, ResultItem};
 use rust_i18n::t;
 
@@ -78,8 +82,17 @@ macro_rules! search_plugin {
     };
 }
 
-/// A file or directory row's commands, in panel order: a terminal leads so the
-/// two ways to open sit together, then reveal in the file manager, then copy its path.
+/// The guess reads only the name, so a directory's type is decided here.
+fn content_type_for(path: &Path) -> String {
+    if fs::metadata(path).is_ok_and(|meta| meta.is_dir()) {
+        "inode/directory".to_string()
+    } else {
+        gio::content_type_guess(Some(path), None).0.to_string()
+    }
+}
+
+/// A file or directory row's commands, in panel order: terminal, reveal and
+/// copy path, then the system's alternative openers.
 pub(super) fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
     let Some(Action::Open { uri }) = item.on_click.as_ref() else {
         return Vec::new();
@@ -90,8 +103,7 @@ pub(super) fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
     let Some(path) = gio::File::for_uri(uri).path() else {
         return Vec::new();
     };
-    let path = path.to_string_lossy();
-    vec![
+    let mut actions = vec![
         ActionItem {
             title: t!("action.terminal"),
             action: Action::Terminal { uri: uri.clone() },
@@ -111,14 +123,36 @@ pub(super) fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
         ActionItem {
             title: t!("action.copy_path"),
             action: Action::Copy {
-                text: path.into_owned(),
+                text: path.to_string_lossy().into_owned(),
             },
             icon: Some("builtin:copy".to_string()),
             id: Some("copy_path".to_string()),
             plugin: None,
             default: false,
         },
-    ]
+    ];
+    actions.extend(open_with_actions(
+        uri,
+        handlers::for_content_type(&content_type_for(&path)),
+    ));
+    actions
+}
+
+fn open_with_actions(uri: &str, handlers: Arc<[Handler]>) -> Vec<ActionItem> {
+    handlers
+        .iter()
+        .map(|handler| ActionItem {
+            title: t!("action.open_with", app = handler.title),
+            action: Action::OpenWith {
+                desktop_id: handler.desktop_id.clone(),
+                uri: uri.to_string(),
+            },
+            icon: handler.icon_spec.as_deref().and_then(gio_icon_path),
+            id: Some(format!("open_with:{}", handler.desktop_id)),
+            plugin: None,
+            default: false,
+        })
+        .collect()
 }
 
 search_plugin!(
@@ -158,6 +192,8 @@ pub(super) fn entry_item(path: &Path, is_dir: bool) -> ResultItem {
         } else {
             mime_icon(path)
         },
+        icon_shape: None,
+        preview: None,
         actions: Vec::new(),
     }
 }
@@ -221,9 +257,7 @@ fn path_rows_in(query: &str, home: &Path) -> Vec<PathHit> {
     let leaf = query.rsplit('/').next().unwrap_or(query);
     let listing = query.ends_with('/') || leaf == "." || leaf == "..";
     if !listing && let Some(path) = path::exact_path(query, home) {
-        let is_dir = std::fs::metadata(&path)
-            .ok()
-            .is_some_and(|meta| meta.is_dir());
+        let is_dir = fs::metadata(&path).ok().is_some_and(|meta| meta.is_dir());
         return vec![PathHit {
             item: entry_item(&path, is_dir),
             exact: true,
@@ -236,13 +270,13 @@ fn path_rows_in(query: &str, home: &Path) -> Vec<PathHit> {
         return Vec::new();
     };
     let leaf = query[slash + 1..].to_lowercase();
-    let Ok(entries) = std::fs::read_dir(&dir) else {
+    let Ok(entries) = fs::read_dir(&dir) else {
         return Vec::new();
     };
     // Keep the smallest names only, so a huge directory is one readdir pass
     // and O(n log cap) work, not a full sort.
     let cap = crate::provider::SHOW_CAP;
-    let mut kept: BinaryHeap<(String, std::ffi::OsString)> = BinaryHeap::with_capacity(cap + 1);
+    let mut kept: BinaryHeap<(String, OsString)> = BinaryHeap::with_capacity(cap + 1);
     for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(text) = name.to_str() else {
@@ -316,6 +350,8 @@ mod tests {
             summary: None,
             on_click,
             icon: None,
+            icon_shape: None,
+            preview: None,
             actions: Vec::new(),
         }
     }
@@ -337,8 +373,17 @@ mod tests {
 
     #[test]
     fn a_file_row_offers_terminal_reveal_and_copy() {
-        let actions: Vec<ActionItem> = file_actions(&row("a.txt", file("file:///tmp/a.txt")));
-        let titles: Vec<&str> = actions.iter().map(|a| a.title.as_str()).collect();
+        let all = file_actions(&row("a.txt", file("file:///tmp/a.txt")));
+        assert!(all.len() >= 3);
+        let (fixed, openers) = all.split_at(3);
+        assert!(
+            openers.iter().all(|action| action
+                .id
+                .as_deref()
+                .is_some_and(|id| id.starts_with("open_with:"))),
+            "the system's openers follow the fixed commands"
+        );
+        let titles: Vec<&str> = fixed.iter().map(|a| a.title.as_str()).collect();
         assert_eq!(
             titles,
             [
@@ -346,22 +391,22 @@ mod tests {
                 t!("action.reveal"),
                 t!("action.copy_path")
             ],
-            "opening leads, so it sits next to the row's own command"
+            "the fixed commands keep their panel order"
         );
         assert_eq!(
-            actions[0].action,
+            fixed[0].action,
             Action::Terminal {
                 uri: "file:///tmp/a.txt".to_string()
             }
         );
         assert_eq!(
-            actions[1].action,
+            fixed[1].action,
             Action::Reveal {
                 uri: "file:///tmp/a.txt".to_string()
             }
         );
         assert_eq!(
-            actions[2].action,
+            fixed[2].action,
             Action::Copy {
                 text: "/tmp/a.txt".to_string()
             }
@@ -392,6 +437,36 @@ mod tests {
                 text: "/tmp/a b".to_string()
             }
         );
+    }
+
+    #[test]
+    fn a_handler_becomes_an_open_with_action() {
+        let actions = open_with_actions(
+            "file:///tmp/a.txt",
+            Arc::from(vec![Handler {
+                desktop_id: "code.desktop".to_string(),
+                title: "VS Code".to_string(),
+                icon_spec: Some("!!/tmp/code.svg".to_string()),
+            }]),
+        );
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].title, t!("action.open_with", app = "VS Code"));
+        assert_eq!(
+            actions[0].action,
+            Action::OpenWith {
+                desktop_id: "code.desktop".to_string(),
+                uri: "file:///tmp/a.txt".to_string(),
+            }
+        );
+        assert_eq!(actions[0].id.as_deref(), Some("open_with:code.desktop"));
+        assert_eq!(actions[0].icon.as_deref(), Some("/tmp/code.svg"));
+    }
+
+    #[test]
+    fn a_directory_asks_for_the_directory_handlers() {
+        let temp = tempfile::tempdir().unwrap();
+        assert_eq!(content_type_for(temp.path()), "inode/directory");
+        assert_eq!(content_type_for(&temp.path().join("a.txt")), "text/plain");
     }
 
     #[test]
@@ -439,11 +514,11 @@ mod tests {
     fn a_path_query_completes_the_directory_it_names() {
         let home = tempfile::tempdir().unwrap();
         let project = home.path().join("Project");
-        std::fs::create_dir_all(project.join("WayRun")).unwrap();
-        std::fs::create_dir_all(project.join("Wayland")).unwrap();
-        std::fs::write(project.join("WayRun/inside.txt"), "x").unwrap();
-        std::fs::write(project.join("Other.txt"), "x").unwrap();
-        std::fs::write(project.join(".hidden"), "x").unwrap();
+        fs::create_dir_all(project.join("WayRun")).unwrap();
+        fs::create_dir_all(project.join("Wayland")).unwrap();
+        fs::write(project.join("WayRun/inside.txt"), "x").unwrap();
+        fs::write(project.join("Other.txt"), "x").unwrap();
+        fs::write(project.join(".hidden"), "x").unwrap();
 
         let titles = |query: &str| -> Vec<String> {
             path_rows_in(query, home.path())
@@ -473,7 +548,7 @@ mod tests {
     #[test]
     fn a_plain_query_falls_back_to_the_first_home_level() {
         let home = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(home.path().join("Project")).unwrap();
+        fs::create_dir_all(home.path().join("Project")).unwrap();
 
         let hits = home_matches_in("Proj", home.path());
         assert_eq!(hits.len(), 1);
@@ -496,9 +571,9 @@ mod tests {
     fn a_listing_is_capped_and_sorted() {
         let home = tempfile::tempdir().unwrap();
         let dir = home.path().join("Many");
-        std::fs::create_dir_all(&dir).unwrap();
+        fs::create_dir_all(&dir).unwrap();
         for at in 0..60 {
-            std::fs::write(dir.join(format!("f{at:02}.txt")), "x").unwrap();
+            fs::write(dir.join(format!("f{at:02}.txt")), "x").unwrap();
         }
 
         let rows = path_rows_in("Many/", home.path());

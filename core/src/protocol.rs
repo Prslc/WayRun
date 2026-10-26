@@ -1,4 +1,6 @@
+use std::io;
 use std::io::Write as _;
+use std::thread;
 
 use tokio::sync::mpsc;
 
@@ -38,15 +40,39 @@ pub fn results_notification(items: &[ResultItem]) -> Notification<&[ResultItem]>
     }
 }
 
+/// A streaming search's intermediate payload: the shell shows the rows but
+/// keeps the search pending until the final `results` arrives.
+pub fn results_partial_notification(items: &[ResultItem]) -> Notification<&[ResultItem]> {
+    Notification {
+        jsonrpc: "2.0",
+        method: "results_partial",
+        params: items,
+    }
+}
+
+#[derive(serde::Serialize)]
+pub struct ImageReady<'a> {
+    pub path: &'a str,
+}
+
+/// A background image fetch landed; the shell drops its cached miss for `path`.
+pub fn image_ready_notification(path: &str) -> Notification<ImageReady<'_>> {
+    Notification {
+        jsonrpc: "2.0",
+        method: "image_ready",
+        params: ImageReady { path },
+    }
+}
+
 /// Drain sentinel: the writer flushes and returns. The watchers hold sender
 /// clones for the process lifetime, so the read loop must send it explicitly.
 pub(super) const DRAIN: &str = "\0";
 
 /// Own stdout for the process lifetime: one channel, so no two producers
 /// interleave. A plain thread, because it must outlive the runtime to flush.
-pub(super) fn spawn_writer(mut rx: mpsc::Receiver<String>) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
-        let mut stdout = std::io::stdout();
+pub(super) fn spawn_writer(mut rx: mpsc::Receiver<String>) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let mut stdout = io::stdout();
         while let Some(json) = rx.blocking_recv() {
             if json == DRAIN {
                 break;

@@ -147,21 +147,21 @@ impl State {
         if action.default {
             return Some((plugin?, None));
         }
-        if let Some(id) = action.id.as_deref() {
-            return Some((plugin?, Some(id)));
-        }
         let row = self.rows.get(menu.parent)?;
-        if !is_row_command(row, action) {
-            return None;
+        // The row's own command is the implicit default, so picking it under any
+        // title drops what the row remembered — whichever plugin's scope did.
+        if is_row_command(row, action) {
+            return row
+                .actions
+                .iter()
+                .find(|action| action.default)
+                .and_then(|action| action.plugin.as_deref())
+                .or(plugin)
+                .map(|scope| (scope, None));
         }
-        // The row's own command is the implicit default, so picking it drops what
-        // the row remembered — whichever plugin's scope remembered it.
-        row.actions
-            .iter()
-            .find(|action| action.default)
-            .and_then(|action| action.plugin.as_deref())
-            .or(plugin)
-            .map(|scope| (scope, None))
+        plugin
+            .zip(action.id.as_deref())
+            .map(|(scope, id)| (scope, Some(id)))
     }
 
     /// The title of the row the panel belongs to, for its header.
@@ -197,7 +197,7 @@ impl State {
     }
 
     pub fn menu_page_up(&mut self) {
-        let page = self.appearance.layout.max_rows;
+        let page = self.layout().max_rows;
         if let Some(menu) = &mut self.menu {
             menu.cursor.page_up(page);
         }
@@ -205,7 +205,7 @@ impl State {
     }
 
     pub fn menu_page_down(&mut self) {
-        let page = self.appearance.layout.max_rows;
+        let page = self.layout().max_rows;
         if let Some(menu) = &mut self.menu {
             menu.cursor.page_down(menu.actions.len(), page);
         }
@@ -213,7 +213,7 @@ impl State {
     }
 
     fn menu_contain(&mut self) {
-        let layout = self.appearance.layout;
+        let layout = self.layout();
         if let Some(menu) = &mut self.menu {
             menu.cursor.contain(menu.actions.len(), layout);
         }
@@ -225,6 +225,7 @@ impl State {
 mod tests {
     use super::*;
     use crate::app::test_support::{file_row, item, plugin_action, run, state, with_actions};
+    use std::time::Instant;
 
     #[test]
     fn the_rows_own_command_clears_a_remembered_default() {
@@ -275,7 +276,7 @@ mod tests {
             ),
             terminal,
         ];
-        state.apply_results(vec![row], std::time::Instant::now());
+        state.apply_results(vec![row], Instant::now());
         assert!(state.open_actions());
 
         fn remember(state: &mut State, selected: usize) -> Option<(String, Option<String>)> {
@@ -302,9 +303,34 @@ mod tests {
     }
 
     #[test]
+    fn an_action_equal_to_the_row_command_clears_instead_of_remembering() {
+        let mut state = state();
+        let copy = Action::Copy {
+            text: "name".to_string(),
+        };
+        let mut row = item("name", None, Some(copy.clone()), None);
+        row.actions = vec![ActionItem {
+            title: "Copy name".to_string(),
+            action: copy,
+            icon: None,
+            id: Some("copy_name".to_string()),
+            plugin: Some("icons".to_string()),
+            default: false,
+        }];
+        state.apply_results(vec![row], Instant::now());
+        assert!(state.open_actions());
+
+        assert_eq!(
+            state.selected_default(),
+            Some(("icons", None)),
+            "an action that is the row's command takes the default back"
+        );
+    }
+
+    #[test]
     fn the_panel_opens_over_the_selected_row_and_runs_its_action() {
         let mut state = state();
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         state.apply_results(
             vec![
                 item(
@@ -343,11 +369,11 @@ mod tests {
             "Reveal in file manager"
         );
         // the panel is taller than the one-row list it replaced
-        assert_eq!(state.content_height(), state.appearance.layout.panel_h(1));
+        assert_eq!(state.content_height(), state.layout().panel_h(1));
 
         state.menu = None;
         assert!(state.menu.is_none());
-        assert_eq!(state.content_height(), state.appearance.layout.content_h(2));
+        assert_eq!(state.content_height(), state.layout().content_h(2));
     }
 
     #[test]
@@ -362,7 +388,7 @@ mod tests {
                 }),
                 None,
             )],
-            std::time::Instant::now(),
+            Instant::now(),
         );
         assert!(!state.open_actions());
         assert!(state.menu.is_none());
@@ -371,7 +397,7 @@ mod tests {
     #[test]
     fn a_new_payload_closes_the_panel() {
         let mut state = state();
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         state.apply_results(
             vec![with_actions(
                 item("a", None, Some(run("a")), None),
@@ -468,7 +494,7 @@ mod tests {
                 default: true,
             },
         ];
-        state.apply_results(vec![row], std::time::Instant::now());
+        state.apply_results(vec![row], Instant::now());
         assert!(state.open_actions());
 
         assert_eq!(
@@ -480,7 +506,7 @@ mod tests {
 
     #[test]
     fn a_default_gesture_keeps_the_panel_on_the_entry_it_marked() {
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         let mut state = state();
         let uri = "file:///tmp/a.txt";
         let reveal = |default| {
@@ -530,7 +556,7 @@ mod tests {
 
     #[test]
     fn a_panel_gesture_on_a_vanished_row_leaves_the_panel_closed() {
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         let mut state = state();
         let uri = "file:///tmp/a.txt";
         let reveal = || {
@@ -554,7 +580,7 @@ mod tests {
 
     #[test]
     fn a_resume_dropped_before_the_reply_lands_leaves_the_panel_closed() {
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         let mut state = state();
         let uri = "file:///tmp/a.txt";
         let reveal = |default| {
@@ -591,7 +617,7 @@ mod tests {
     #[test]
     fn the_panel_window_follows_the_selection_past_max_rows() {
         let mut state = state();
-        let now = std::time::Instant::now();
+        let now = Instant::now();
         let actions: Vec<&str> = (0..10).map(|_| "act").collect();
         state.apply_results(
             vec![with_actions(
@@ -602,7 +628,7 @@ mod tests {
         );
         assert!(state.open_actions());
 
-        let max = state.appearance.layout.max_rows;
+        let max = state.layout().max_rows;
         state.menu_down();
         state.menu_down();
         state.menu_down();
@@ -613,5 +639,51 @@ mod tests {
 
         state.menu_page_up();
         assert_eq!(state.menu.as_ref().unwrap().cursor.selected, 5 - max);
+    }
+
+    #[test]
+    fn the_enter_hint_names_a_default_action_and_keeps_launch_without_one() {
+        let now = Instant::now();
+        let uri = "file:///tmp/a.txt";
+        let mut state = state();
+        let mut row = item(
+            "a.txt",
+            None,
+            Some(Action::Open {
+                uri: uri.to_string(),
+            }),
+            None,
+        );
+        row.actions = vec![ActionItem {
+            title: "Open in terminal".into(),
+            action: Action::Terminal {
+                uri: uri.to_string(),
+            },
+            icon: None,
+            id: Some("terminal".into()),
+            plugin: Some("file-search".into()),
+            default: true,
+        }];
+        state.apply_results(vec![row.clone()], now);
+        assert_eq!(
+            state.frame(now).footer.effective_label,
+            Some("Open in terminal")
+        );
+
+        // the panel's own Enter runs the highlighted action, so the row hint goes
+        assert!(state.open_actions());
+        assert_eq!(state.frame(now).footer.effective_label, None);
+        state.menu = None;
+
+        // a default that runs the row's own command is not a different outcome
+        row.actions[0].action = Action::Open {
+            uri: uri.to_string(),
+        };
+        state.apply_results(vec![row.clone()], now);
+        assert_eq!(state.frame(now).footer.effective_label, None);
+
+        row.actions.clear();
+        state.apply_results(vec![row], now);
+        assert_eq!(state.frame(now).footer.effective_label, None);
     }
 }

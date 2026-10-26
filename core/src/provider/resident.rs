@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::io;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::process;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 /// A host with no calls for this long is dropped and the next call pays a
@@ -15,26 +17,47 @@ const IDLE: Duration = Duration::from_secs(120);
 /// ticket, so a queued call a later one overtook is skipped instead of stacking.
 struct Slot {
     ticket: AtomicU64,
+    /// A watched file changed: the next call drops the process that loaded it.
+    stale: AtomicBool,
     host: tokio::sync::Mutex<Option<Host>>,
+}
+
+type Partial = Box<dyn FnMut(serde_json::Value) + Send>;
+
+/// The one exchange in flight: its reply channel and the partial sink the
+/// reader task feeds.
+struct Pending {
+    reply: tokio::sync::oneshot::Sender<serde_json::Value>,
+    partial: Option<Partial>,
 }
 
 struct Host {
     /// Held only for its drop: `kill_on_drop` ends the process.
     _child: Child,
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
     last_used: Instant,
+    pending: Arc<Mutex<Option<Pending>>>,
 }
 
 static SLOTS: LazyLock<Mutex<HashMap<String, Arc<Slot>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// One JSON-RPC round trip against `command`'s resident host, spawned on first
-/// use and restarted after a crash or a stall; `None` reads like a missing host.
+/// use and restarted after a crash, stall or dropped caller; `None` is no host.
 pub(super) async fn call(
     command: &str,
     request: &serde_json::Value,
     limit: Duration,
+) -> Option<serde_json::Value> {
+    call_stream(command, request, limit, |_| {}).await
+}
+
+/// A call that forwards each id-less notification to `partial` while it waits.
+pub(super) async fn call_stream(
+    command: &str,
+    request: &serde_json::Value,
+    limit: Duration,
+    partial: impl FnMut(serde_json::Value) + Send + 'static,
 ) -> Option<serde_json::Value> {
     ensure_reaper();
     let slot = slot_for(command);
@@ -43,11 +66,15 @@ pub(super) async fn call(
     let (tx, rx) = tokio::sync::oneshot::channel();
     let owned = Arc::clone(&slot);
     let command = command.to_string();
-    // The exchange runs detached, so a caller dropped mid-await (a superseded
-    // search) cannot leave an unread reply ahead of the next call's.
+    // The exchange runs detached, so a dropped caller (a superseded search) is
+    // seen and its host killed instead of leaving an unread reply for the next.
     tokio::spawn(async move {
+        let mut tx = tx;
         let mut guard = owned.host.lock().await;
-        if owned.ticket.load(Ordering::SeqCst) != ticket {
+        if owned.stale.swap(false, Ordering::SeqCst) {
+            *guard = None;
+        }
+        if owned.ticket.load(Ordering::SeqCst) != ticket || tx.is_closed() {
             let _ = tx.send(None);
             return;
         }
@@ -60,26 +87,61 @@ pub(super) async fn call(
                 }
             }
         }
-        let outcome = {
-            let Some(host) = guard.as_mut() else {
-                let _ = tx.send(None);
-                return;
-            };
-            match tokio::time::timeout(limit, host.exchange(&line)).await {
-                Ok(Ok(reply)) => {
-                    host.last_used = Instant::now();
-                    Ok(reply)
+        let Some(host) = guard.as_mut() else {
+            let _ = tx.send(None);
+            return;
+        };
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        *host
+            .pending
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(Pending {
+            reply: reply_tx,
+            partial: Some(Box::new(partial)),
+        });
+        let outcome = match host.send(&line).await {
+            Err(error) => Outcome::Write(error),
+            Ok(()) => {
+                let wait = tokio::time::timeout(limit, reply_rx);
+                tokio::select! {
+                    _ = tx.closed() => Outcome::CallerGone,
+                    out = wait => match out {
+                        Ok(Ok(reply)) => Outcome::Reply(reply),
+                        Ok(Err(_)) => Outcome::HostGone,
+                        Err(_) => Outcome::Timeout,
+                    },
                 }
-                Ok(Err(error)) => Err(format!("failed: {error}")),
-                Err(_) => Err(format!("overran {}ms and was killed", limit.as_millis())),
             }
         };
+        if let Some(host) = guard.as_mut() {
+            *host
+                .pending
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()) = None;
+        }
         match outcome {
-            Ok(reply) => {
+            Outcome::Reply(reply) => {
+                if let Some(host) = guard.as_mut() {
+                    host.last_used = Instant::now();
+                }
                 let _ = tx.send(Some(reply));
             }
-            Err(error) => {
-                eprintln!("wayrun-core: resident host {command} {error}");
+            Outcome::CallerGone => *guard = None,
+            Outcome::HostGone => {
+                eprintln!("wayrun-core: resident host {command} closed its pipe");
+                *guard = None;
+                let _ = tx.send(None);
+            }
+            Outcome::Write(error) => {
+                eprintln!("wayrun-core: resident host {command} failed: {error}");
+                *guard = None;
+                let _ = tx.send(None);
+            }
+            Outcome::Timeout => {
+                eprintln!(
+                    "wayrun-core: resident host {command} overran {}ms and was killed",
+                    limit.as_millis()
+                );
                 *guard = None;
                 let _ = tx.send(None);
             }
@@ -88,14 +150,37 @@ pub(super) async fn call(
     rx.await.ok().flatten()
 }
 
+enum Outcome {
+    Reply(serde_json::Value),
+    /// The caller dropped its receiver; nobody will read a reply.
+    CallerGone,
+    /// The reply channel closed: the reader task saw the host's pipe end.
+    HostGone,
+    Timeout,
+    Write(io::Error),
+}
+
 async fn spawn(command: &str) -> io::Result<Host> {
-    let mut child = Command::new(command)
-        .kill_on_drop(true)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
+    let mut tries = 0;
+    let mut child = loop {
         // A resident host lives in the unit's journal: its warnings are ours.
-        .stderr(std::process::Stdio::inherit())
-        .spawn()?;
+        let spawned = Command::new(command)
+            .kill_on_drop(true)
+            .stdin(process::Stdio::piped())
+            .stdout(process::Stdio::piped())
+            .stderr(process::Stdio::inherit())
+            .spawn();
+        match spawned {
+            Ok(child) => break child,
+            // Another thread's fork held a just-written script open until it
+            // exec'd; a brief retry outlasts that window.
+            Err(error) if error.kind() == io::ErrorKind::ExecutableFileBusy && tries < 3 => {
+                tries += 1;
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+            Err(error) => return Err(error),
+        }
+    };
     let stdin = child
         .stdin
         .take()
@@ -104,30 +189,45 @@ async fn spawn(command: &str) -> io::Result<Host> {
         .stdout
         .take()
         .ok_or_else(|| io::Error::other("no stdout pipe"))?;
+    let pending: Arc<Mutex<Option<Pending>>> = Arc::new(Mutex::new(None));
+    tokio::spawn(read_lines(
+        BufReader::new(stdout).lines(),
+        Arc::clone(&pending),
+    ));
     Ok(Host {
         _child: child,
         stdin,
-        stdout: BufReader::new(stdout),
         last_used: Instant::now(),
+        pending,
     })
 }
 
+/// The host's stdout, read for the process's life: an id-less line is a
+/// partial for the exchange in flight, a line with an id is its reply.
+async fn read_lines(
+    mut lines: Lines<BufReader<ChildStdout>>,
+    pending: Arc<Mutex<Option<Pending>>>,
+) {
+    while let Ok(Some(line)) = lines.next_line().await {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let mut guard = pending.lock().unwrap_or_else(|error| error.into_inner());
+        if value.get("id").is_some() {
+            if let Some(pending) = guard.take() {
+                let _ = pending.reply.send(value);
+            }
+        } else if let Some(partial) = guard.as_mut().and_then(|pending| pending.partial.as_mut()) {
+            partial(value);
+        }
+    }
+}
+
 impl Host {
-    /// One request line in, one response line out; a short or unparseable line
-    /// names a host that cannot be resynchronized, so the caller replaces it.
-    async fn exchange(&mut self, line: &str) -> io::Result<serde_json::Value> {
+    async fn send(&mut self, line: &str) -> io::Result<()> {
         self.stdin.write_all(line.as_bytes()).await?;
         self.stdin.write_all(b"\n").await?;
-        self.stdin.flush().await?;
-        let mut reply = String::new();
-        if self.stdout.read_line(&mut reply).await? == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "the host closed its pipe",
-            ));
-        }
-        serde_json::from_str(reply.trim())
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+        self.stdin.flush().await
     }
 }
 
@@ -136,13 +236,14 @@ fn slot_for(command: &str) -> Arc<Slot> {
     Arc::clone(slots.entry(command.to_string()).or_insert_with(|| {
         Arc::new(Slot {
             ticket: AtomicU64::new(0),
+            stale: AtomicBool::new(false),
             host: tokio::sync::Mutex::new(None),
         })
     }))
 }
 
 fn ensure_reaper() {
-    static REAPER: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    static REAPER: OnceLock<()> = OnceLock::new();
     REAPER.get_or_init(|| {
         tokio::spawn(async {
             loop {
@@ -157,6 +258,18 @@ fn ensure_reaper() {
 /// the session kept warm goes with it.
 pub(crate) fn reap_all() {
     reap(Duration::ZERO, None);
+}
+
+/// Drop `command`'s host now; one busy with a call is marked so its next call
+/// starts from the new script instead.
+pub(crate) fn reap_command(command: &str) {
+    {
+        let slots = SLOTS.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(slot) = slots.get(command) {
+            slot.stale.store(true, Ordering::SeqCst);
+        }
+    }
+    reap(Duration::ZERO, Some(command));
 }
 
 /// Kill the hosts idle past `idle` and forget the slots whose host is gone;
@@ -184,6 +297,8 @@ fn reap(idle: Duration, only: Option<&str>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::Path;
 
     // Functional tests, not latency tests: the suite runs in parallel with
     // process spawns of its own, so a call gets a load-tolerant deadline.
@@ -196,12 +311,12 @@ mod tests {
         use std::io::Write;
         use std::os::unix::fs::PermissionsExt;
         let path = dir.path().join(name);
-        let mut file = std::fs::File::create(&path).unwrap();
+        let mut file = fs::File::create(&path).unwrap();
         file.write_all(body.as_bytes()).unwrap();
         drop(file);
-        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
         perms.set_mode(0o755);
-        std::fs::set_permissions(&path, perms).unwrap();
+        fs::set_permissions(&path, perms).unwrap();
         path.display().to_string()
     }
 
@@ -210,7 +325,7 @@ mod tests {
     }
 
     /// A counting host: one `start` line per process, one reply per request.
-    fn echo_host(dir: &tempfile::TempDir, counter: &std::path::Path) -> String {
+    fn echo_host(dir: &tempfile::TempDir, counter: &Path) -> String {
         script(
             dir,
             "echo.sh",
@@ -221,8 +336,8 @@ mod tests {
         )
     }
 
-    fn starts(counter: &std::path::Path) -> usize {
-        std::fs::read_to_string(counter).unwrap().lines().count()
+    fn starts(counter: &Path) -> usize {
+        fs::read_to_string(counter).unwrap().lines().count()
     }
 
     #[tokio::test]
@@ -257,6 +372,20 @@ mod tests {
         assert!(call(&command, &request(), limit).await.is_none());
         assert!(call(&command, &request(), limit).await.is_none());
         assert_eq!(starts(&counter), 2, "the stalled host was replaced");
+    }
+
+    #[tokio::test]
+    async fn a_reaped_command_starts_a_fresh_host() {
+        let _serial = SERIAL.lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let counter = dir.path().join("starts");
+        let command = echo_host(&dir, &counter);
+        assert!(call(&command, &request(), LIMIT).await.is_some());
+        assert_eq!(starts(&counter), 1);
+
+        reap_command(&command);
+        assert!(call(&command, &request(), LIMIT).await.is_some());
+        assert_eq!(starts(&counter), 2, "the reaped host was replaced");
     }
 
     #[tokio::test]
@@ -305,7 +434,7 @@ mod tests {
         });
         // Wait until the first call is inside the host, so the next two queue.
         for _ in 0..200 {
-            if std::fs::read_to_string(&served).is_ok_and(|text| !text.is_empty()) {
+            if fs::read_to_string(&served).is_ok_and(|text| !text.is_empty()) {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -330,7 +459,7 @@ mod tests {
         assert!(first.await.unwrap().is_some());
         assert!(second.await.unwrap().is_none(), "overtaken while it waited");
         assert!(third.await.unwrap().is_some());
-        assert_eq!(std::fs::read_to_string(&served).unwrap().lines().count(), 2);
+        assert_eq!(fs::read_to_string(&served).unwrap().lines().count(), 2);
     }
 
     #[tokio::test]
@@ -382,5 +511,56 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         panic!("a dead slot is forgotten");
+    }
+
+    #[tokio::test]
+    async fn a_dropped_call_replaces_its_host() {
+        let _serial = SERIAL.lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let counter = dir.path().join("starts");
+        let command = script(
+            &dir,
+            "slow.sh",
+            &format!(
+                "#!/bin/sh\necho start >> {}\nread line\ncase \"$line\" in *slow*) sleep 10 ;; esac\nprintf '%s\\n' '{{\"jsonrpc\":\"2.0\",\"result\":\"pong\",\"id\":1}}'\n",
+                counter.display()
+            ),
+        );
+        let slow =
+            serde_json::json!({"jsonrpc":"2.0","method":"search","params":{"text":"slow"},"id":1});
+
+        let timed_out =
+            tokio::time::timeout(Duration::from_millis(500), call(&command, &slow, LIMIT)).await;
+        assert!(timed_out.is_err(), "the slow call did not answer");
+        assert_eq!(starts(&counter), 1);
+
+        let reply = tokio::time::timeout(Duration::from_secs(1), call(&command, &request(), LIMIT))
+            .await
+            .expect("a dropped call frees the host")
+            .expect("the new host answers");
+        assert_eq!(reply["result"], "pong");
+        assert_eq!(starts(&counter), 2);
+    }
+
+    #[tokio::test]
+    async fn a_resident_host_streams_partials() {
+        let _serial = SERIAL.lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let command = script(
+            &dir,
+            "stream.sh",
+            "#!/bin/sh\nwhile IFS= read -r line; do\nprintf '%s\\n' '{\"jsonrpc\":\"2.0\",\"method\":\"partial\",\"params\":{\"id\":1,\"rows\":[{\"title\":\"first\"}]}}'\nprintf '%s\\n' '{\"jsonrpc\":\"2.0\",\"result\":\"pong\",\"id\":1}'\ndone\n",
+        );
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let reply = call_stream(&command, &request(), LIMIT, move |value| {
+            let _ = tx.try_send(value);
+        })
+        .await;
+        assert_eq!(reply.unwrap()["result"], "pong");
+        let partial = rx.try_recv().expect("the partial was forwarded");
+        assert_eq!(partial["params"]["rows"][0]["title"], "first");
+
+        // The same process answers the next call.
+        assert!(call(&command, &request(), LIMIT).await.is_some());
     }
 }

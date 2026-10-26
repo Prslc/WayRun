@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::Path;
 
 use crate::provider::file::index::builder::build;
@@ -6,9 +7,9 @@ use crate::wire::ResultItem;
 
 pub(super) fn write(path: &Path) {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).unwrap();
+        fs::create_dir_all(parent).unwrap();
     }
-    std::fs::write(path, "x").unwrap();
+    fs::write(path, "x").unwrap();
 }
 
 pub(super) fn parsed<'a>(bytes: &'a [u8], home: &Path) -> Index<'a> {

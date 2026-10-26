@@ -5,6 +5,8 @@ mod scan;
 mod test_support;
 mod update;
 
+use std::fs;
+use std::io;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -176,9 +178,9 @@ pub fn discard() {
     let Some(path) = path() else {
         return;
     };
-    let _ = std::fs::remove_file(&path);
+    let _ = fs::remove_file(&path);
     // Only this process's staging file; another core's is its own business.
-    let _ = std::fs::remove_file(crate::system::fs::tmp_path(&path));
+    let _ = fs::remove_file(crate::system::fs::tmp_path(&path));
 }
 
 /// Unmap an index nothing has used for [`IDLE`], so an idle launcher holds no
@@ -353,7 +355,7 @@ fn refresh(home: &Path) {
     // `write_all` would hold both copies at the peak
     let mut shape = (0u32, 0u32, 0usize);
     let write = crate::system::fs::write_atomic_with(&path, |file| {
-        let mut buf = std::io::BufWriter::new(file);
+        let mut buf = io::BufWriter::new(file);
         shape = tables.write_into(home, exclude, &mut buf)?;
         buf.flush()
     });
@@ -392,18 +394,18 @@ fn path() -> Option<PathBuf> {
 }
 
 fn load() -> Option<Mmap> {
-    let file = std::fs::File::open(path()?).ok()?;
+    let file = fs::File::open(path()?).ok()?;
     // SAFETY: the cache is only ever replaced by an atomic rename, never
     // written in place or truncated, so the mapping stays valid.
     unsafe { Mmap::map(&file).ok() }
 }
 
 pub(super) fn mtime_ns(path: &Path) -> Option<i64> {
-    mtime_of(&std::fs::metadata(path).ok()?)
+    mtime_of(&fs::metadata(path).ok()?)
 }
 
 /// A stat's mtime, in nanoseconds since the epoch; negative before it.
-fn mtime_of(meta: &std::fs::Metadata) -> Option<i64> {
+fn mtime_of(meta: &fs::Metadata) -> Option<i64> {
     match meta.modified().ok()?.duration_since(UNIX_EPOCH) {
         Ok(since) => Some(since.as_nanos() as i64),
         Err(before) => Some(-(before.duration().as_nanos() as i64)),
@@ -413,7 +415,7 @@ fn mtime_of(meta: &std::fs::Metadata) -> Option<i64> {
 /// The cache image's identity, `(mtime_ns, size)`. It is replaced only by an
 /// atomic rename, so a sweep's verdict can be tied to the image it came from.
 fn image_id() -> Option<(i64, u64)> {
-    let meta = std::fs::metadata(path()?).ok()?;
+    let meta = fs::metadata(path()?).ok()?;
     Some((mtime_of(&meta)?, meta.len()))
 }
 

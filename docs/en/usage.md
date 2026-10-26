@@ -14,15 +14,14 @@ shows no rows.
 | `d <query>` | search directories by path (multi-token) |
 | `r <query>` | fuzzy-search `$PATH` executables and run one |
 | `w <query>` | switch focus to a matching open window |
-| `c <query>` | search clipboard history (cliphist) |
 | `?` | show keyword modes, default functions, hints and each plugin's remembered default action |
 | `lock` / `reboot` / `shutdown` | system commands |
 | `2 + 3` | inline calculator |
 
-Some prefixes need an optional component: `w` a compositor backend, `c`
-cliphist, and copy/paste `wl-clipboard`. Without it, the keyword returns no
-rows. Anything else a `plugins.toml` host registers — the WayRun-Plugins
-workspace's Firefox and web search among them — adds its own keyword the same
+Some prefixes need an optional component: `w` a compositor backend, and
+copy/paste `wl-clipboard`. Without it, the keyword returns no rows. Anything
+else a `plugins.toml` host registers — the WayRun-Plugins workspace's Firefox,
+web search and clipboard history among them — adds its own keyword the same
 way; the full dependency list is in the
 [README](../../README.md#feature-dependencies).
 
@@ -58,8 +57,9 @@ first level of `$HOME` is listed the same way.
 `Shift+Enter` opens a Wox-style second level for the highlighted row: the
 commands that type of result offers. It leads with the row's own command
 (**Open**), then the actions its plugin adds for that type — a file row offers
-"Open in terminal", "Reveal in file manager" and "Copy path", an application row
-lists its `[Desktop Action …]` groups — then anything an external host attached.
+"Open in terminal", "Reveal in file manager" and "Copy path", then the system's
+other handlers for the content type ("Open with …"); an application row lists
+its `[Desktop Action …]` groups — then anything an external host attached.
 The dot marks the entry `Enter` runs, so **Open** carries it until a default is
 remembered. A row with no command to offer has no panel at all, so the footer
 hides its actions hint.

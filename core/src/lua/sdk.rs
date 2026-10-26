@@ -1,9 +1,15 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::env;
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::process;
 use std::rc::Rc;
-use std::time::UNIX_EPOCH;
+use std::time::SystemTime;
+use std::time::{Duration, UNIX_EPOCH};
 
+use gio::prelude::FileExt;
 use mlua::{Lua, LuaSerdeExt, Table, Value};
 
 use super::areas;
@@ -11,16 +17,16 @@ use super::crypto;
 use super::fuzzy;
 use super::http;
 use super::kv;
+use super::log::Log;
 use super::sqlite;
-use super::warn;
-
-/// The plugin directories this script may read from, one per declared id;
-/// filled after the script is read, resolved by the bindings at call time.
-pub(super) type Scope = Rc<RefCell<Vec<PathBuf>>>;
 
 /// Every declared plugin's readable environment names, by plugin id; filled
 /// after the script is read, refused for a name the calling plugin omits.
 pub(super) type EnvScope = Rc<RefCell<HashMap<String, Vec<String>>>>;
+
+/// Every declared plugin's runnable program names, by plugin id; a name the
+/// calling plugin omits is refused.
+pub(super) type ExecScope = Rc<RefCell<HashMap<String, Vec<String>>>>;
 
 /// `$XDG_CONFIG_HOME/wayrun/plugins/<id>`, the directory a plugin reads its own
 /// files from; the user places them, nothing here is created for the script.
@@ -28,36 +34,38 @@ pub(super) fn plugin_dir(id: &str) -> Option<PathBuf> {
     Some(crate::config::dir()?.join("plugins").join(id))
 }
 
-/// The text of `name` under the first scope root that holds it; `Ok(None)`
-/// when none does, and an error when the name itself is not allowed.
-fn scoped_read(roots: &[PathBuf], name: &str) -> Result<Option<String>, String> {
-    let allowed = !name.is_empty()
-        && !name.starts_with('/')
-        && !name
-            .split('/')
-            .any(|part| part.is_empty() || part == "." || part == "..");
-    if !allowed {
-        return Err("name must be a relative path without `..`".to_string());
-    }
-    for root in roots {
-        match std::fs::read_to_string(root.join(name)) {
-            Ok(text) => return Ok(Some(text)),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error.to_string()),
-        }
-    }
-    Ok(None)
+/// `$XDG_CACHE_HOME/wayrun/plugins/<id>`, created on demand by `fs.write`.
+pub(super) fn plugin_cache_dir(id: &str) -> Option<PathBuf> {
+    Some(crate::system::fs::cache_root()?.join("plugins").join(id))
 }
 
-pub(super) fn build(
-    lua: &Lua,
-    script: &str,
-    scope: Scope,
-    active: kv::Active,
-    paths: kv::Paths,
-    env_scope: EnvScope,
-    read_areas: areas::Areas,
-) -> mlua::Result<Table> {
+/// The scope handles a script's bindings share: filled after the plugin table
+/// is read, then resolved by id at call time.
+pub(super) struct Shared {
+    pub active: kv::Active,
+    pub kv_paths: kv::Paths,
+    pub env_scope: EnvScope,
+    pub exec_scope: ExecScope,
+    pub read_areas: areas::Areas,
+}
+
+/// The session variables a declared program keeps: enough to reach a socket or
+/// a display, with the rest of the launcher's environment hidden.
+const EXEC_ENV: [&str; 8] = [
+    "PATH",
+    "HOME",
+    "XDG_RUNTIME_DIR",
+    "XDG_CONFIG_HOME",
+    "XDG_STATE_HOME",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "WAYLAND_DISPLAY",
+    "DISPLAY",
+];
+const EXEC_TIMEOUT: Duration = Duration::from_millis(1500);
+const EXEC_STDOUT_CAP: usize = 1024 * 1024;
+const EXEC_STDERR_CAP: usize = 8 * 1024;
+
+pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua::Result<Table> {
     let sdk = lua.create_table()?;
     sdk.set(
         "home",
@@ -82,8 +90,17 @@ pub(super) fn build(
         "urlencode",
         lua.create_function(|_, text: String| Ok(urlencoding::encode(&text).into_owned()))?,
     )?;
+    sdk.set(
+        "file_uri",
+        lua.create_function(|_, path: String| Ok(file_uri(&path)))?,
+    )?;
     sdk.set("time", lua.create_function(|_, ()| Ok(now_seconds()))?)?;
-    let env_active = Rc::clone(&active);
+    sdk.set(
+        "locale",
+        lua.create_function(|_, ()| Ok(rust_i18n::locale()))?,
+    )?;
+    let env_active = Rc::clone(&shared.active);
+    let env_scope = Rc::clone(&shared.env_scope);
     sdk.set(
         "env",
         lua.create_function(move |_, name: String| {
@@ -98,17 +115,33 @@ pub(super) fn build(
                 .is_some_and(|names| names.contains(&name));
             if !allowed {
                 return Err(mlua::Error::RuntimeError(format!(
-                    "env {name}: plugin {id} does not declare it"
+                    "env {name}: plugin {id} does not declare it; add the name to the plugin table's env"
                 )));
             }
-            Ok(std::env::var(name).ok())
+            Ok(env::var(name).ok())
         })?,
     )?;
     sdk.set(
         "which",
         lua.create_function(|_, name: String| {
-            let path = std::env::var_os("PATH").unwrap_or_default();
+            let path = env::var_os("PATH").unwrap_or_default();
             Ok(crate::system::fs::which_in(path, &name).map(|path| path.display().to_string()))
+        })?,
+    )?;
+    let exec_active = Rc::clone(&shared.active);
+    let exec_scope = Rc::clone(&shared.exec_scope);
+    let exec_env = Rc::clone(&shared.env_scope);
+    sdk.set(
+        "exec",
+        lua.create_function(move |lua, (program, args): (String, Option<Vec<String>>)| {
+            exec_program(
+                lua,
+                &program,
+                args.unwrap_or_default(),
+                &exec_active,
+                &exec_scope,
+                &exec_env,
+            )
         })?,
     )?;
     let dir = script_dir(script);
@@ -123,35 +156,51 @@ pub(super) fn build(
             Ok(plugin_dir(&id).map(|dir| dir.display().to_string()))
         })?,
     )?;
-    let name = script.to_string();
+    sdk.set(
+        "plugin_cache_dir",
+        lua.create_function(|_, id: String| {
+            Ok(plugin_cache_dir(&id).map(|dir| dir.display().to_string()))
+        })?,
+    )?;
     sdk.set(
         "log",
         lua.create_function(move |_, message: String| {
-            warn(&name, &message);
+            log.write(&message);
             Ok(())
         })?,
     )?;
-    let guard: areas::Guard = {
-        let read_areas = Rc::clone(&read_areas);
-        let guard_active = Rc::clone(&active);
+    let read_guard: areas::Guard = {
+        let read_areas = Rc::clone(&shared.read_areas);
+        let guard_active = Rc::clone(&shared.active);
         let script = dir.clone();
         Rc::new(move |path: &str| {
             let Some(id) = guard_active.borrow().clone() else {
                 return Err("this read ran outside a plugin call".to_string());
             };
-            let mut roots = read_areas.borrow().get(&id).cloned().unwrap_or_default();
-            if let Some(own) = plugin_dir(&id) {
-                roots.push(own);
-            }
-            if let Some(dir) = &script {
-                roots.push(dir.clone());
-            }
-            areas::check(&roots, path)
+            let Some(own) = plugin_dir(&id) else {
+                return Err("no plugin directory".to_string());
+            };
+            let cache = plugin_cache_dir(&id);
+            let areas = read_areas.borrow();
+            let declared = areas.get(&id).map(Vec::as_slice).unwrap_or(&[]);
+            read_path(&own, cache.as_deref(), declared, script.as_deref(), path)
+        })
+    };
+    let write_guard: areas::Guard = {
+        let guard_active = Rc::clone(&shared.active);
+        Rc::new(move |path: &str| {
+            let Some(id) = guard_active.borrow().clone() else {
+                return Err("this write ran outside a plugin call".to_string());
+            };
+            let Some(own) = plugin_dir(&id) else {
+                return Err("no plugin directory".to_string());
+            };
+            write_path(&own, plugin_cache_dir(&id).as_deref(), path)
         })
     };
     sdk.set("json", json_lib(lua)?)?;
     sdk.set("toml", toml_lib(lua)?)?;
-    sdk.set("fs", fs_lib(lua, scope, Rc::clone(&guard))?)?;
+    sdk.set("fs", fs_lib(lua, Rc::clone(&read_guard), write_guard)?)?;
     let stores: kv::Handle = Rc::new(RefCell::new(kv::Stores::default()));
     sdk.set(
         "http",
@@ -159,29 +208,111 @@ pub(super) fn build(
             lua,
             script,
             Rc::clone(&stores),
-            Rc::clone(&active),
-            Rc::clone(&paths),
+            Rc::clone(&shared.active),
+            Rc::clone(&shared.kv_paths),
         )?,
     )?;
-    sdk.set("sqlite", sqlite::lib(lua, guard)?)?;
-    sdk.set("kv", kv::lib(lua, stores, active, paths)?)?;
+    sdk.set("sqlite", sqlite::lib(lua, read_guard)?)?;
+    sdk.set(
+        "kv",
+        kv::lib(
+            lua,
+            stores,
+            Rc::clone(&shared.active),
+            Rc::clone(&shared.kv_paths),
+        )?,
+    )?;
     sdk.set("fuzzy", fuzzy::lib(lua)?)?;
     sdk.set("crypto", crypto::lib(lua)?)?;
     Ok(sdk)
 }
 
+/// Run a declared PATH program with argv and a deadline. The plugin's declared
+/// `env` names survive `env_clear`, so `exec("env")` cannot widen that list.
+fn exec_program(
+    lua: &Lua,
+    program: &str,
+    args: Vec<String>,
+    active: &kv::Active,
+    exec_scope: &ExecScope,
+    env_scope: &EnvScope,
+) -> mlua::Result<Table> {
+    let Some(id) = active.borrow().clone() else {
+        return Err(mlua::Error::RuntimeError(format!(
+            "exec {program}: this call ran outside a plugin call"
+        )));
+    };
+    let declared = exec_scope.borrow().get(&id).cloned().unwrap_or_default();
+    if !declared.iter().any(|name| name == program) {
+        return Err(mlua::Error::RuntimeError(format!(
+            "exec {program}: plugin {id} does not declare it; add the name to the plugin table's exec"
+        )));
+    }
+    let path = crate::system::fs::which_in(env::var_os("PATH").unwrap_or_default(), program)
+        .ok_or_else(|| {
+            mlua::Error::RuntimeError(format!("exec {program}: not on the launcher's PATH"))
+        })?;
+    let mut command = process::Command::new(path);
+    command.args(&args).env_clear();
+    if let Ok(home) = crate::system::fs::get_home() {
+        command.current_dir(home);
+    }
+    for name in EXEC_ENV {
+        if let Some(value) = env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    let declared_env = env_scope.borrow().get(&id).cloned().unwrap_or_default();
+    for name in declared_env {
+        if let Some(value) = env::var_os(&name) {
+            command.env(name, value);
+        }
+    }
+    let output = crate::system::process::output_within_capped(
+        command,
+        EXEC_TIMEOUT,
+        EXEC_STDOUT_CAP,
+        EXEC_STDERR_CAP,
+    )
+    .ok_or_else(|| {
+        mlua::Error::RuntimeError(format!(
+            "exec {program}: could not start, or still running after {}s",
+            EXEC_TIMEOUT.as_secs_f32()
+        ))
+    })?;
+
+    let result = lua.create_table()?;
+    result.set("code", output.status.code().unwrap_or(-1))?;
+    result.set(
+        "stdout",
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+    )?;
+    result.set(
+        "stderr",
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )?;
+    Ok(result)
+}
+
+/// The `file://` URI for an absolute path, encoded by GLib exactly as a built-in
+/// row's action is; a relative path has no meaning to the launcher.
+pub(super) fn file_uri(path: &str) -> Option<String> {
+    path.starts_with('/')
+        .then(|| gio::File::for_path(path).uri().to_string())
+}
+
 /// Unix seconds, the host clock a signature or a cache TTL needs.
 pub(super) fn now_seconds() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         .map(|since| since.as_secs() as i64)
         .unwrap_or(0)
 }
 
 /// The script's own directory, so a plugin can ship an icon beside itself; the
 /// host has just read the file, so canonicalize only fails in theory.
-fn script_dir(script: &str) -> Option<PathBuf> {
-    let path = std::fs::canonicalize(script).unwrap_or_else(|_| PathBuf::from(script));
+pub(super) fn script_dir(script: &str) -> Option<PathBuf> {
+    let path = fs::canonicalize(script).unwrap_or_else(|_| PathBuf::from(script));
     path.parent().map(|dir| dir.to_path_buf())
 }
 
@@ -223,18 +354,70 @@ fn toml_lib(lua: &Lua) -> mlua::Result<Table> {
     Ok(toml)
 }
 
-fn fs_lib(lua: &Lua, scope: Scope, guard: areas::Guard) -> mlua::Result<Table> {
-    let fs = lua.create_table()?;
-    let list_guard = Rc::clone(&guard);
-    fs.set(
+/// A read path: relative names live under the plugin's own directory; absolute
+/// and `~/` paths must lie in a declared area, that directory or the script's.
+fn read_path(
+    own: &Path,
+    cache: Option<&Path>,
+    declared: &[PathBuf],
+    script: Option<&Path>,
+    path: &str,
+) -> Result<PathBuf, String> {
+    if areas::relative(path) {
+        return areas::inside(own, path);
+    }
+    let mut roots = declared.to_vec();
+    roots.push(own.to_path_buf());
+    if let Some(cache) = cache {
+        roots.push(cache.to_path_buf());
+    }
+    if let Some(dir) = script {
+        roots.push(dir.to_path_buf());
+    }
+    areas::check(&roots, path)
+}
+
+/// A write path: the plugin directory or its cache, never the kv store.
+fn write_path(own: &Path, cache: Option<&Path>, path: &str) -> Result<PathBuf, String> {
+    let own = areas::resolve(own);
+    let cache = cache.map(areas::resolve);
+    let resolved = if areas::relative(path) {
+        areas::inside(&own, path)?
+    } else {
+        let Some(expanded) = areas::expand(path) else {
+            return Err("the name must be absolute or start with ~/".to_string());
+        };
+        let resolved = areas::resolve(&expanded);
+        let in_cache = cache
+            .as_ref()
+            .is_some_and(|cache| resolved.starts_with(cache));
+        if !resolved.starts_with(&own) && !in_cache {
+            return Err("writes stay inside the plugin directory or its cache".to_string());
+        }
+        resolved
+    };
+    if resolved.starts_with(&own) {
+        let name = resolved
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if matches!(name, "kv.db" | "kv.db-wal" | "kv.db-shm" | "kv.db-journal") {
+            return Err("kv owns this file".to_string());
+        }
+    }
+    Ok(resolved)
+}
+
+fn fs_lib(lua: &Lua, read: areas::Guard, write: areas::Guard) -> mlua::Result<Table> {
+    let lib = lua.create_table()?;
+    let list_guard = Rc::clone(&read);
+    lib.set(
         "list",
         lua.create_function(move |lua, dir: String| {
-            if let Err(problem) = list_guard(&dir) {
-                return Err(mlua::Error::RuntimeError(format!(
-                    "fs.list {dir:?}: {problem}"
-                )));
-            }
-            let Ok(entries) = std::fs::read_dir(&dir) else {
+            let dir = list_guard(&dir).map_err(|problem| {
+                mlua::Error::RuntimeError(format!("fs.list {dir:?}: {problem}"))
+            })?;
+            let Ok(entries) = fs::read_dir(&dir) else {
                 return Ok(Value::Nil);
             };
             // readdir order is unspecified; sort so the listing is stable.
@@ -250,16 +433,14 @@ fn fs_lib(lua: &Lua, scope: Scope, guard: areas::Guard) -> mlua::Result<Table> {
             Ok(Value::Table(list))
         })?,
     )?;
-    let stat_guard = Rc::clone(&guard);
-    fs.set(
+    let stat_guard = Rc::clone(&read);
+    lib.set(
         "stat",
         lua.create_function(move |lua, path: String| {
-            if let Err(problem) = stat_guard(&path) {
-                return Err(mlua::Error::RuntimeError(format!(
-                    "fs.stat {path:?}: {problem}"
-                )));
-            }
-            let Ok(meta) = std::fs::metadata(&path) else {
+            let path = stat_guard(&path).map_err(|problem| {
+                mlua::Error::RuntimeError(format!("fs.stat {path:?}: {problem}"))
+            })?;
+            let Ok(meta) = fs::metadata(&path) else {
                 return Ok(Value::Nil);
             };
             let mtime_ns = meta
@@ -274,19 +455,59 @@ fn fs_lib(lua: &Lua, scope: Scope, guard: areas::Guard) -> mlua::Result<Table> {
             Ok(Value::Table(stat))
         })?,
     )?;
-    fs.set(
+    lib.set(
         "read",
-        lua.create_function(
-            move |lua, name: String| match scoped_read(&scope.borrow(), &name) {
-                Ok(Some(text)) => Ok(Value::String(lua.create_string(text)?)),
-                Ok(None) => Ok(Value::Nil),
-                Err(problem) => Err(mlua::Error::RuntimeError(format!(
-                    "fs.read {name:?}: {problem}"
+        lua.create_function(move |lua, name: String| {
+            let path = read(&name).map_err(|problem| {
+                mlua::Error::RuntimeError(format!("fs.read {name:?}: {problem}"))
+            })?;
+            match fs::read_to_string(&path) {
+                Ok(text) => Ok(Value::String(lua.create_string(text)?)),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Value::Nil),
+                Err(error) => Err(mlua::Error::RuntimeError(format!(
+                    "fs.read {name:?}: {error}"
                 ))),
-            },
-        )?,
+            }
+        })?,
     )?;
-    Ok(fs)
+    let delete_guard = Rc::clone(&write);
+    lib.set(
+        "write",
+        lua.create_function(move |_, (path, data): (String, mlua::LuaString)| {
+            let target = write(&path).map_err(|problem| {
+                mlua::Error::RuntimeError(format!("fs.write {path:?}: {problem}"))
+            })?;
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(|error| {
+                    mlua::Error::RuntimeError(format!("fs.write {path:?}: {error}"))
+                })?;
+            }
+            fs::write(&target, data.as_bytes()).map_err(|error| {
+                mlua::Error::RuntimeError(format!("fs.write {path:?}: {error}"))
+            })?;
+            Ok(true)
+        })?,
+    )?;
+    lib.set(
+        "delete",
+        lua.create_function(move |_, path: String| {
+            let target = delete_guard(&path).map_err(|problem| {
+                mlua::Error::RuntimeError(format!("fs.delete {path:?}: {problem}"))
+            })?;
+            delete_path(&target)
+                .map_err(|error| mlua::Error::RuntimeError(format!("fs.delete {path:?}: {error}")))
+        })?,
+    )?;
+    Ok(lib)
+}
+
+/// Remove one file; an absent file is already what the caller asked for.
+fn delete_path(target: &Path) -> io::Result<bool> {
+    match fs::remove_file(target) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(test)]
@@ -297,40 +518,165 @@ mod tests {
     use super::*;
 
     #[test]
-    fn scoped_read_stays_inside_its_roots() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("config.toml"), "a = 1").unwrap();
-        std::fs::create_dir(dir.path().join("sub")).unwrap();
-        std::fs::write(dir.path().join("sub/data.txt"), "x").unwrap();
-        let roots = vec![dir.path().to_path_buf()];
+    fn a_read_path_uses_the_plugin_dir_or_a_declared_area() {
+        let own = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let area = tempfile::tempdir().unwrap();
+        let script = tempfile::tempdir().unwrap();
+        fs::write(own.path().join("local.txt"), "x").unwrap();
+        fs::write(cache.path().join("cached.bin"), "z").unwrap();
+        fs::write(area.path().join("note.txt"), "y").unwrap();
+        let declared = [area.path().to_path_buf()];
+        let script_dir = script.path().to_path_buf();
 
+        assert!(
+            read_path(
+                own.path(),
+                Some(cache.path()),
+                &declared,
+                Some(&script_dir),
+                "local.txt"
+            )
+            .is_ok()
+        );
+        assert!(
+            read_path(
+                own.path(),
+                Some(cache.path()),
+                &declared,
+                Some(&script_dir),
+                cache.path().join("cached.bin").to_str().unwrap()
+            )
+            .is_ok(),
+            "the plugin cache is readable"
+        );
+        assert!(
+            read_path(
+                own.path(),
+                Some(cache.path()),
+                &declared,
+                Some(&script_dir),
+                area.path().join("note.txt").to_str().unwrap()
+            )
+            .is_ok()
+        );
+        assert!(
+            read_path(
+                own.path(),
+                Some(cache.path()),
+                &declared,
+                Some(&script_dir),
+                script.path().join("shipped.txt").to_str().unwrap()
+            )
+            .is_ok(),
+            "the script's own directory is readable"
+        );
+        assert!(
+            read_path(
+                own.path(),
+                Some(cache.path()),
+                &declared,
+                Some(&script_dir),
+                "/etc/hostname"
+            )
+            .is_err()
+        );
+        assert!(
+            read_path(
+                own.path(),
+                Some(cache.path()),
+                &declared,
+                Some(&script_dir),
+                "../escape"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn a_file_uri_percent_encodes_an_absolute_path() {
         assert_eq!(
-            scoped_read(&roots, "config.toml").unwrap().as_deref(),
-            Some("a = 1")
+            file_uri("/tmp/a b.png").as_deref(),
+            Some("file:///tmp/a%20b.png")
         );
         assert_eq!(
-            scoped_read(&roots, "sub/data.txt").unwrap().as_deref(),
-            Some("x")
+            file_uri("/tmp/中文.txt").as_deref(),
+            Some("file:///tmp/%E4%B8%AD%E6%96%87.txt")
         );
-        assert_eq!(scoped_read(&roots, "missing.txt").unwrap(), None);
-        assert!(scoped_read(&roots, "../escape.txt").is_err());
-        assert!(scoped_read(&roots, "a/../b").is_err());
-        assert!(scoped_read(&roots, "/etc/hostname").is_err());
-        assert!(scoped_read(&roots, "").is_err());
+        assert_eq!(file_uri("relative.png"), None);
+    }
+
+    #[test]
+    fn a_write_path_stays_in_the_plugin_dir_and_leaves_kv_alone() {
+        let own = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        assert!(write_path(own.path(), Some(cache.path()), "data/cache.json").is_ok());
+        assert!(
+            write_path(
+                own.path(),
+                Some(cache.path()),
+                own.path().join("x.json").to_str().unwrap()
+            )
+            .is_ok()
+        );
+        assert!(
+            write_path(
+                own.path(),
+                Some(cache.path()),
+                cache.path().join("avatars/x.png").to_str().unwrap()
+            )
+            .is_ok(),
+            "the plugin cache is writable"
+        );
+        assert!(write_path(own.path(), Some(cache.path()), "kv.db").is_err());
+        assert!(write_path(own.path(), Some(cache.path()), "kv.db-wal").is_err());
+        assert!(write_path(own.path(), Some(cache.path()), "/etc/hostname").is_err());
+        assert!(write_path(own.path(), Some(cache.path()), "../escape").is_err());
+    }
+
+    #[test]
+    fn deleting_a_file_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("x");
+        fs::write(&file, "x").unwrap();
+        assert!(delete_path(&file).unwrap());
+        assert!(
+            delete_path(&file).unwrap(),
+            "a missing file is already gone"
+        );
+        assert!(
+            delete_path(dir.path()).is_err(),
+            "a directory is not a file"
+        );
     }
 
     /// Every name the sandbox binds, one level into a sub-table: the leaves the
     /// reference page has to name, read off the built table, not the source.
     fn sdk_names() -> BTreeSet<String> {
         let lua = Lua::new_with(mlua::StdLib::ALL_SAFE, mlua::LuaOptions::default()).unwrap();
+        let active = Rc::new(RefCell::new(None));
+        let shared = Shared {
+            active: Rc::clone(&active),
+            kv_paths: Rc::new(RefCell::new(HashMap::new())),
+            env_scope: Rc::new(RefCell::new(HashMap::new())),
+            exec_scope: Rc::new(RefCell::new(HashMap::new())),
+            read_areas: Rc::new(RefCell::new(HashMap::new())),
+        };
         let table = build(
             &lua,
             "/test/script.lua",
-            Rc::new(RefCell::new(Vec::new())),
-            Rc::new(RefCell::new(None)),
-            Rc::new(RefCell::new(HashMap::new())),
-            Rc::new(RefCell::new(HashMap::new())),
-            Rc::new(RefCell::new(HashMap::new())),
+            &shared,
+            Log::new("/test/script.lua", Rc::clone(&active)),
+        )
+        .unwrap();
+        // `wayrun.import` is bound by the sandbox, after the environment exists.
+        let imports = Rc::new(RefCell::new(Vec::new()));
+        crate::lua::sandbox::script_env(
+            &lua,
+            &table,
+            "/test/script.lua",
+            Log::new("/test/script.lua", active),
+            &imports,
         )
         .unwrap();
         let mut names = BTreeSet::new();
@@ -355,7 +701,15 @@ mod tests {
         let mut names = BTreeSet::new();
         let mut rest = text;
         while let Some(at) = rest.find("wayrun.") {
+            // a path such as lua/wayrun.lua is not a binding
+            let standalone = rest[..at]
+                .chars()
+                .next_back()
+                .is_none_or(|c| !c.is_alphanumeric() && c != '_' && c != '/');
             rest = &rest[at + "wayrun.".len()..];
+            if !standalone {
+                continue;
+            }
             let name: String = rest
                 .chars()
                 .take_while(|c| {
@@ -376,7 +730,60 @@ mod tests {
             .join("docs")
             .join(locale)
             .join("lua.md");
-        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
+        fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
+    }
+
+    fn stub() -> String {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("the core lives in the workspace")
+            .join("lua")
+            .join("wayrun.lua");
+        fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
+    }
+
+    /// The `wayrun.<name>` declarations a LuaLS stub file holds; a parent table
+    /// assignment (`wayrun.fs = {}`) is a name in its own right.
+    fn stub_names(text: &str) -> BTreeSet<String> {
+        let mut names = BTreeSet::new();
+        for line in text.lines() {
+            let line = line.trim();
+            let rest = line
+                .strip_prefix("function wayrun.")
+                .or_else(|| line.strip_prefix("wayrun."));
+            let Some(rest) = rest else { continue };
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '.')
+                .collect();
+            if !name.is_empty() {
+                names.insert(name);
+            }
+        }
+        names
+    }
+
+    #[test]
+    fn the_lua_stub_names_every_binding() {
+        let names = sdk_names();
+        let stub = stub_names(&stub());
+        let missing: Vec<&String> = names.difference(&stub).collect();
+        assert!(missing.is_empty(), "bound but not stubbed: {missing:?}");
+    }
+
+    #[test]
+    fn the_lua_stub_names_nothing_missing() {
+        let names = sdk_names();
+        let stub = stub_names(&stub());
+        let stale: Vec<&String> = stub
+            .difference(&names)
+            .filter(|name| {
+                !stub
+                    .iter()
+                    .any(|other| other.starts_with(&format!("{name}.")))
+            })
+            .collect();
+        assert!(stale.is_empty(), "stubbed but not bound: {stale:?}");
     }
 
     #[test]

@@ -18,10 +18,21 @@ impl Shell {
 
     /// Re-send the current query, leaving a pending panel resume in place.
     fn resend_query(&mut self) {
+        let now = Instant::now();
         if self.app.query.is_empty() {
             // No query is no result set: the list clears in place.
-            self.app.apply_results(Vec::new(), Instant::now());
+            self.app.apply_results(Vec::new(), now);
             self.redraw();
+        } else if self.app.search_sent(now) {
+            let _ = self.loop_handle.insert_source(
+                Timer::from_duration(app::SEARCH_LOADING_DELAY),
+                move |_, _, state: &mut Shell| {
+                    if state.app.search_started == Some(now) {
+                        state.redraw();
+                    }
+                    TimeoutAction::Drop
+                },
+            );
         }
         backend::search(&self.app.query);
     }
@@ -29,6 +40,12 @@ impl Shell {
     /// Usage recording first, then exactly one command line to the core.
     pub(super) fn submit(&mut self, now: Instant) {
         if self.app.preedit_active {
+            return;
+        }
+
+        // The rows on screen still answer the previous query; wait for the one
+        // the field has already asked for instead of launching a stale row.
+        if self.app.hold_submit() {
             return;
         }
 
@@ -74,6 +91,7 @@ impl Shell {
         if self.app.preedit_active {
             return;
         }
+        self.app.cancel_held_submit();
         if self.app.open_actions() {
             self.app.retarget_height(now);
             self.app.resync_hover();

@@ -2,8 +2,22 @@
 
 `$XDG_CONFIG_HOME/wayrun/plugins.toml` (default
 `~/.config/wayrun/plugins.toml`) is the plugin registry. It is generated on the
-first run as a commented template and is watched, so an edit is picked up without
-restarting.
+first run from the shipped defaults and is watched, so an edit is picked up
+without restarting.
+
+`wayrun plugin list` prints the effective registry — ids, names, keywords, icons
+and any disabled entry — with the user file already merged over the built-ins.
+
+`wayrun plugin add <script.lua> [--keyword K] [--resident]` registers a Lua host:
+it loads the script, refuses a missing shebang or exec bit, an id already
+configured, or a keyword another enabled entry owns, then appends the entry (the
+keyword defaults to the plugin id). `wayrun plugin enable|disable <id>` writes or
+edits the user entry for an id, a built-in included, and `wayrun plugin
+set-keyword <id> <keyword>` changes its routing keyword the same way; an empty
+keyword puts the plugin in the default chain. `wayrun plugin remove <id>` drops a
+user entry, leaving a built-in at its shipped default. Edits keep the file's
+comments and are written at once; a running launcher picks the file up through
+its watcher.
 
 ## Entry fields
 
@@ -37,6 +51,11 @@ then by the row's usage count, then by entry order. A title match therefore lead
 a description match of comparable strength, while an exact keyword still beats a
 title the query only sits inside of.
 
+A provider that cannot score an item (an external host) lists its rows instead:
+they sit below every scored row and fill the remaining slots in the provider's
+own order. A keyword-less external host is bounded by a short deadline in that
+chain, so a stalled host never delays the card.
+
 ## Built-in plugins
 
 | Id | Keyword | What it searches | Needs |
@@ -48,7 +67,6 @@ title the query only sits inside of.
 | `runner` | `r` | Fuzzy `$PATH` executables; accepts arguments. An installed app launches through GLib (honoring `Terminal=`), anything else runs in a terminal. | a terminal emulator |
 | `file-search` | `f` | Files under the home directory, at any depth. | — |
 | `path-search` | `d` | Directories under the home directory, at any depth. | — |
-| `clipboard` | `c` | Clipboard history. | `cliphist` running |
 | `window` | `w` | Open windows (niri or Hyprland, per build). | the matching compositor backend |
 
 A keyword whose dependency is absent returns no rows instead of failing.
@@ -61,7 +79,8 @@ instead; they then keep no cache.
 
 A result row can carry secondary commands, shown in the `Shift+Enter` panel. They
 differ by result type: `file-search`/`path-search` offer "Open in terminal",
-"Reveal in file manager" and "Copy path", `app-search` lists the entry's
+"Reveal in file manager" and "Copy path", then the system's other handlers for
+the content type ("Open with …"); `app-search` lists the entry's
 `[Desktop Action …]` groups, and an external host's rows carry whatever `actions`
 it attaches (the workspace's `web.lua` offers "Copy URL"). The row's own command
 leads the panel, and an external host's own `actions` follow the plugin's.
@@ -81,16 +100,31 @@ is bounded by a short timeout, so a stalled host cannot hang the launcher.
 `resident = true` keeps one host process alive across calls instead — about a
 millisecond per call against the fresh process's several. The host is dropped
 when the launcher dismisses, when it sits idle for two minutes, or when a call
-crashes or stalls; the next call starts a new one. The host must be stateless
-per call either way, but it may cache within its process lifetime.
+crashes or stalls; the next call starts a new one. An edit to the configured
+script is picked up on the next call too. The host must be stateless per call
+either way, but it may cache within its process lifetime.
 
-Both the identity `icon` and each result `icon` must be an absolute path — a
-file the host ships itself (`wayrun.script_dir()` locates the script's own
-directory) or a theme icon the Lua SDK's `wayrun.icon()` resolved; the same
-holds for an action's `icon`. A `builtin:` glyph, or a theme name or `papirus:`
-spec left unresolved, counts as no icon. A result whose own icon is missing
-falls back to the plugin's identity icon, and the built-in placeholder answers
-when that is missing too.
+The identity `icon` and an action's `icon` must be an absolute path: a file the
+host ships itself (`wayrun.script_dir()` locates the script's own directory) or
+a theme icon the Lua SDK's `wayrun.icon()` resolved. A result's own `icon` is an
+absolute path too, or an `https://` URL: the core fetches it in the background
+into its icon cache and hands the shell a local path, so the row draws at once
+and fills in when the image lands. A `builtin:` glyph, or a theme name or
+`papirus:` spec left unresolved, counts as no icon. A result whose own icon is
+missing falls back to the plugin's identity icon, and the built-in placeholder
+answers when that is missing too. A row may set `icon_shape = "circle"` to clip
+its icon box, as an avatar needs.
+
+A plugin that needs other network data (an API cache, a non-image file) still
+fetches and caches it itself; result icons and preview images are the core's.
+
+A host's `search` error is shown as one display-only row whose summary is the
+first line of the error message; a `top` error keeps the identity card.
+
+A host inherits the launcher's resolved locale as `WAYRUN_LOCALE`, the stem its
+own tables use (`en`, `zh_cn`, …); it owns its catalog and fallback, and the
+launcher never translates plugin text. [lua.md](lua.md#localisation) has the Lua
+pattern.
 
 Every plugin names the API version it targets — a host in its `list_plugins`
 identity, a Lua script in its plugin table — and the launcher logs a mismatch

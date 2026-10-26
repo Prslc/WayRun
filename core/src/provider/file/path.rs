@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::wire::ResultItem;
@@ -122,7 +123,7 @@ pub(super) fn resolve_dir(query: &str, home: &Path) -> Option<PathBuf> {
         }
 
         let lower = part.to_lowercase();
-        let found = std::fs::read_dir(&base)
+        let found = fs::read_dir(&base)
             .ok()?
             .flatten()
             .find(|entry| entry.file_name().to_string_lossy().to_lowercase() == lower)
@@ -150,13 +151,14 @@ pub(super) fn exact_path(query: &str, home: &Path) -> Option<PathBuf> {
 /// A stat'd path as one row, or `None` when it is not the kind this provider
 /// lists (`f` files, `d` directories).
 pub(super) fn path_item(path: &Path, want_dir: bool) -> Option<ResultItem> {
-    let is_dir = std::fs::metadata(path).ok()?.is_dir();
+    let is_dir = fs::metadata(path).ok()?.is_dir();
     (is_dir == want_dir).then(|| entry_item(path, is_dir))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
 
     fn tokens(query: &str) -> Vec<&str> {
         query.split_whitespace().collect()
@@ -257,7 +259,7 @@ mod tests {
 
     #[test]
     fn an_absolute_path_is_allowed_outside_home_but_a_relative_escape_is_not() {
-        let home = std::env::temp_dir();
+        let home = env::temp_dir();
         if Path::new("/etc/hosts").exists() {
             let canonical = Path::new("/etc/hosts").canonicalize().unwrap();
             assert_eq!(exact_path("/etc/hosts", &home), Some(canonical));

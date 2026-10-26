@@ -9,9 +9,6 @@ plugin.calculator.ready: 输入数学表达式
 plugin.app.name: 应用
 plugin.app.ready: 搜索已安装的应用
 
-plugin.clipboard.name: 剪贴板历史
-plugin.clipboard.ready: 搜索剪贴板历史
-
 plugin.file.name: 文件
 plugin.file.ready: 按名称或路径搜索文件
 
@@ -31,6 +28,7 @@ plugin.window.name: 窗口
 plugin.window.ready: 切换已打开的窗口
 
 plugin.external.ready: 来自 %{command} 的外部插件
+plugin.search_failed: 搜索失败
 
 command.lock: 锁定
 command.suspend: 挂起
@@ -39,6 +37,7 @@ command.shutdown: 关机
 command.logout: 注销
 
 action.open: 打开
+action.open_with: "用 %{app} 打开"
 action.copy_path: 复制路径
 action.reveal: 在文件管理器中显示
 action.terminal: 在终端中打开
@@ -60,6 +59,7 @@ footer.default: 设为默认
 footer.clear_default: 清除默认
 footer.back: 返回
 footer.no_results: 无匹配结果
+footer.searching: 搜索中…
 footer.count_action_one: 1 个动作
 footer.count_action_many: "%{count} 个动作"
 footer.count_result_one: 1 条结果

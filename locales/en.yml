@@ -10,9 +10,6 @@ plugin.calculator.ready: Enter a math expression
 plugin.app.name: Applications
 plugin.app.ready: Search installed applications
 
-plugin.clipboard.name: Clipboard History
-plugin.clipboard.ready: Search clipboard history
-
 plugin.file.name: Files
 plugin.file.ready: Search files by name or path
 
@@ -32,6 +29,7 @@ plugin.window.name: Window
 plugin.window.ready: Switch open windows
 
 plugin.external.ready: External plugin via %{command}
+plugin.search_failed: Search failed
 
 command.lock: Lock
 command.suspend: Suspend
@@ -40,6 +38,7 @@ command.shutdown: Shutdown
 command.logout: Logout
 
 action.open: Open
+action.open_with: "Open with %{app}"
 action.copy_path: Copy path
 action.reveal: Reveal in file manager
 action.terminal: Open in terminal
@@ -61,6 +60,7 @@ footer.default: Default
 footer.clear_default: Clear default
 footer.back: Back
 footer.no_results: No results
+footer.searching: Searching…
 footer.count_action_one: 1 action
 footer.count_action_many: "%{count} actions"
 footer.count_result_one: 1 result

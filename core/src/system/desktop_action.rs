@@ -77,9 +77,8 @@ pub fn entry(id: &str, locales: Option<&[String]>) -> Option<DesktopEntry> {
     DesktopEntry::from_path(&path, locales).ok()
 }
 
-/// The locale list every `.desktop` read localises through, from
-/// `g_get_language_names()`; `.encoding` variants are dropped so `zh_CN` matches.
-/// One list for the whole core, so a row and the `%c` it launches with agree.
+/// The locale list every `.desktop` read uses, from `g_get_language_names()`;
+/// `.encoding` variants are dropped so `zh_CN` matches; rows and their `%c` agree.
 pub fn locales() -> Vec<String> {
     locales_from(gio::glib::language_names().into_iter().map(Into::into))
 }
@@ -323,6 +322,7 @@ fn launch_with_glib(desktop_id: &str, action_id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     const ENTRY: &str = "\
 [Desktop Entry]
@@ -369,8 +369,8 @@ Exec=nautilus %i --profile \"100%% sure\"
     fn a_nested_desktop_file_flattens_its_id() {
         let dir = tempfile::tempdir().unwrap();
         let nested = dir.path().join("wine/Programs/app.desktop");
-        std::fs::create_dir_all(nested.parent().unwrap()).unwrap();
-        std::fs::write(&nested, "[Desktop Entry]\nName=App\nExec=/bin/true\n").unwrap();
+        fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        fs::write(&nested, "[Desktop Entry]\nName=App\nExec=/bin/true\n").unwrap();
         assert_eq!(
             find_nested(dir.path(), "wine-Programs-app.desktop"),
             Some(nested)

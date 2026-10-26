@@ -1,0 +1,352 @@
+use crate::config::{ColorOverrides, Mode, SurfaceOverride, SurfaceOverrides};
+use crate::geom::HAIRLINE_W;
+use wayrun_core::wire::ThemeConfig;
+
+/// The three base roles every surface derives from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Theme {
+    pub primary: [u8; 3],
+    pub fg: [u8; 3],
+    pub container: [u8; 3],
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Self {
+            primary: [0x7a, 0xa2, 0xf7],
+            fg: [0xc0, 0xca, 0xf5],
+            container: [0x24, 0x28, 0x3b],
+        }
+    }
+}
+
+impl Theme {
+    /// Field-by-field: a missing or unparseable entry keeps the fallback.
+    pub fn from_config(config: &ThemeConfig) -> Self {
+        let fallback = Self::default();
+
+        Self {
+            primary: config
+                .primary
+                .as_deref()
+                .and_then(parse_hex)
+                .unwrap_or(fallback.primary),
+            fg: config
+                .fg
+                .as_deref()
+                .and_then(parse_hex)
+                .unwrap_or(fallback.fg),
+            container: config
+                .container
+                .as_deref()
+                .and_then(parse_hex)
+                .unwrap_or(fallback.container),
+        }
+    }
+
+    /// The system theme with `theme.toml`'s per-field overrides on top; a key
+    /// the file does not set keeps tracking the system.
+    pub fn overlay(system: Self, colors: &ColorOverrides) -> Self {
+        Self {
+            primary: colors.primary.unwrap_or(system.primary),
+            fg: colors.fg.unwrap_or(system.fg),
+            container: colors.container.unwrap_or(system.container),
+        }
+    }
+}
+
+const CARD_ALPHA: f32 = 0.72;
+/// A dark card sits over a blurred wallpaper: more opacity keeps the backdrop's
+/// warm patches from bleeding through.
+const CARD_ALPHA_DARK: f32 = 0.85;
+const SELECTION_ALPHA: f32 = 0.15;
+const HOVER_ALPHA: f32 = 0.08;
+/// The split view's preview pane: a tonal column, not a bordered box.
+const PREVIEW_ALPHA: f32 = 0.05;
+/// White over a dark card reads as a bright ring; black over a light one is
+/// the visible edge, while white there is nearly the card's own colour.
+const HAIRLINE_ALPHA: f32 = 0.10;
+const HAIRLINE_ALPHA_DARK: f32 = 0.12;
+const MUTED_ALPHA: f32 = 0.55;
+const SUMMARY_ALPHA: f32 = 0.7;
+const FOOTER_ALPHA: f32 = 0.5;
+const ACCENT_ALPHA: f32 = 1.0;
+
+/// The backdrop dim's shipped colour and alpha, overridden by `[colors].dim`.
+pub const DEFAULT_DIM: [u8; 4] = [0, 0, 0, alpha_u8(0.3)];
+
+/// The per-surface colours the renderer draws: a base role at its shipped alpha
+/// by default, or the `theme.toml` override with its own fields.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Surfaces {
+    pub card: [u8; 4],
+    pub selection: [u8; 4],
+    pub hover: [u8; 4],
+    pub preview: [u8; 4],
+    pub hairline: [u8; 4],
+    pub hairline_width: f32,
+    pub muted: [u8; 4],
+    pub summary: [u8; 4],
+    pub footer: [u8; 4],
+    pub accent: [u8; 4],
+    pub dim: [u8; 4],
+}
+
+impl Surfaces {
+    /// The surfaces derived from the theme, with `[colors].dim` then the
+    /// `[surfaces]` overrides on top; an unset field keeps deriving.
+    pub fn resolve(
+        theme: Theme,
+        colors: &ColorOverrides,
+        overrides: &SurfaceOverrides,
+        mode: Mode,
+    ) -> Self {
+        let mut surfaces = Self::derive(theme, mode);
+        if let Some(color) = colors.dim {
+            surfaces.dim = color;
+        }
+        if let Some(width) = overrides.hairline.and_then(|entry| entry.width) {
+            surfaces.hairline_width = width;
+        }
+        apply_override(&mut surfaces.card, overrides.card.as_ref());
+        apply_override(&mut surfaces.selection, overrides.selection.as_ref());
+        apply_override(&mut surfaces.hover, overrides.hover.as_ref());
+        apply_override(&mut surfaces.preview, overrides.preview.as_ref());
+        apply_override(&mut surfaces.hairline, overrides.hairline.as_ref());
+        apply_override(&mut surfaces.muted, overrides.muted.as_ref());
+        apply_override(&mut surfaces.summary, overrides.summary.as_ref());
+        apply_override(&mut surfaces.footer, overrides.footer.as_ref());
+        apply_override(&mut surfaces.accent, overrides.accent.as_ref());
+        apply_override(&mut surfaces.dim, overrides.dim.as_ref());
+        surfaces
+    }
+
+    fn derive(theme: Theme, mode: Mode) -> Self {
+        let dark = mode == Mode::Dark;
+        Self {
+            card: tint(
+                theme.container,
+                if dark { CARD_ALPHA_DARK } else { CARD_ALPHA },
+            ),
+            selection: tint(theme.primary, SELECTION_ALPHA),
+            hover: tint(theme.primary, HOVER_ALPHA),
+            preview: tint(theme.primary, PREVIEW_ALPHA),
+            hairline: if dark {
+                [255, 255, 255, alpha_u8(HAIRLINE_ALPHA_DARK)]
+            } else {
+                [0, 0, 0, alpha_u8(HAIRLINE_ALPHA)]
+            },
+            hairline_width: HAIRLINE_W,
+            muted: tint(theme.fg, MUTED_ALPHA),
+            summary: tint(theme.fg, SUMMARY_ALPHA),
+            footer: tint(theme.fg, FOOTER_ALPHA),
+            accent: tint(theme.primary, ACCENT_ALPHA),
+            dim: DEFAULT_DIM,
+        }
+    }
+}
+
+fn tint(rgb: [u8; 3], alpha: f32) -> [u8; 4] {
+    [rgb[0], rgb[1], rgb[2], alpha_u8(alpha)]
+}
+
+fn apply_override(surface: &mut [u8; 4], entry: Option<&SurfaceOverride>) {
+    let Some(entry) = entry else {
+        return;
+    };
+    if let Some(rgb) = entry.color {
+        surface[..3].copy_from_slice(&rgb);
+    }
+    if let Some(alpha) = entry.alpha {
+        surface[3] = alpha_u8(alpha);
+    }
+}
+
+/// Rounds to the nearest 8-bit alpha; `round` is not const.
+const fn alpha_u8(alpha: f32) -> u8 {
+    (alpha * 255.0 + 0.5) as u8
+}
+
+/// `#rrggbb` (or `#rgb`), nothing else: the base roles are RGB, the surfaces in
+/// `[colors]` take the alpha-carrying [`parse_color`] instead.
+pub fn parse_hex(spec: &str) -> Option<[u8; 3]> {
+    let hex = spec.trim().strip_prefix('#')?;
+    if !hex.is_ascii() {
+        return None;
+    }
+
+    let byte = |at: usize| u8::from_str_radix(&hex[at..at + 2], 16).ok();
+    match hex.len() {
+        6 => Some([byte(0)?, byte(2)?, byte(4)?]),
+        3 => {
+            let one = |at: usize| {
+                u8::from_str_radix(&hex[at..at + 1], 16)
+                    .ok()
+                    .map(|v| v * 17)
+            };
+            Some([one(0)?, one(1)?, one(2)?])
+        }
+        _ => None,
+    }
+}
+
+/// `#rrggbb`, `#rgb`, `#rrggbbaa` or `#rgba`; a missing alpha is opaque.
+pub fn parse_color(spec: &str) -> Option<[u8; 4]> {
+    let hex = spec.trim().strip_prefix('#')?;
+    if !hex.is_ascii() {
+        return None;
+    }
+
+    let byte = |at: usize| u8::from_str_radix(&hex[at..at + 2], 16).ok();
+    let nibble = |at: usize| {
+        u8::from_str_radix(&hex[at..at + 1], 16)
+            .ok()
+            .map(|v| v * 17)
+    };
+    match hex.len() {
+        6 => Some([byte(0)?, byte(2)?, byte(4)?, 255]),
+        8 => Some([byte(0)?, byte(2)?, byte(4)?, byte(6)?]),
+        3 => Some([nibble(0)?, nibble(1)?, nibble(2)?, 255]),
+        4 => Some([nibble(0)?, nibble(1)?, nibble(2)?, nibble(3)?]),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wayrun_core::wire::ThemeConfig;
+
+    #[test]
+    fn parses_hex_and_falls_back() {
+        let config = ThemeConfig {
+            mode: None,
+            primary: Some("#7aa2f7".into()),
+            on_primary: None,
+            bg: None,
+            fg: Some("nonsense".into()),
+            container: None,
+        };
+        let theme = Theme::from_config(&config);
+        assert_eq!(theme.primary, [0x7a, 0xa2, 0xf7]);
+        assert_eq!(theme.fg, Theme::default().fg);
+        assert_eq!(theme.container, Theme::default().container);
+    }
+
+    #[test]
+    fn non_ascii_values_do_not_panic() {
+        assert!(parse_hex("主色").is_none());
+        assert!(parse_hex("#主色").is_none());
+        assert!(parse_hex("🦀🦀🦀").is_none());
+        assert!(parse_hex("#abc").is_some());
+    }
+
+    #[test]
+    fn a_colour_carries_its_alpha_but_a_role_does_not() {
+        assert_eq!(parse_color("#112233").unwrap(), [0x11, 0x22, 0x33, 255]);
+        assert_eq!(parse_color("#1234").unwrap(), [0x11, 0x22, 0x33, 0x44]);
+        assert_eq!(parse_color("#11223380").unwrap(), [0x11, 0x22, 0x33, 0x80]);
+        // a base role is RGB-only, so an eight-digit spec is not a role colour
+        assert!(parse_hex("#11223380").is_none());
+        assert!(parse_color("nonsense").is_none());
+    }
+
+    #[test]
+    fn overrides_win_field_by_field() {
+        let system = Theme {
+            primary: [1, 2, 3],
+            fg: [4, 5, 6],
+            container: [7, 8, 9],
+        };
+        let colors = ColorOverrides {
+            primary: Some([0xaa, 0xbb, 0xcc]),
+            container: Some([0x11, 0x22, 0x33]),
+            ..ColorOverrides::default()
+        };
+        let theme = Theme::overlay(system, &colors);
+        assert_eq!(theme.primary, [0xaa, 0xbb, 0xcc]);
+        assert_eq!(theme.fg, [4, 5, 6]);
+        assert_eq!(theme.container, [0x11, 0x22, 0x33]);
+    }
+
+    #[test]
+    fn a_surface_derives_from_its_role_except_dim() {
+        let theme = Theme::default();
+        let light = Surfaces::resolve(
+            theme,
+            &ColorOverrides::default(),
+            &SurfaceOverrides::default(),
+            Mode::Light,
+        );
+        assert_eq!(light.card, tint(theme.container, CARD_ALPHA));
+        assert_eq!(light.hairline[..3], [0, 0, 0]);
+        assert_eq!(light.hairline[3], alpha_u8(HAIRLINE_ALPHA));
+
+        let dark = Surfaces::resolve(
+            theme,
+            &ColorOverrides::default(),
+            &SurfaceOverrides::default(),
+            Mode::Dark,
+        );
+        assert_eq!(dark.card, tint(theme.container, CARD_ALPHA_DARK));
+        assert_eq!(dark.hairline[..3], [255, 255, 255]);
+        assert_eq!(dark.hairline[3], alpha_u8(HAIRLINE_ALPHA_DARK));
+        assert_eq!(dark.muted, tint(theme.fg, MUTED_ALPHA));
+        assert_eq!(dark.accent, tint(theme.primary, ACCENT_ALPHA));
+        assert_eq!(dark.preview, tint(theme.primary, PREVIEW_ALPHA));
+        assert_eq!(dark.dim, DEFAULT_DIM);
+
+        let colors = ColorOverrides {
+            dim: parse_color("#010203cc"),
+            ..ColorOverrides::default()
+        };
+        let overridden =
+            Surfaces::resolve(theme, &colors, &SurfaceOverrides::default(), Mode::Dark);
+        assert_eq!(overridden.dim, [1, 2, 3, 0xcc]);
+        // every other surface still derives
+        assert_eq!(overridden.card, tint(theme.container, CARD_ALPHA_DARK));
+    }
+
+    #[test]
+    fn a_surface_override_pins_only_what_it_states() {
+        let theme = Theme::default();
+        let overrides = SurfaceOverrides {
+            card: Some(SurfaceOverride {
+                color: Some([1, 2, 3]),
+                ..SurfaceOverride::default()
+            }),
+            muted: Some(SurfaceOverride {
+                alpha: Some(0.25),
+                ..SurfaceOverride::default()
+            }),
+            dim: Some(SurfaceOverride {
+                color: Some([9, 9, 9]),
+                alpha: Some(0.5),
+                ..SurfaceOverride::default()
+            }),
+            hairline: Some(SurfaceOverride {
+                width: Some(2.5),
+                ..SurfaceOverride::default()
+            }),
+            ..SurfaceOverrides::default()
+        };
+        let colors = ColorOverrides {
+            dim: parse_color("#010203cc"),
+            ..ColorOverrides::default()
+        };
+        let surfaces = Surfaces::resolve(theme, &colors, &overrides, Mode::Dark);
+
+        // a colour keeps the shipped alpha, and an alpha keeps the derived colour
+        assert_eq!(surfaces.card, [1, 2, 3, alpha_u8(CARD_ALPHA_DARK)]);
+        assert_eq!(surfaces.muted, tint(theme.fg, 0.25));
+        // `[surfaces]` layers over `[colors].dim`, and an unset surface derives
+        assert_eq!(surfaces.dim, [9, 9, 9, alpha_u8(0.5)]);
+        assert_eq!(surfaces.selection, tint(theme.primary, SELECTION_ALPHA));
+        // a width pins the edge without touching its colour
+        assert_eq!(surfaces.hairline_width, 2.5);
+        assert_eq!(
+            surfaces.hairline,
+            [255, 255, 255, alpha_u8(HAIRLINE_ALPHA_DARK)]
+        );
+    }
+}

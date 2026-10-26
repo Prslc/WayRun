@@ -35,6 +35,19 @@ pub enum Action {
     Open {
         uri: String,
     },
+    /// Open one URI with a named handler instead of the default one.
+    OpenWith {
+        desktop_id: String,
+        uri: String,
+    },
+    /// Hand a named command back to its plugin's host, with a payload only the
+    /// plugin interprets; the host runs it in the plugin's own sandbox.
+    Plugin {
+        plugin: String,
+        action: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        payload: Option<serde_json::Value>,
+    },
 }
 
 impl Action {
@@ -69,12 +82,36 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+/// What the selected row shows beside the list, tagged by `type` like `Action`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum Preview {
+    Image { path: String },
+    Text { text: String },
+}
+
+/// The shape an icon box is clipped to; absent draws the icon as it is.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum IconShape {
+    #[default]
+    Square,
+    Circle,
+}
+
+/// One result row, shared by the core, the shell and the UI.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ResultItem {
     pub title: String,
     pub summary: Option<String>,
     pub on_click: Option<Action>,
     pub icon: Option<String>,
+    /// Clip the icon box to this shape; absent draws the file as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_shape: Option<IconShape>,
+    /// An optional split-view payload for the selected row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<Preview>,
     /// Secondary commands for the row's action panel. Built-ins are attached by
     /// the core before emitting; a host may supply its own.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -106,7 +143,6 @@ pub struct ThemeConfig {
 pub const BUILTIN_GLYPHS: &[&str] = &[
     "app",
     "calculator",
-    "clipboard",
     "copy",
     "file",
     "folder",
@@ -123,3 +159,69 @@ pub const BUILTIN_GLYPHS: &[&str] = &[
 
 /// The spec a missing icon falls back to; its name is in [`BUILTIN_GLYPHS`].
 pub const BUILTIN_FALLBACK: &str = "builtin:app";
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn a_plugin_action_carries_its_payload_and_omits_an_absent_one() {
+        let action = Action::Plugin {
+            plugin: "note".into(),
+            action: "new".into(),
+            payload: Some(json!({ "title": "x" })),
+        };
+        assert_eq!(
+            serde_json::to_value(&action).unwrap(),
+            json!({
+                "type": "plugin",
+                "plugin": "note",
+                "action": "new",
+                "payload": { "title": "x" },
+            })
+        );
+
+        let bare = Action::Plugin {
+            plugin: "note".into(),
+            action: "new".into(),
+            payload: None,
+        };
+        let value = serde_json::to_value(&bare).unwrap();
+        assert_eq!(
+            value,
+            json!({ "type": "plugin", "plugin": "note", "action": "new" })
+        );
+    }
+
+    #[test]
+    fn a_row_omits_an_unset_icon_shape() {
+        let row = ResultItem {
+            title: "x".into(),
+            summary: None,
+            on_click: None,
+            icon: None,
+            icon_shape: None,
+            preview: None,
+            actions: Vec::new(),
+        };
+        let value = serde_json::to_value(&row).unwrap();
+        assert!(value.get("icon_shape").is_none());
+    }
+
+    #[test]
+    fn a_circle_icon_shape_round_trips() {
+        let row: ResultItem = serde_json::from_value(json!({
+            "title": "x",
+            "summary": null,
+            "on_click": null,
+            "icon": "/a.png",
+            "icon_shape": "circle",
+        }))
+        .unwrap();
+        assert_eq!(row.icon_shape, Some(IconShape::Circle));
+        let value = serde_json::to_value(&row).unwrap();
+        assert_eq!(value["icon_shape"], "circle");
+    }
+}

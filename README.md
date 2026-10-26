@@ -34,8 +34,8 @@ needs no GPU stack and no GUI toolkit.
 
 - **Launcher** — fuzzy search of installed applications, launched the way the
   desktop itself would, with Flatpak apps and themed icons per row.
-- **Quick search** — files and paths, clipboard history, `$PATH` commands,
-  open windows, system commands, and inline math.
+- **Quick search** — files and paths, `$PATH` commands, open windows, system
+  commands, and inline math.
 - **Action panel** — `Shift+Enter` opens a per-type action menu (reveal a
   file, run a desktop action, copy a link).
 - **Themeable** — follows DankMaterialShell's Material You palette, with
@@ -60,14 +60,13 @@ needs no GPU stack and no GUI toolkit.
 The overlay, and the built-in app, file and calculator search, need
 nothing beyond the compositor above. Every other feature depends on an optional
 component; when one is missing, the keyword returns no rows rather than an
-error. Extra plugins (Firefox bookmarks and history, web suggestions, and more)
-install from the [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins)
-workspace:
+error. Extra plugins (Firefox bookmarks and history, web suggestions, clipboard
+history, and more) install from the
+[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace:
 
 | Feature | Needs |
 | --- | --- |
 | `w` open-window search | the niri (default) or Hyprland build — see [Compositor backends](#compositor-backends) |
-| `c` clipboard history | [cliphist](https://github.com/sentriz/cliphist) running |
 | copy / paste and the "Copy …" actions | `wl-clipboard` (`wl-copy` / `wl-paste`) |
 | a terminal-only `$PATH` hit (`r`) | a terminal emulator (`$TERMINAL`, else one on `PATH`) |
 | a blurred card | `ext-background-effect-v1` (niri) or the compositor's own blur by namespace |
@@ -107,7 +106,7 @@ compositor-specific (niri and Hyprland examples are in
 [resident mode](docs/en/resident.md)):
 
 ```bash
-wayrun
+wayrun run
 ```
 
 The launcher is a full-screen overlay with a dimmed backdrop and a centered card.
@@ -142,6 +141,11 @@ payloads included:
 Cold start: the first `ping` reply comes back in 10.0 ms, and a cold app
 search takes 24 ms.
 
+A warm panel show — every show after the process's first — commits its first
+frame in 4.4 ms (P95 5.3 ms); that first show takes ~10 ms. The first frame is
+transparent (the entrance starts at alpha 0), so the first visible frame lands
+one refresh later, and the 240 ms fade is deliberate.
+
 <details>
 <summary>Full table, cold start and method</summary>
 
@@ -158,7 +162,6 @@ Warm steady state (3 discarded + 30 measured rounds per run, shuffled):
 | `path-search` | `d download` | 50 | 1.104 | 1.312 | 1.400 |
 | `path-lookup` | `~/` | 15 | 0.500 | 0.609 | 0.689 |
 | `home-fallback` | `Proj` | 1 | 0.263 | 0.345 | 0.444 |
-| `clipboard` | `c a` | 50 | 0.191 | 0.218 | 0.235 |
 | `window` | `w kitty` | 1 | 0.085 | 0.110 | 0.114 |
 
 Cold first call (a fresh `wayrun --core` per run, 3 runs, run 1 shown):
@@ -174,21 +177,28 @@ Cold first call (a fresh `wayrun --core` per run, 3 runs, run 1 shown):
 | `path-search` | `d download` | 50 | loaded | 48.7 | 40.1 |
 | `path-lookup` | `~/` | 15 | — | 23.7 | 14.7 |
 | `home-fallback` | `Proj` | 1 | — | 22.4 | 14.2 |
-| `clipboard` | `c a` | 50 | — | 33.8 | 13.2 |
 | `window` | `w kitty` | 1 | — | 24.0 | 16.5 |
+
+Show latency (IPC open → first committed frame, 3 warmups + 20 shows):
+
+| | Cold | Warm P50 | Warm P95 |
+|---|---|---|---|
+| show | 10.1 ms | 4.4 ms | 5.3 ms |
 
 Measured 2026-10-18 on an AMD Ryzen 5 5500U (6c/12t, `performance` governor),
 Arch Linux, niri 26.04, release build. Warm rows are synchronous `search`
 calls against one resident `--core` over stdin/stdout; cold rows start a fresh
-process each run, timed with GNU time. The real `$HOME` is read, with a 42 MB
-file index over 111k directories and 742k files. `ping` is the harness's own
-round-trip floor, and the clipboard and window rows hit a 500 ms burst cache.
+process each run, timed with GNU time; show rows measure a resident shell's
+`toggle` to its first committed frame (`WAYRUN_TIMING`). The real `$HOME` is
+read, with a 42 MB file index over 111k directories and 742k files. `ping` is
+the harness's own round-trip floor, and the window row hits a 500 ms burst
+cache.
 
 </details>
 
 ## Documentation
 
-- [Usage](docs/en/usage.md) — prefixes, keybindings, and the clipboard.
+- [Usage](docs/en/usage.md) — prefixes, keybindings, and copy/paste.
 - [Resident mode](docs/en/resident.md) — the systemd unit and the control commands.
 - [Theme](docs/en/theme.md) — the system palette and `theme.toml` (colors, blur,
   layout, typography, motion).
@@ -214,5 +224,5 @@ Dual licensed under either of the following, at your option:
 - **Apache-2.0** — [LICENSE-APACHE](LICENSE-APACHE)
 
 The built-in UI glyphs are Google Material Symbols under the Apache License 2.0;
-see [shell/assets/icons/NOTICE](shell/assets/icons/NOTICE) for the attribution and
+see [ui/assets/icons/NOTICE](ui/assets/icons/NOTICE) for the attribution and
 the full license text.

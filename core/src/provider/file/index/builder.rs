@@ -1,9 +1,11 @@
 use std::ffi::{OsStr, OsString};
+use std::fs;
 use std::io::{self, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, PoisonError};
+use std::thread;
 
 use crate::provider::file::index::format::{
     DIR_BLOOM, DIR_REC, DirOut, FILE_BLOOM, FILE_REC, FileOut, HEADER, bloom64, bloom128,
@@ -103,7 +105,7 @@ pub(super) fn read_dir_entries(path: &Path, exclude: &[String]) -> Option<DirEnt
         dirs: Vec::new(),
         files: Vec::new(),
     };
-    for entry in std::fs::read_dir(path).ok()? {
+    for entry in fs::read_dir(path).ok()? {
         let entry = entry.ok()?;
         let name = entry.file_name();
         if !keep_name(&name, exclude) {
@@ -169,7 +171,7 @@ impl Limits {
 
 /// The walk's thread count: one per core, since a directory task is small.
 pub(super) fn walk_threads() -> u32 {
-    std::thread::available_parallelism().map_or(1, |num| num.get() as u32)
+    thread::available_parallelism().map_or(1, |num| num.get() as u32)
 }
 
 /// A pool for one walk, built once per caller: the thread count is the caller's
@@ -434,6 +436,7 @@ mod tests {
     use crate::provider::file::index::MAX_ENTRIES;
     use crate::provider::file::index::scan::search_in;
     use crate::provider::file::index::test_support::{build_ok, parsed, shipped_exclude, write};
+    use std::os::unix::fs::PermissionsExt;
 
     /// The path-mode scans read the stored lowercased path instead of rebuilding
     /// one per query, so what the build stores is what matching depends on.
@@ -579,12 +582,9 @@ mod tests {
 
         // a directory that stats but cannot be listed: root ignores the mode
         // bits, so the case cannot be staged there
-        let chmod = |mode| {
-            std::fs::set_permissions(&home, std::os::unix::fs::PermissionsExt::from_mode(mode))
-                .unwrap()
-        };
+        let chmod = |mode| fs::set_permissions(&home, PermissionsExt::from_mode(mode)).unwrap();
         chmod(0o000);
-        if std::fs::read_dir(&home).is_ok() {
+        if fs::read_dir(&home).is_ok() {
             chmod(0o755);
             return;
         }

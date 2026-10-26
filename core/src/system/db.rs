@@ -5,6 +5,7 @@ pub mod usage;
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex, PoisonError};
 
@@ -58,17 +59,17 @@ fn migrate_legacy_state(new: &Path) {
         }
     }
     if let Some(parent) = old.parent() {
-        let _ = std::fs::remove_dir(parent);
+        let _ = fs::remove_dir(parent);
     }
 }
 
 fn move_file(from: &Path, to: &Path) -> bool {
-    if std::fs::rename(from, to).is_ok() {
+    if fs::rename(from, to).is_ok() {
         return true;
     }
     // `XDG_STATE_HOME` may sit on another filesystem (EXDEV).
-    if std::fs::copy(from, to).is_ok() {
-        let _ = std::fs::remove_file(from);
+    if fs::copy(from, to).is_ok() {
+        let _ = fs::remove_file(from);
         return true;
     }
     false

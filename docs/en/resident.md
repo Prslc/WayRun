@@ -13,12 +13,11 @@ PartOf=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/home/you/.local/bin/wayrun
+ExecStart=/home/you/.local/bin/wayrun run
 # dismissing the launcher is a clean exit, so "on-failure" would be wrong
 Restart=always
 RestartSec=2
-# so commands the launcher runs see ~/.local/bin too
-Environment=PATH=/home/you/.local/bin:/usr/local/bin:/usr/bin:/bin
+# no PATH here: the unit inherits the systemd user manager's environment
 # WAYLAND_DISPLAY/DISPLAY come from the graphical session (imported by the
 # compositor); only XDG_RUNTIME_DIR is set, via the uid-proof `%t` specifier
 Environment=XDG_RUNTIME_DIR=%t
@@ -28,6 +27,12 @@ Environment=WAYRUN_RESIDENT=1
 [Install]
 WantedBy=default.target
 ```
+
+The unit inherits the systemd user manager's environment, so the commands the
+launcher runs see the same `PATH` as your other user services. To add a
+directory (for example `~/.cargo/bin`), put it in `~/.config/environment.d/`
+rather than setting `PATH=` in the unit: a unit-level assignment replaces the
+whole inherited value.
 
 Bind `wayrun toggle` in your compositor's config. Any compositor that can run
 a command on a key works; niri and Hyprland are just the two shown here:
@@ -42,9 +47,10 @@ systemctl --user enable --now wayrun-launcher
 
 The commands are `open` / `close` / `toggle` / `status`, spoken to the socket the
 resident instance owns; `status` prints `visible` or `hidden`. Without
-`WAYRUN_RESIDENT=1`, a plain `wayrun` shows on launch and quits on dismiss. To
-revert, `systemctl --user disable --now wayrun-launcher` and restore the
-spawn-per-hotkey binding.
+`WAYRUN_RESIDENT=1`, `wayrun run` shows on launch and quits on dismiss. A bare
+`wayrun` prints the command list in a terminal; spawned without one — a keybind,
+a unit, a script — it runs the launcher. To revert, `systemctl --user disable
+--now wayrun-launcher` and restore the spawn-per-hotkey binding.
 
 Apps you launch run in their own transient systemd scope
 (`systemd-run --user --scope`), so the unit's memory and CPU stay the launcher's

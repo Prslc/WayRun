@@ -154,12 +154,6 @@ impl State {
         self.anchor.get_or_insert(self.caret);
         self.caret = self.query.len();
     }
-
-    /// The text before the caret, which is what the IME wants as surrounding
-    /// text (only its byte length is reported, since nothing tracks it).
-    pub fn before_caret(&self) -> &str {
-        &self.query[..self.caret]
-    }
 }
 
 /// The byte index where the character before `at` starts; `at` must be a char

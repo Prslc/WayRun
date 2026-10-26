@@ -15,7 +15,8 @@ pub use rank::{
     classify_confident,
 };
 pub use registry::{
-    host_paths, list_plugins, print_list, refresh_hosts, reload, reload_if_changed,
+    add_plugin, entries_for_command, host_paths, list_plugins, print_list, refresh_hosts, reload,
+    reload_if_changed, remove_plugin, run_command, set_enabled, set_keyword,
 };
 pub use search::dispatch;
 
@@ -28,6 +29,9 @@ pub struct Meta {
     pub ready: String,
 }
 
+/// A partial payload from a streaming host, already parsed into rows.
+pub type Emit = tokio::sync::mpsc::Sender<Vec<ResultItem>>;
+
 pub trait Plugin: Send + Sync {
     fn meta(&self) -> &Meta;
     fn search(
@@ -35,6 +39,17 @@ pub trait Plugin: Send + Sync {
         query: &str,
         full: &str,
     ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<ResultItem>>> + Send + '_>>;
+
+    /// A search that may report partial payloads while it runs; a provider that
+    /// cannot stream ignores the emitter and answers once.
+    fn search_streaming<'a>(
+        &'a self,
+        query: &'a str,
+        full: &'a str,
+        _emit: Option<Emit>,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<Vec<ResultItem>>> + Send + 'a>> {
+        self.search(query, full)
+    }
 
     /// A search that reports how each row matched, for a caller that merges
     /// several providers; the default numbers [`Plugin::search`]'s rows as listed.
@@ -67,6 +82,16 @@ pub trait Plugin: Send + Sync {
     fn actions(&self, _item: &ResultItem) -> Vec<crate::wire::ActionItem> {
         Vec::new()
     }
+
+    /// Run one `Action::Plugin` command; a host forwards it to its own handler,
+    /// and a built-in has none.
+    fn command<'a>(
+        &'a self,
+        _action: &'a str,
+        _payload: Option<&'a serde_json::Value>,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
+        Box::pin(async { anyhow::bail!("the plugin has no command handler") })
+    }
 }
 
 #[cfg(test)]
@@ -76,6 +101,8 @@ fn item(title: &str, command: crate::wire::Action) -> ResultItem {
         summary: None,
         on_click: Some(command),
         icon: None,
+        icon_shape: None,
+        preview: None,
         actions: Vec::new(),
     }
 }

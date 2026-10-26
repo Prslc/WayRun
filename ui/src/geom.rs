@@ -1,0 +1,565 @@
+pub const ROW_H: f32 = 64.0;
+pub const PAD: f32 = 14.0;
+pub const SEARCH_H: f32 = 52.0;
+pub const GAP: f32 = 10.0;
+pub const FOOTER_H: f32 = 28.0;
+pub const HAIRLINE_W: f32 = 1.0;
+pub const ACCENT_W: f32 = 3.0;
+pub const ACCENT_H: f32 = 28.0;
+/// The split view's preview column: one share of the card's content for every
+/// preview kind, so switching rows never changes the column's width.
+pub const PREVIEW_FRAC: f32 = 0.46;
+pub const PREVIEW_MIN_W: f32 = 240.0;
+pub const PREVIEW_MAX_W: f32 = 560.0;
+pub const PREVIEW_GAP: f32 = 16.0;
+/// A text preview gets a readable minimum height; an image pane is fitted to
+/// the image and centered, so its body only needs room for a thumbnail.
+const IMAGE_MIN_H: f32 = 200.0;
+const TEXT_MIN_H: f32 = 220.0;
+
+/// The preview body's shape differs by content, never its column width.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewKind {
+    Image,
+    Text,
+}
+
+/// The card's horizontal anchor on the output.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Align {
+    Left,
+    #[default]
+    Center,
+    Right,
+}
+
+/// The runtime geometry, overridable from `theme.toml`. The defaults reproduce
+/// the original metrics, so an untouched config renders the same frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Layout {
+    /// The card's width in logical pixels; a narrower output shrinks it.
+    pub width: f32,
+    pub top_ratio: f32,
+    pub align: Align,
+    pub radius: f32,
+    pub max_rows: usize,
+    pub panel_header_h: f32,
+    /// Whether the hint bar is drawn; hiding it gives its band back to the card.
+    pub footer: bool,
+    /// The entrance's remaining rise, in logical pixels: a frame draws with a
+    /// shifted copy and the configured layout stays at rest.
+    pub offset_y: f32,
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Self {
+            width: 730.0,
+            top_ratio: 0.20,
+            align: Align::Center,
+            radius: 16.0,
+            max_rows: 5,
+            panel_header_h: 28.0,
+            footer: true,
+            offset_y: 0.0,
+        }
+    }
+}
+
+/// One rect of the blur region, in surface-local coordinates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlurRect {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
+impl Layout {
+    pub fn card_w(&self, surface: (u32, u32)) -> f32 {
+        self.width.min((surface.0 as f32 - 2.0 * PAD).max(0.0))
+    }
+
+    pub fn card_x(&self, surface: (u32, u32)) -> f32 {
+        let width = self.card_w(surface);
+        let base = match self.align {
+            Align::Left => 0.0,
+            Align::Center => ((surface.0 as f32) - width) / 2.0,
+            Align::Right => (surface.0 as f32) - width,
+        };
+        base.round()
+    }
+
+    /// Fixed card top: results only extend the card downward, so the search bar
+    /// never moves when the row count changes.
+    pub fn card_top(&self, surface: (u32, u32)) -> f32 {
+        ((surface.1 as f32) * self.top_ratio).round() + self.offset_y
+    }
+
+    /// The same geometry with the card shifted down by `dy`.
+    pub fn shifted(self, dy: f32) -> Self {
+        Self {
+            offset_y: dy,
+            ..self
+        }
+    }
+
+    /// The band a row is drawn in, as `(left, width)`, shared by the list,
+    /// panel and footer; the hit test uses the whole card width instead.
+    pub fn row_band(&self, surface: (u32, u32)) -> (f32, f32) {
+        (self.card_x(surface) + PAD, self.card_w(surface) - 2.0 * PAD)
+    }
+
+    /// The preview column's width for this card: one share of the content for
+    /// every kind, clamped so neither side collapses.
+    pub fn preview_w(&self, surface: (u32, u32)) -> f32 {
+        let (_, content) = self.row_band(surface);
+        (content * PREVIEW_FRAC)
+            .clamp(PREVIEW_MIN_W, PREVIEW_MAX_W)
+            .min(content)
+    }
+
+    /// The list's band: the row band minus the preview column when split.
+    pub fn list_band(&self, surface: (u32, u32), split: bool) -> (f32, f32) {
+        let (left, width) = self.row_band(surface);
+        if split {
+            (
+                left,
+                (width - self.preview_w(surface) - PREVIEW_GAP).max(0.0),
+            )
+        } else {
+            (left, width)
+        }
+    }
+
+    /// The preview pane's band: the card's right edge, inset by `PAD`.
+    pub fn preview_band(&self, surface: (u32, u32)) -> (f32, f32) {
+        let width = self.preview_w(surface);
+        (
+            self.card_x(surface) + PAD + self.card_w(surface) - 2.0 * PAD - width,
+            width,
+        )
+    }
+
+    /// The y of the first list row: the card's padding, the search field and the
+    /// column's spacing.
+    pub fn rows_top(&self, surface: (u32, u32)) -> f32 {
+        self.card_top(surface) + PAD + SEARCH_H + GAP
+    }
+
+    pub fn list_h(&self, rows: usize) -> f32 {
+        (rows as f32 * ROW_H).min(self.max_rows as f32 * ROW_H)
+    }
+
+    /// The card without its list band: both paddings, the field, and the
+    /// footer's band when it is drawn; a hidden footer takes the band with it.
+    fn base_h(&self) -> f32 {
+        PAD + SEARCH_H + if self.footer { GAP + FOOTER_H } else { 0.0 } + PAD
+    }
+
+    /// The card's height for `rows` results, capped at `max_rows`; with no rows
+    /// it holds the field and the footer band alone.
+    pub fn content_h(&self, rows: usize) -> f32 {
+        if rows == 0 {
+            self.base_h()
+        } else {
+            self.content_h_for(self.list_h(rows))
+        }
+    }
+
+    /// The card's height for an explicit body height, split view included.
+    pub fn content_h_for(&self, body_h: f32) -> f32 {
+        self.base_h() + GAP + body_h
+    }
+
+    /// The split body's height: an image needs room for a thumbnail, text a
+    /// readable minimum; a short list grows the card down either way.
+    pub fn split_h(&self, rows: usize, kind: PreviewKind) -> f32 {
+        match kind {
+            PreviewKind::Image => self.list_h(rows).max(IMAGE_MIN_H),
+            PreviewKind::Text => self.list_h(rows).max(TEXT_MIN_H),
+        }
+    }
+
+    /// The card with only the search field: what a pristine show rests at,
+    /// with no gap, footer band or list to reserve.
+    pub fn empty_h(&self) -> f32 {
+        PAD + SEARCH_H + PAD
+    }
+
+    /// The card height with the action panel open: like `content_h`, but the
+    /// list band holds the actions under a header instead of the results.
+    pub fn panel_h(&self, actions: usize) -> f32 {
+        self.base_h() + GAP + self.panel_header_h + self.list_h(actions)
+    }
+
+    /// The y of the first action row: the panel header sits where the first
+    /// result row would.
+    pub fn actions_top(&self, surface: (u32, u32)) -> f32 {
+        self.rows_top(surface) + self.panel_header_h
+    }
+
+    /// The action index under a surface-local point, `None` outside the panel.
+    pub fn action_at(
+        &self,
+        surface: (u32, u32),
+        first: usize,
+        count: usize,
+        x: f32,
+        y: f32,
+    ) -> Option<usize> {
+        let left = self.card_x(surface);
+        if x < left || x > left + self.card_w(surface) {
+            return None;
+        }
+
+        let top = self.actions_top(surface);
+        if y < top || y >= top + self.list_h(count) {
+            return None;
+        }
+
+        let index = first + ((y - top) / ROW_H) as usize;
+        (index < count).then_some(index)
+    }
+
+    /// The blur region covering the card's rounded rect, as 2px scanline bands
+    /// inset by `r - sqrt(r² - (r - dy)²)` so no rect pokes past the edge.
+    pub fn blur_rects(&self, surface: (u32, u32), card_height: f32) -> Vec<BlurRect> {
+        // Floor to 4px so an in-flight reflow does not commit a region per frame.
+        let height = ((card_height / 4.0).floor() * 4.0).max(4.0);
+        let (x, y) = (
+            self.card_x(surface).round() as i32,
+            self.card_top(surface).round() as i32,
+        );
+        let width = self.card_w(surface).round() as i32;
+        let height = height.round() as i32;
+        let radius = self.radius.round() as i32;
+
+        let mut rects = Vec::with_capacity(radius as usize + 4);
+
+        if height <= 2 * radius {
+            rects.push(BlurRect {
+                x,
+                y,
+                width,
+                height,
+            });
+            return rects;
+        }
+
+        rects.push(BlurRect {
+            x,
+            y: y + radius,
+            width,
+            height: height - 2 * radius,
+        });
+
+        let r = radius as f32;
+        for offset in (0..radius).step_by(2) {
+            let f = offset as f32;
+            let inset = (r - (r * r - (r - f) * (r - f)).max(0.0).sqrt()).floor() as i32;
+            let band = BlurRect {
+                x: x + inset,
+                y: y + offset,
+                width: width - 2 * inset,
+                height: 2,
+            };
+            rects.push(band);
+            rects.push(BlurRect {
+                y: y + height - offset - 2,
+                ..band
+            });
+        }
+
+        rects
+    }
+
+    /// The row index under a surface-local point, `None` outside the list band.
+    pub fn row_at(
+        &self,
+        surface: (u32, u32),
+        split: bool,
+        first: usize,
+        rows: usize,
+        x: f32,
+        y: f32,
+    ) -> Option<usize> {
+        // The hit test keeps the card's side padding (a press there selects
+        // the row beside the pointer) but stops at the preview pane.
+        let left = self.card_x(surface);
+        let right = if split {
+            self.preview_band(surface).0
+        } else {
+            left + self.card_w(surface)
+        };
+        if x < left || x >= right {
+            return None;
+        }
+
+        let top = self.rows_top(surface);
+        if y < top || y >= top + self.list_h(rows) {
+            return None;
+        }
+
+        let index = first + ((y - top) / ROW_H) as usize;
+        (index < rows).then_some(index)
+    }
+
+    /// `Contain` semantics for the fixed [`Layout::max_rows`]-row window.
+    pub fn contain(&self, selected: usize, first: usize, rows: usize) -> usize {
+        if rows <= self.max_rows {
+            return 0;
+        }
+
+        let mut first = first.min(rows - self.max_rows);
+        if selected < first {
+            first = selected;
+        }
+        if selected >= first + self.max_rows {
+            first = selected + 1 - self.max_rows;
+        }
+        first
+    }
+
+    /// The stroke's path, inset by half its width so the ring's inner edge
+    /// meets the fill's.
+    pub fn hairline_radius(&self, width: f32) -> f32 {
+        (self.radius - width / 2.0).max(0.0)
+    }
+
+    /// Nested radii stay inside the card: at the default 16 they are the
+    /// designed 8, and a smaller card radius pulls them in with it.
+    fn inner(&self, base: f32) -> f32 {
+        base.min((self.radius - 1.0).max(0.0)).max(0.0)
+    }
+
+    pub fn row_radius(&self) -> f32 {
+        self.inner(8.0)
+    }
+
+    /// The selected row's accent bar, a pill half as wide as it is thick.
+    pub fn accent_radius(&self) -> f32 {
+        ACCENT_W / 2.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn row_at_inverts_the_layout_the_renderer_draws() {
+        let l = Layout::default();
+        let surface = (1920, 1080);
+        let left = l.card_x(surface) + 10.0;
+        let top = l.rows_top(surface);
+
+        assert_eq!(l.row_at(surface, false, 0, 20, left, top), Some(0));
+        assert_eq!(
+            l.row_at(surface, false, 0, 20, left, top + ROW_H + 1.0),
+            Some(1)
+        );
+        // `first` is the window's top row, so surface row 0 is `first`
+        assert_eq!(l.row_at(surface, false, 2, 20, left, top + 0.5), Some(2));
+
+        // only the five-row window is drawn
+        assert_eq!(
+            l.row_at(surface, false, 0, 20, left, top + l.max_rows as f32 * ROW_H),
+            None
+        );
+        // outside the card, and above the list
+        assert_eq!(
+            l.row_at(surface, false, 0, 20, l.card_x(surface) - 1.0, top),
+            None
+        );
+        assert_eq!(l.row_at(surface, false, 0, 20, left, top - 1.0), None);
+        // a short list has nothing below its last row
+        assert_eq!(
+            l.row_at(surface, false, 0, 2, left, top + 2.0 * ROW_H + 1.0),
+            None
+        );
+    }
+
+    #[test]
+    fn the_split_layout_reserves_the_preview_pane() {
+        let l = Layout::default();
+        let surface = (1920, 1080);
+        let (left, width) = l.list_band(surface, true);
+        let (preview_left, preview_w) = l.preview_band(surface);
+        let (_, content) = l.row_band(surface);
+
+        assert_eq!(preview_w, l.preview_w(surface));
+        assert!((preview_w - content * PREVIEW_FRAC).abs() < 0.001);
+        assert_eq!(
+            l.card_w(surface),
+            Layout::default().card_w(surface),
+            "the card keeps its width"
+        );
+        assert_eq!(content, width + preview_w + PREVIEW_GAP);
+        assert_eq!(left + width + PREVIEW_GAP, preview_left);
+        assert_eq!(
+            l.split_h(1, PreviewKind::Image),
+            IMAGE_MIN_H,
+            "a short list reserves a thumbnail"
+        );
+        assert!(l.content_h_for(l.split_h(1, PreviewKind::Image)) > l.content_h(1));
+
+        let top = l.rows_top(surface);
+        assert_eq!(l.row_at(surface, true, 0, 20, preview_left, top), None);
+        assert_eq!(l.row_at(surface, false, 0, 20, preview_left, top), Some(0));
+    }
+
+    #[test]
+    fn a_text_preview_keeps_the_column_but_gets_a_minimum_height() {
+        let l = Layout::default();
+        let surface = (1920, 1080);
+        let width = l.preview_w(surface);
+        assert_eq!(
+            l.preview_band(surface).1,
+            width,
+            "text and image share the column"
+        );
+
+        let (left, list_w) = l.list_band(surface, true);
+        assert_eq!(l.row_band(surface).1, list_w + width + PREVIEW_GAP);
+        let (preview_left, _) = l.preview_band(surface);
+        assert_eq!(left + list_w + PREVIEW_GAP, preview_left);
+        assert_eq!(
+            l.split_h(1, PreviewKind::Text),
+            TEXT_MIN_H,
+            "a short list gives the text a readable body"
+        );
+        assert_eq!(
+            l.row_at(surface, true, 0, 20, preview_left, l.rows_top(surface)),
+            None
+        );
+    }
+
+    #[test]
+    fn the_blur_region_covers_the_card_and_stays_inside_it() {
+        let l = Layout::default();
+        let surface = (1920, 1080);
+        let height = l.content_h(l.max_rows);
+        let (x, y) = (
+            l.card_x(surface).round() as i32,
+            l.card_top(surface).round() as i32,
+        );
+        let (w, h) = (l.card_w(surface).round() as i32, height.round() as i32);
+        let rects = l.blur_rects(surface, height);
+
+        // the region is always the card's outer rect plus its scanline bands
+        for rect in &rects {
+            assert!(rect.width > 0 && rect.height > 0, "{rect:?}");
+            assert!(rect.x >= x && rect.x + rect.width <= x + w, "{rect:?}");
+            assert!(rect.y >= y && rect.y + rect.height <= y + h, "{rect:?}");
+        }
+        // the first band is the middle one: inset by the radius top and bottom
+        assert_eq!(rects[0].y, y + l.radius as i32);
+        assert_eq!(rects[0].height, h - 2 * l.radius as i32);
+        // the corner bands are pulled in by the chord inset, most at the very
+        // top of the card, and they alternate top/bottom per offset
+        assert_eq!(rects[1].x, x + l.radius as i32);
+        assert_eq!(rects[1].y, y);
+        assert_eq!(rects[2].y + 2, y + h);
+        // a card shorter than two radii degrades to one rect
+        assert_eq!(l.blur_rects(surface, 20.0).len(), 1);
+    }
+
+    #[test]
+    fn the_defaults_reproduce_the_original_metrics() {
+        let l = Layout::default();
+        assert_eq!(l.content_h(0), 118.0);
+        assert_eq!(l.content_h(5), 448.0);
+        // the pristine card drops the gap and the footer band
+        assert_eq!(l.empty_h(), 80.0);
+        assert_eq!(l.row_radius(), 8.0);
+        assert_eq!(l.hairline_radius(HAIRLINE_W), 15.5);
+        // a narrower output shrinks the card to fit its padding
+        assert_eq!(l.card_w((1920, 1080)), 730.0);
+        assert_eq!(l.card_w((720, 1080)), 692.0);
+    }
+
+    #[test]
+    fn a_hidden_footer_gives_its_band_back_to_the_card() {
+        let l = Layout {
+            footer: false,
+            ..Layout::default()
+        };
+        // a no-result card rests where the pristine card does
+        assert_eq!(l.content_h(0), l.empty_h());
+        let band = GAP + FOOTER_H;
+        assert_eq!(l.content_h(5) + band, Layout::default().content_h(5));
+        assert_eq!(
+            l.panel_h(3) + band,
+            Layout::default().panel_h(3),
+            "the panel loses the band too"
+        );
+    }
+
+    #[test]
+    fn the_action_panel_adds_a_header_above_the_actions() {
+        let l = Layout::default();
+        assert_eq!(l.panel_h(3), l.content_h(3) + l.panel_header_h);
+        // the actions start where the first result row would, one header lower
+        let surface = (1920, 1080);
+        assert_eq!(
+            l.actions_top(surface),
+            l.rows_top(surface) + l.panel_header_h
+        );
+
+        let left = l.card_x(surface) + 10.0;
+        let top = l.actions_top(surface);
+        assert_eq!(l.action_at(surface, 0, 4, left, top), Some(0));
+        assert_eq!(l.action_at(surface, 0, 4, left, top + ROW_H + 1.0), Some(1));
+        // a `first` window shifts surface row 0 to that action
+        assert_eq!(l.action_at(surface, 2, 20, left, top + 0.5), Some(2));
+        // above the actions is the header, not an action
+        assert_eq!(l.action_at(surface, 0, 4, left, top - 1.0), None);
+        // only the `max_rows` window is drawn
+        assert_eq!(
+            l.action_at(surface, 0, 20, left, top + l.max_rows as f32 * ROW_H),
+            None
+        );
+        // a short panel has nothing below its last action
+        assert_eq!(
+            l.action_at(surface, 0, 2, left, top + 2.0 * ROW_H + 1.0),
+            None
+        );
+    }
+
+    #[test]
+    fn a_smaller_card_radius_pulls_the_nested_radii_in() {
+        let l = Layout {
+            radius: 8.0,
+            ..Layout::default()
+        };
+        assert_eq!(l.row_radius(), 7.0);
+        assert_eq!(l.hairline_radius(HAIRLINE_W), 7.5);
+    }
+
+    #[test]
+    fn a_wider_hairline_insets_its_path_by_half_its_width() {
+        assert_eq!(Layout::default().hairline_radius(3.0), 14.5);
+    }
+
+    #[test]
+    fn align_places_the_card() {
+        let surface = (1920, 1080);
+        let center = Layout::default();
+        let width = center.card_w(surface);
+        assert_eq!(center.card_x(surface), ((1920.0 - width) / 2.0).round());
+        assert_eq!(center.card_top(surface), (1080.0_f32 * 0.20).round());
+
+        let left = Layout {
+            align: Align::Left,
+            ..Layout::default()
+        };
+        assert_eq!(left.card_x(surface), 0.0);
+
+        let right = Layout {
+            align: Align::Right,
+            ..Layout::default()
+        };
+        assert_eq!(right.card_x(surface), 1920.0 - width);
+    }
+}

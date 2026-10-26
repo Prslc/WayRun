@@ -6,6 +6,19 @@ first run as a commented template and is watched, so an edit is picked up withou
 restarting. Every key is optional: a missing file or key keeps the built-in
 default shown here.
 
+## From the command line
+
+`wayrun config list` prints every effective setting (defaults plus your file),
+`wayrun config get <key>` one of them, and `wayrun config set <key> <value>` /
+`wayrun config unset <key>` edit `config.toml` in place, keeping its comments
+and re-parsing the result before writing. Keys are dotted (`ui.locale`,
+`files.exclude`); a text value needs no quotes unless it looks like another TOML
+type, so `config set files.index false` and
+`config set files.exclude '["node_modules", "target"]'` both work. `locale` is
+read at startup, so a change needs
+`systemctl --user restart wayrun-launcher`; the rest, `font.family` included,
+applies through the watchers.
+
 ## `[ui]`
 
 | Key | Default | Meaning |
@@ -24,10 +37,9 @@ and a blank value is the same as leaving the key out.
 | --- | --- | --- |
 | `family` | `sans-serif` | Primary shaping family, or a generic name (`serif`, `sans-serif`, `monospace`). |
 
-Read at startup, so a change takes effect on the next launch
-(`systemctl --user restart wayrun-launcher`). Glyphs the family lacks fall back
-to the system fonts. The interface size is `theme.toml`'s `[font].size` and
-applies live.
+Applies live: the launcher re-shapes with the new family when the file changes.
+Glyphs the family lacks fall back to the system fonts. The interface size is
+`theme.toml`'s `[font].size` and applies live too.
 
 ## `[icon]`
 

@@ -1,0 +1,330 @@
+use std::time::Instant;
+
+use tiny_skia::Pixmap;
+
+use crate::icons::IconCache;
+use crate::text::TextEngine;
+use crate::view::{Body, Frame};
+
+use super::canvas::{Canvas, Rect};
+use super::{field, footer, list, panel, preview};
+
+pub fn draw(
+    pixmap: &mut Pixmap,
+    frame: &Frame<'_>,
+    text: &mut TextEngine,
+    icons: &mut IconCache,
+    now: Instant,
+    full: bool,
+) {
+    let timing = frame.timing;
+    let mut marks: Vec<(&str, Instant)> = Vec::new();
+    let mut mark = |name: &'static str| {
+        if timing {
+            marks.push((name, Instant::now()));
+        }
+    };
+    mark("start");
+    let canvas = Canvas { scale: frame.scale };
+    let surface = frame.surface;
+    let layout = frame.layout;
+    let dim_rgb = frame.dim_color();
+
+    let card = Rect {
+        x: layout.card_x(surface),
+        y: layout.card_top(surface),
+        w: layout.card_w(surface),
+        h: frame.card_h,
+    };
+
+    // The frame is retained, so a settled frame repaints only the card and
+    // leaves the dim in place; an animation or fresh frame repaints it all.
+    let dim = frame.dim_alpha();
+    if full {
+        canvas.fill_all(
+            pixmap,
+            [
+                dim_rgb[0],
+                dim_rgb[1],
+                dim_rgb[2],
+                (dim * 255.0).round() as u8,
+            ],
+        );
+    } else {
+        // A shrink has to erase the old card's rows too, so the region spans the
+        // union of the previous and current bottoms, not just the current card.
+        let base_bottom = card.bottom().max(frame.last_card_bottom);
+        canvas.restore_dim(
+            pixmap,
+            Rect {
+                x: card.x,
+                y: card.y,
+                w: card.w,
+                h: base_bottom - card.y,
+            },
+            dim,
+            dim_rgb,
+        );
+    }
+    mark("clear");
+
+    // The card: a translucent fill with a hairline. The hairline is a *ring*,
+    // not a base fill, which would raise the interior's alpha.
+    let border = frame.surfaces.hairline_width;
+    canvas.fill_round(
+        pixmap,
+        Rect {
+            x: card.x + border,
+            y: card.y + border,
+            w: card.w - 2.0 * border,
+            h: card.h - 2.0 * border,
+        },
+        layout.radius - border,
+        frame.fade_rgba(frame.surfaces.card),
+    );
+    if border > 0.0 {
+        canvas.stroke_round(
+            pixmap,
+            Rect {
+                x: card.x + border / 2.0,
+                y: card.y + border / 2.0,
+                w: card.w - border,
+                h: card.h - border,
+            },
+            layout.hairline_radius(border),
+            border,
+            frame.fade_rgba(frame.surfaces.hairline),
+        );
+    }
+
+    mark("card");
+    let field_rect = Rect::field_at(card.x, card.y, card.w);
+    field::draw_magnifier(&canvas, pixmap, field_rect, frame);
+    field::draw_query(&canvas, pixmap, field_rect, frame, text);
+    mark("query");
+
+    match &frame.body {
+        Body::Panel(_) => panel::draw_actions(&canvas, pixmap, frame, text, icons),
+        Body::List(view) if !view.rows.is_empty() => {
+            list::draw_list(&canvas, pixmap, frame, text, icons, now);
+            if let Some(preview) = &view.preview {
+                preview::draw_preview(
+                    &canvas,
+                    pixmap,
+                    frame,
+                    view.rows.len(),
+                    preview,
+                    text,
+                    icons,
+                );
+            }
+        }
+        Body::List(_) => {}
+    }
+    mark("list");
+
+    if layout.footer {
+        footer::draw_footer(&canvas, pixmap, frame, text);
+        mark("footer");
+    }
+
+    // A growing payload lays rows out immediately while the height animates, so
+    // the band below the card's bottom belongs to the backdrop.
+    let resting = layout.card_top(surface) + frame.content_h;
+    let bottom = card.y + card.h;
+    let mut band = None;
+    if full && bottom < resting {
+        canvas.restore_dim_below(pixmap, bottom, surface, dim, dim_rgb);
+        band = Some(bottom);
+    }
+
+    if timing && marks.len() > 1 {
+        let mut previous = marks[0].1;
+        let mut line = String::from("wayrun: draw");
+        for (name, at) in &marks[1..] {
+            line.push_str(&format!(" {}={:?}", name, at.duration_since(previous)));
+            previous = *at;
+        }
+        line.push_str(&format!(
+            " total={:?}",
+            marks[marks.len() - 1].1.duration_since(marks[0].1)
+        ));
+        if let Some(bottom) = band {
+            line.push_str(&format!(" reflow_band_from={bottom}"));
+        }
+        eprintln!("{line}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::canvas::dim_u8;
+    use super::*;
+    use crate::view::test_frame;
+    use std::sync::mpsc;
+    use tiny_skia::Color;
+
+    /// A cache whose queue nobody drains: these frames draw no icons.
+    fn idle_icons() -> IconCache {
+        let (jobs, _queued) = mpsc::channel();
+        IconCache::new(jobs)
+    }
+
+    fn render(frame: &Frame<'_>) -> Pixmap {
+        let mut pixmap = Pixmap::new(frame.surface.0, frame.surface.1).unwrap();
+        let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
+        let mut icons = idle_icons();
+        draw(
+            &mut pixmap,
+            frame,
+            &mut text,
+            &mut icons,
+            Instant::now(),
+            true,
+        );
+        pixmap
+    }
+
+    #[test]
+    fn a_hidden_footer_draws_no_hints() {
+        use crate::geom::{FOOTER_H, PAD};
+
+        let mut frame = test_frame((1600, 1080));
+        frame.card_h = frame.layout.content_h(0);
+        frame.content_h = frame.card_h;
+        frame.footer.rows = 3;
+        frame.footer.query_empty = false;
+
+        let layout = frame.layout;
+        let x = (layout.card_x(frame.surface) + PAD + 3.0) as u32;
+        let top = layout.card_top(frame.surface) + frame.card_h - PAD - FOOTER_H;
+        let y = (top + FOOTER_H / 2.0) as u32;
+
+        let shown = render(&frame).pixel(x, y).unwrap();
+        frame.layout.footer = false;
+        let hidden = render(&frame).pixel(x, y).unwrap();
+        assert_ne!(
+            (shown.red(), shown.green(), shown.blue()),
+            (hidden.red(), hidden.green(), hidden.blue()),
+            "the footer's keycap chip goes with it"
+        );
+    }
+
+    #[test]
+    fn the_base_fill_is_the_dim_with_no_clear_under_it() {
+        let frame = test_frame((64, 64));
+
+        let mut pixmap = Pixmap::new(64, 64).unwrap();
+        let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
+        let mut icons = idle_icons();
+        draw(
+            &mut pixmap,
+            &frame,
+            &mut text,
+            &mut icons,
+            Instant::now(),
+            true,
+        );
+
+        // Above the card only the dim exists; a clear under the dim would show
+        // up as alpha 0.
+        let pixel = pixmap.pixel(0, 0).unwrap();
+        assert_eq!(pixel.alpha(), dim_u8(), "the dim is the base");
+        assert_eq!((pixel.red(), pixel.green(), pixel.blue()), (0, 0, 0));
+    }
+
+    #[test]
+    fn a_wider_hairline_paints_inside_the_card_edge() {
+        let mut frame = test_frame((1600, 1080));
+        frame.surfaces.hairline = [255, 0, 0, 255];
+        frame.surfaces.hairline_width = 4.0;
+
+        let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
+        let mut icons = idle_icons();
+        let mut pixmap = Pixmap::new(1600, 1080).unwrap();
+        draw(
+            &mut pixmap,
+            &frame,
+            &mut text,
+            &mut icons,
+            Instant::now(),
+            true,
+        );
+
+        let x = frame.layout.card_x(frame.surface);
+        let y = frame.layout.card_top(frame.surface) + frame.card_h / 2.0;
+        let edge = pixmap.pixel((x + 1.0) as u32, y as u32).unwrap();
+        assert_eq!((edge.red(), edge.green(), edge.blue()), (255, 0, 0));
+        // The fill starts where the ring ends, so the ring is not blended
+        // over the translucent card.
+        let inside = pixmap.pixel((x + 5.0) as u32, y as u32).unwrap();
+        assert_ne!((inside.red(), inside.green(), inside.blue()), (255, 0, 0));
+    }
+
+    #[test]
+    fn a_settled_repaint_only_touches_the_card_rectangle() {
+        let frame = test_frame((1600, 1080));
+
+        let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
+        let mut icons = idle_icons();
+        let mut pixmap = Pixmap::new(1600, 1080).unwrap();
+        // A sentinel everywhere: a region repaint must leave the backdrop alone.
+        pixmap.fill(Color::from_rgba8(255, 0, 255, 255));
+
+        draw(
+            &mut pixmap,
+            &frame,
+            &mut text,
+            &mut icons,
+            Instant::now(),
+            false,
+        );
+
+        // A point outside the card keeps the sentinel untouched.
+        let outside = pixmap.pixel(0, 0).unwrap();
+        assert_eq!((outside.red(), outside.blue()), (255, 255), "outside");
+
+        // A point inside the card was restored to the dim and painted over, so
+        // it can no longer be the sentinel.
+        let inside = pixmap
+            .pixel(
+                (frame.layout.card_x(frame.surface) + frame.layout.card_w(frame.surface) / 2.0)
+                    as u32,
+                (frame.layout.card_top(frame.surface) + 10.0) as u32,
+            )
+            .unwrap();
+        assert_ne!((inside.red(), inside.green(), inside.blue()), (255, 0, 255));
+    }
+
+    #[test]
+    fn a_settled_shrink_erases_the_old_cards_rows() {
+        let mut frame = test_frame((1600, 1080));
+        let card_h = frame.content_h;
+        // The previous card was 200px taller than the current one.
+        frame.last_card_bottom = frame.layout.card_top(frame.surface) + card_h + 200.0;
+
+        let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
+        let mut icons = idle_icons();
+        let mut pixmap = Pixmap::new(1600, 1080).unwrap();
+        pixmap.fill(Color::from_rgba8(255, 0, 255, 255));
+
+        draw(
+            &mut pixmap,
+            &frame,
+            &mut text,
+            &mut icons,
+            Instant::now(),
+            false,
+        );
+
+        // Below the current card but inside the old one: the dim, not the
+        // sentinel and not a leftover row.
+        let y = (frame.layout.card_top(frame.surface) + card_h + 100.0) as u32;
+        let pixel = pixmap.pixel(800, y).unwrap();
+        assert_ne!(
+            (pixel.red(), pixel.green(), pixel.blue()),
+            (255, 0, 255),
+            "the old card's rows were erased"
+        );
+    }
+}

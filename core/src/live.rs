@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -30,9 +31,7 @@ struct Stamp {
 
 impl Stamp {
     fn of(path: &Path) -> Self {
-        let modified = std::fs::metadata(path)
-            .and_then(|meta| meta.modified())
-            .ok();
+        let modified = fs::metadata(path).and_then(|meta| meta.modified()).ok();
         Self {
             path: path.to_path_buf(),
             modified,
@@ -279,15 +278,18 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, mpsc};
+    use std::thread;
 
     use notify::Event;
     use notify::event::{AccessKind, ModifyKind, RemoveKind};
 
     use super::{Live, Source, lock, observe};
 
-    fn no_roots() -> Vec<std::path::PathBuf> {
+    fn no_roots() -> Vec<PathBuf> {
         Vec::new()
     }
 
@@ -334,7 +336,7 @@ mod tests {
         let (release_tx, release_rx) = mpsc::channel();
         let slow = {
             let live = Arc::clone(&live);
-            std::thread::spawn(move || {
+            thread::spawn(move || {
                 live.get(|| {
                     started_tx.send(()).unwrap();
                     release_rx.recv().unwrap();
@@ -409,7 +411,7 @@ mod tests {
         source.rearm(vec![missing.clone()]);
         assert_eq!(lock(&source.state).targets, vec![temp.path().to_path_buf()]);
 
-        std::fs::create_dir(&missing).unwrap();
+        fs::create_dir(&missing).unwrap();
         source.rearm(vec![missing.clone()]);
         assert_eq!(lock(&source.state).targets, vec![missing]);
     }

@@ -1,13 +1,21 @@
 mod config;
+mod edit;
 mod hosts;
 
 use std::collections::HashMap;
+use std::fs;
+use std::io::{self, Write};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use self::config::{Config, load_or_default};
 use self::hosts::HostCache;
 use crate::provider::external::HostMeta;
+
+pub use self::edit::{add_plugin, remove_plugin, set_enabled, set_keyword};
 
 #[derive(Clone)]
 pub struct PendingHost {
@@ -27,7 +35,7 @@ pub(super) struct Entry {
     pub pending: Option<PendingHost>,
 }
 
-pub(super) type PluginMap = std::collections::HashMap<&'static str, Box<dyn super::Plugin>>;
+pub(super) type PluginMap = HashMap<&'static str, Box<dyn super::Plugin>>;
 
 /// How many external hosts may be forked at once while resolving identities.
 /// Each is a fresh interpreter, so this is the memory ceiling of the walk.
@@ -100,6 +108,41 @@ pub fn host_paths() -> Vec<PathBuf> {
     paths
 }
 
+/// The `plugins.toml` entries pointing at `command`, as `(id, keyword, enabled)`,
+/// so `wayrun plugin check` can compare a script with its registration.
+pub fn entries_for_command(command: &str) -> Vec<(String, String, bool)> {
+    // The exec bit stays out of it: a script that lost it is still registered.
+    let wanted = fs::canonicalize(command).unwrap_or_else(|_| PathBuf::from(command));
+    load_or_default()
+        .plugins
+        .into_iter()
+        .filter(|entry| {
+            entry.command.as_deref().is_some_and(|configured| {
+                fs::canonicalize(configured).unwrap_or_else(|_| PathBuf::from(configured)) == wanted
+            })
+        })
+        .map(|entry| (entry.id, entry.keyword, entry.enabled))
+        .collect()
+}
+
+/// Run one `Action::Plugin` command on the host that serves `id`; the action name
+/// and payload are the plugin's own.
+pub async fn run_command(
+    id: &str,
+    action: &str,
+    payload: Option<&serde_json::Value>,
+) -> anyhow::Result<()> {
+    ensure_loaded().await;
+    let reg = REGISTRY.read().await;
+    let Some(entry) = reg
+        .iter()
+        .find(|entry| entry.plugin.meta().id.as_ref() == id)
+    else {
+        anyhow::bail!("no plugin {id:?} in the registry");
+    };
+    entry.plugin.command(action, payload).await
+}
+
 /// Rebuild the registry when a host file changed, then ask only those hosts
 /// for their identity again.
 pub async fn refresh_hosts() {
@@ -123,6 +166,11 @@ pub async fn refresh_hosts() {
         *REGISTRY.write().await = build_entries(&config);
         stale
     };
+    // A changed script is reloaded by a fresh process, not the one that already
+    // loaded it; discovery below must see the new code too.
+    for command in &stale {
+        crate::provider::resident::reap_command(command);
+    }
     resolve_pending_filtered(None, Some(&stale)).await;
 }
 
@@ -231,7 +279,7 @@ async fn resolve_pending_filtered(keyword: Option<&str>, commands: Option<&[Stri
     }
 
     if !stale.is_empty() {
-        let permits = std::sync::Arc::new(tokio::sync::Semaphore::new(DISCOVERY_CONCURRENCY));
+        let permits = Arc::new(tokio::sync::Semaphore::new(DISCOVERY_CONCURRENCY));
         let mut hosts = tokio::task::JoinSet::new();
         for (command, resident) in stale {
             let permits = permits.clone();
@@ -271,22 +319,106 @@ async fn resolve_pending_filtered(keyword: Option<&str>, commands: Option<&[Stri
     }
 }
 
-/// Print the registry table (`--list-plugins`).
-pub async fn print_list() {
-    println!(
-        "{:<24} {:<24} {:<12} {:<24} STATUS",
-        "ID", "NAME", "KEYWORD", "ICON"
-    );
-    println!("{:-<24} {:-<24} {:-<12} {:-<24} {:-<8}", "", "", "", "", "");
+/// Print the registry table for `plugin list`; a reader that closes the pipe
+/// early (`| head`) ends the listing quietly.
+pub async fn print_list() -> io::Result<()> {
+    let mut out = io::stdout().lock();
+    match table(&mut out).await {
+        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        other => other,
+    }
+}
+
+async fn table(out: &mut impl Write) -> io::Result<()> {
+    const ID: usize = 24;
+    const NAME: usize = 24;
+    const KEYWORD: usize = 12;
+    const ICON: usize = 24;
+    const STATUS: usize = 10;
+
+    writeln!(
+        out,
+        "{} {} {} {} {}",
+        cell("ID", ID, false),
+        cell("NAME", NAME, false),
+        cell("KEYWORD", KEYWORD, false),
+        cell("ICON", ICON, true),
+        cell("STATUS", STATUS, false)
+    )?;
+    writeln!(
+        out,
+        "{} {} {} {} {}",
+        "-".repeat(ID),
+        "-".repeat(NAME),
+        "-".repeat(KEYWORD),
+        "-".repeat(ICON),
+        "-".repeat(STATUS)
+    )?;
     for (id, name, icon, keyword, enabled) in list_plugins().await {
         let kw = if keyword.is_empty() {
             "(default)"
         } else {
             &keyword
         };
-        let status = if enabled { "" } else { "[disabled]" };
-        println!("{id:<24} {name:<24} {kw:<12} {icon:<24}{status}");
+        let status = if enabled { "enabled" } else { "disabled" };
+        writeln!(
+            out,
+            "{} {} {} {} {}",
+            cell(&id, ID, false),
+            cell(&name, NAME, false),
+            cell(kw, KEYWORD, false),
+            cell(&icon, ICON, true),
+            cell(status, STATUS, false)
+        )?;
     }
+    Ok(())
+}
+
+/// A cell of `width` display columns, padded or clipped; `tail` keeps the end of
+/// a clipped value, for a path whose file name matters more than its root.
+fn cell(text: &str, width: usize, tail: bool) -> String {
+    let (text, used) = if text.width() <= width {
+        (text.to_string(), text.width())
+    } else if tail {
+        clip_tail(text, width)
+    } else {
+        clip_head(text, width)
+    };
+    let padding = width.saturating_sub(used);
+    format!("{text}{}", " ".repeat(padding))
+}
+
+fn clip_head(text: &str, width: usize) -> (String, usize) {
+    let limit = width.saturating_sub(1);
+    let mut out = String::new();
+    let mut used = 0;
+    for ch in text.chars() {
+        let w = ch.width().unwrap_or(0);
+        if used + w > limit {
+            break;
+        }
+        out.push(ch);
+        used += w;
+    }
+    out.push('…');
+    (out, used + 1)
+}
+
+fn clip_tail(text: &str, width: usize) -> (String, usize) {
+    let limit = width.saturating_sub(1);
+    let mut tail = Vec::new();
+    let mut used = 0;
+    for ch in text.chars().rev() {
+        let w = ch.width().unwrap_or(0);
+        if used + w > limit {
+            break;
+        }
+        tail.push(ch);
+        used += w;
+    }
+    tail.push('…');
+    tail.reverse();
+    (tail.into_iter().collect(), used + 1)
 }
 
 pub async fn list_plugins() -> Vec<(String, String, String, String, bool)> {
@@ -345,6 +477,26 @@ mod tests {
 
     fn parse(src: &str) -> Config {
         toml::from_str(src).unwrap()
+    }
+
+    #[test]
+    fn a_cell_fits_its_display_width() {
+        // a CJK name takes two columns per character
+        let name = cell("计算器", 10, false);
+        assert_eq!(name, "计算器    ");
+        assert_eq!(name.width(), 10);
+
+        // a long path keeps its file name
+        let path = "/home/me/.config/wayrun/plugins/note/assets/an-icon.svg";
+        let icon = cell(path, 20, true);
+        assert_eq!(icon.width(), 20);
+        assert!(icon.starts_with('…'), "{icon}");
+        assert!(icon.trim_end().ends_with("icon.svg"), "{icon}");
+
+        // a long name keeps its start
+        let cut = cell("a very long plugin display name", 12, false);
+        assert_eq!(cut.width(), 12);
+        assert!(cut.trim_end().ends_with('…'), "{cut}");
     }
 
     #[test]

@@ -1,21 +1,25 @@
 use crate::provider::external::HostMeta;
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 
 /// A discovered host identity, keyed by `command` and stamped with the file's
-/// `(mtime, size)`: a changed host is asked again, a stale `api` never read.
+/// `(mtime, size, mode)`, so a changed host or exec bit is asked again.
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub(super) struct HostCache {
-    hosts: std::collections::HashMap<String, CachedHost>,
+    hosts: HashMap<String, CachedHost>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct CachedHost {
     mtime: u64,
     size: u64,
+    mode: u32,
     metas: Vec<HostMeta>,
 }
 
 impl HostCache {
-    fn path() -> Option<std::path::PathBuf> {
+    fn path() -> Option<PathBuf> {
         Some(crate::system::fs::cache_dir()?.join("plugin-hosts.json"))
     }
 
@@ -23,7 +27,7 @@ impl HostCache {
         let Some(path) = Self::path() else {
             return Self::default();
         };
-        std::fs::read_to_string(path)
+        fs::read_to_string(path)
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default()
@@ -32,9 +36,10 @@ impl HostCache {
     /// The cached identities for `command`, only while the file it names is
     /// unchanged. `None` means the host must be asked.
     pub(super) fn fresh(&self, command: &str) -> Option<Vec<HostMeta>> {
-        let (mtime, size) = crate::provider::external::command_stamp(command)?;
+        let (mtime, size, mode) = crate::provider::external::command_stamp(command)?;
         let cached = self.hosts.get(command)?;
-        (cached.mtime == mtime && cached.size == size).then(|| cached.metas.clone())
+        (cached.mtime == mtime && cached.size == size && cached.mode == mode)
+            .then(|| cached.metas.clone())
     }
 
     /// Whether a cached identity's file moved; an uncached host is not stale.
@@ -42,12 +47,13 @@ impl HostCache {
         let Some(cached) = self.hosts.get(command) else {
             return false;
         };
-        crate::provider::external::command_stamp(command)
-            .is_none_or(|(mtime, size)| cached.mtime != mtime || cached.size != size)
+        crate::provider::external::command_stamp(command).is_none_or(|(mtime, size, mode)| {
+            cached.mtime != mtime || cached.size != size || cached.mode != mode
+        })
     }
 
     pub(super) fn record(&mut self, command: &str, metas: &[HostMeta]) {
-        let Some((mtime, size)) = crate::provider::external::command_stamp(command) else {
+        let Some((mtime, size, mode)) = crate::provider::external::command_stamp(command) else {
             return;
         };
         self.hosts.insert(
@@ -55,6 +61,7 @@ impl HostCache {
             CachedHost {
                 mtime,
                 size,
+                mode,
                 metas: metas.to_vec(),
             },
         );
@@ -79,8 +86,8 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let cmd = dir.path().join("host");
-        std::fs::write(&cmd, b"x").unwrap();
-        std::fs::set_permissions(&cmd, std::fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(&cmd, b"x").unwrap();
+        fs::set_permissions(&cmd, fs::Permissions::from_mode(0o755)).unwrap();
         let command = cmd.display().to_string();
 
         let mut cache = HostCache::default();
@@ -94,12 +101,17 @@ mod tests {
         cache.record(&command, &metas);
         assert!(cache.fresh(&command).is_some());
 
+        // the exec bit is part of the identity: the command may no longer run
+        fs::set_permissions(&cmd, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(cache.fresh(&command).is_none());
+        fs::set_permissions(&cmd, fs::Permissions::from_mode(0o755)).unwrap();
+
         // a changed file is a stale identity, so the host is asked again
-        std::fs::write(&cmd, b"xy").unwrap();
+        fs::write(&cmd, b"xy").unwrap();
         assert!(cache.fresh(&command).is_none());
 
         // a command that no longer exists is never fresh
-        std::fs::remove_file(&cmd).unwrap();
+        fs::remove_file(&cmd).unwrap();
         assert!(cache.fresh(&command).is_none());
     }
 

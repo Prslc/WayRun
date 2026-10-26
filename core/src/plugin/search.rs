@@ -1,4 +1,5 @@
 use std::cmp::Reverse;
+use std::collections::HashMap;
 use std::time::Duration;
 
 use super::Meta;
@@ -13,12 +14,13 @@ use rust_i18n::t;
 
 /// Run a search and surface its action panel: every row is decorated with its
 /// secondary commands.
-pub async fn dispatch(input: &str) -> Vec<ResultItem> {
-    let items = search(input).await;
+pub async fn dispatch(input: &str, emit: Option<super::Emit>) -> Vec<ResultItem> {
+    crate::system::icon::remote_supersede();
+    let items = search(input, emit).await;
     decorate(items).await
 }
 
-async fn search(input: &str) -> Vec<ResultItem> {
+async fn search(input: &str, emit: Option<super::Emit>) -> Vec<ResultItem> {
     ensure_loaded().await;
     // A search that names a keyword only wakes that plugin's host; `?` lists
     // every name, so it resolves them all. A plain query wakes none.
@@ -76,7 +78,10 @@ async fn search(input: &str) -> Vec<ResultItem> {
         }
 
         for entry in reg.iter().filter(|e| e.keyword == keyword) {
-            if let Ok(results) = entry.plugin.search(query, input).await
+            if let Ok(results) = entry
+                .plugin
+                .search_streaming(query, input, emit.clone())
+                .await
                 && !results.is_empty()
             {
                 return fill_icons(&entry.plugin.meta().icon, results);
@@ -146,7 +151,7 @@ const DEFAULT_DEADLINE: Duration = Duration::from_millis(50);
 fn merge_ranked(
     rows: Vec<(Rank, u32, ResultItem)>,
     keys: &[String],
-    counts: &std::collections::HashMap<String, u32>,
+    counts: &HashMap<String, u32>,
 ) -> Vec<ResultItem> {
     // Materialize the sort keys first: a `sort_by_key` closure runs on every
     // comparison, and the usage lookup is a hash per call.
@@ -204,6 +209,8 @@ fn identity_card(meta: &Meta, summary: String) -> ResultItem {
         summary: Some(summary),
         on_click: None,
         icon: find_icon_spec(&meta.icon).or_else(|| Some(String::new())),
+        icon_shape: None,
+        preview: None,
         actions: Vec::new(),
     }
 }
@@ -256,6 +263,8 @@ mod tests {
                 cmd: command.to_string(),
             }),
             icon: None,
+            icon_shape: None,
+            preview: None,
             actions: Vec::new(),
         }
     }
@@ -316,6 +325,18 @@ mod tests {
         let merged = merge(rows, &HashMap::default());
         let titles: Vec<&str> = merged.iter().map(|item| item.title.as_str()).collect();
         assert_eq!(titles, ["scored", "first", "second"]);
+    }
+
+    /// Usage reorders rows within a tier, never across the listed/scored line.
+    #[test]
+    fn usage_cannot_lift_a_listed_row_above_a_scored_one() {
+        let rows = vec![
+            (Rank::Listed(0), 0, row("plugin", "a")),
+            (Rank::title(Match::Loose), 1, row("builtin", "b")),
+        ];
+        let key = rows[0].2.on_click.as_ref().expect("clickable").key();
+        let counts = HashMap::from([(key, 100)]);
+        assert_eq!(merge(rows, &counts)[0].title, "builtin");
     }
 
     /// The merge orders by the weight a provider computed, not by the kind band:

@@ -15,7 +15,7 @@ use wayland_client::{Connection, QueueHandle};
 use wayrun_core::trim_allocator;
 
 use crate::session::{backend, ipc};
-use crate::ui::render;
+use wayrun_ui::render;
 
 use super::{Damage, Shell, scale};
 
@@ -23,7 +23,7 @@ pub(super) use caret::CaretPatch;
 
 const NAMESPACE: &str = "WayRun";
 
-/// How soon to retry a present when both buffers are still held.
+/// How soon to retry a present when no buffer is free yet.
 const RETRY_DELAY: Duration = Duration::from_millis(4);
 
 impl Shell {
@@ -124,14 +124,13 @@ impl Shell {
         if let Some(effect) = self.effect.take() {
             effect.destroy();
         }
-        self.pool = None;
+        // The pool and its buffer stay: every show after the first starts warm.
+        // The frame pixmap and the scratch buffer belong to one show.
         self.pixmap = None;
         self.caret_patch = None;
-        self.buffers = [None, None];
-        self.buffer_stale = [Damage::EMPTY, Damage::EMPTY];
-        self.buffer_next = 0;
-        self.pending_damage = Damage::EMPTY;
-        self.buffer_physical = (0, 0);
+        self.buffers[1] = None;
+        self.scratch_pool = None;
+        self.buffer_stale[1] = Damage::FULL;
         // Free the decoded icons: the resident shell sits hidden between shows
         // and these grow with every distinct payload.
         self.icons.clear();
@@ -140,11 +139,10 @@ impl Shell {
         backend::dismiss();
         self.app.hidden();
         ipc::VISIBLE.store(false, Ordering::Relaxed);
-        // glibc keeps freed large allocations in its arena, so a hidden resident
-        // shell would hold the render buffers it just dropped; return the pages.
-        trim_allocator();
 
         if self.resident {
+            // glibc keeps freed large allocations in its arenas; return the pages.
+            trim_allocator();
             return;
         }
 
@@ -174,31 +172,28 @@ impl Shell {
         self.needs_present = false;
         // The fade begins on the first frame that is actually drawn.
         self.app.start_entrance(now);
-        // A fresh pixmap, a moving dim (entrance) or a reflowing card needs the
+        // A fresh pixmap, a moving dim (entrance) or a springing card needs the
         // whole surface; a settled redraw only repaints the card rectangle.
-        let full = self.needs_full || self.app.animating(now);
+        self.app.sync_split_height(now);
+        let animating = self.app.animating(now);
+        self.app.advance(now);
+        let full = self.needs_full || animating;
         self.needs_full = false;
         {
+            let frame = self.app.frame(now);
             let Some(pixmap) = self.pixmap.as_mut() else {
                 return;
             };
-            render::draw(
-                pixmap,
-                &self.app,
-                &mut self.text,
-                &mut self.icons,
-                now,
-                full,
-            );
+            render::draw(pixmap, &frame, &mut self.text, &mut self.icons, now, full);
         }
 
         // What the frame just changed, in physical pixels: a settled repaint is
         // the card rect, spanned by the previous and current bottoms.
         let surface_size = self.app.surface;
         let scale = self.app.scale_factor();
-        let layout = self.app.appearance.layout;
+        let layout = self.app.layout();
         let top = layout.card_top(surface_size);
-        let new_bottom = top + self.app.card_height(now);
+        let new_bottom = top + self.app.card_height();
         let damage = if full {
             Damage::FULL
         } else {
@@ -217,7 +212,8 @@ impl Shell {
         // can restore them without a second frame pixmap.
         self.capture_caret_patch();
         if let Some(pixmap) = self.pixmap.as_mut() {
-            render::draw_caret(pixmap, &self.app, &mut self.text, now);
+            let frame = self.app.frame(now);
+            render::draw_caret(pixmap, &frame, &mut self.text);
         }
 
         // The blur region is double-buffered state: it must be set before the
@@ -229,7 +225,7 @@ impl Shell {
         }
     }
 
-    /// Retry a deferred present shortly, for when both buffers are still held; the
+    /// Retry a deferred present shortly, for when no buffer is free yet; the
     /// frame callback usually wakes `pump`, but a release can arrive alone.
     fn schedule_retry(&mut self) {
         if self.retry_armed {
@@ -251,7 +247,8 @@ impl Shell {
     pub(super) fn present_caret(&mut self, now: Instant) {
         self.restore_caret_patch();
         if let Some(pixmap) = self.pixmap.as_mut() {
-            render::draw_caret(pixmap, &self.app, &mut self.text, now);
+            let frame = self.app.frame(now);
+            render::draw_caret(pixmap, &frame, &mut self.text);
         }
         if let Some(patch) = self.caret_patch.as_ref() {
             self.pending_damage.add(Damage::rect(
@@ -274,7 +271,7 @@ impl Shell {
         };
         let _ = layer;
 
-        if !self.app.appearance.blur {
+        if !self.app.presentation.appearance.blur {
             // `None` clears a region set before the config disabled blur.
             if self.blur_sent.take().is_some() {
                 effect.set_blur_region(None);
@@ -282,11 +279,12 @@ impl Shell {
             return;
         }
 
-        let height = self.app.card_height(Instant::now());
+        let now = Instant::now();
+        let height = self.app.card_height();
         let rects = self
             .app
-            .appearance
-            .layout
+            .presentation
+            .frame_layout(now)
             .blur_rects(self.app.surface, height);
         let key = rects
             .first()

@@ -30,26 +30,34 @@ pub use system::fs::write_if_absent;
 /// dismissal and the index reaper, both of which drop a large buffer.
 pub use system::fs::trim_allocator;
 
-/// `--list-plugins` prints the registry and exits; otherwise serve the protocol.
-async fn serve_or_list() -> Result<()> {
-    if std::env::args().any(|a| a == "--list-plugins") {
-        plugin::print_list().await;
-        return Ok(());
-    }
+fn runtime() -> Result<tokio::runtime::Runtime> {
+    Ok(tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?)
+}
 
-    session::serve().await
+fn prepare() {
+    locale::init();
+    // Before the runtime exists: the env write must be single-threaded.
+    system::fs::ensure_flatpak_data_dirs();
+    system::icon::warn_if_no_icon_theme();
 }
 
 /// Run the core on stdin/stdout. `wayrun --core` (or invoking the binary as
 /// `wayrun-core`) calls this and blocks for the process's life.
 pub fn run() -> Result<()> {
-    locale::init();
-    // Before the runtime exists: the env write must be single-threaded.
-    system::fs::ensure_flatpak_data_dirs();
-    system::icon::warn_if_no_icon_theme();
+    prepare();
+    runtime()?.block_on(session::serve())
+}
 
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?
-        .block_on(serve_or_list())
+/// Print the plugin registry for `wayrun plugin list`.
+pub fn print_plugins() -> Result<()> {
+    prepare();
+    runtime()?.block_on(plugin::print_list())?;
+    Ok(())
+}
+
+/// The user-file edits behind `wayrun plugin add|enable|disable|remove|set-keyword`.
+pub mod plugins {
+    pub use crate::plugin::{add_plugin, remove_plugin, set_enabled, set_keyword};
 }

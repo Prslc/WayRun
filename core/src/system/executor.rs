@@ -1,4 +1,5 @@
 use gio::prelude::{AppInfoExt, AppLaunchContextExt, FileExt};
+use std::env;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process;
@@ -51,6 +52,7 @@ fn scoped_command(scope: bool, program: &str, args: &[String]) -> process::Comma
         Some(language) => command.env("LANGUAGE", language),
         None => command.env_remove("LANGUAGE"),
     };
+    command.env_remove("WAYRUN_LOCALE");
     restore_signals(&mut command);
     command
 }
@@ -113,9 +115,9 @@ pub fn execute_command(cmd: &str) {
 }
 
 /// The shell line that runs `cmd` and lets the launcher return: detached from
-/// the session, with its output discarded.
+/// the session, with stdout discarded and stderr left on the journal.
 fn detached_line(cmd: &str) -> String {
-    format!("setsid {cmd} >/dev/null 2>&1 &")
+    format!("setsid {cmd} >/dev/null &")
 }
 
 /// Join an argv into a `sh` command line, quoting tokens that need it: the `run:`
@@ -174,6 +176,7 @@ pub(crate) fn launch_context() -> gio::AppLaunchContext {
         Some(language) => context.setenv("LANGUAGE", language),
         None => context.unsetenv("LANGUAGE"),
     }
+    context.unsetenv("WAYRUN_LOCALE");
     context
 }
 
@@ -184,6 +187,18 @@ pub fn open_uri(uri: &str) {
         return;
     }
     let _ = gio::AppInfo::launch_default_for_uri(uri, Some(&launch_context()));
+}
+
+/// Open `uri` with one named handler; a handler that vanished since the panel
+/// was built runs nothing.
+pub fn open_with(desktop_id: &str, uri: &str) {
+    let context = launch_context();
+    for app in gio::AppInfo::all() {
+        if app.id().as_deref() == Some(desktop_id) {
+            let _ = app.launch_uris(&[uri], Some(&context));
+            return;
+        }
+    }
 }
 
 /// Show a file in the file manager: `org.freedesktop.FileManager1.ShowItems`
@@ -241,7 +256,7 @@ fn spawn_argv(argv: &[String], dir: Option<&Path>) {
 
 /// Whether a bare program name resolves to an executable on `PATH`.
 fn program_on_path(name: &str) -> bool {
-    let path = std::env::var_os("PATH").unwrap_or_default();
+    let path = env::var_os("PATH").unwrap_or_default();
     crate::system::fs::which_in(path, name).is_some()
 }
 
@@ -263,6 +278,9 @@ pub fn execute(command: &crate::wire::Action) {
         Action::Reveal { uri } => reveal(uri),
         Action::Terminal { uri } => open_terminal(uri),
         Action::Open { uri } => open_uri(uri),
+        Action::OpenWith { desktop_id, uri } => open_with(desktop_id, uri),
+        // The RPC layer hands this one to the plugin's host; nothing runs here.
+        Action::Plugin { .. } => {}
     }
 }
 
@@ -297,7 +315,7 @@ mod tests {
     #[test]
     fn a_launched_program_gets_the_default_sigpipe() {
         use std::os::unix::process::ExitStatusExt;
-        let mut command = std::process::Command::new("sh");
+        let mut command = process::Command::new("sh");
         restore_signals(&mut command);
         let status = command.args(["-c", "kill -s PIPE $$"]).status().unwrap();
         assert_eq!(status.signal(), Some(libc::SIGPIPE));

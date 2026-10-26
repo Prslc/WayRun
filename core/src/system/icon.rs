@@ -1,5 +1,6 @@
 mod mime;
 mod papirus;
+mod remote;
 mod theme;
 
 use std::collections::HashMap;
@@ -14,6 +15,10 @@ use self::papirus::find_papirus;
 use self::theme::{find_pixmap_icon, find_theme_icon};
 
 pub use self::mime::content_type_icon;
+pub(crate) use self::remote::{
+    icon as remote_icon, preview as remote_preview, start as start_remote,
+    supersede as remote_supersede,
+};
 pub use self::theme::warn_if_no_icon_theme;
 
 /// Distinct specs kept before the map is dropped whole; an app's icon name can
@@ -56,6 +61,14 @@ pub fn find_icon_spec(name: &str) -> Option<String> {
 /// theme's namespace and the compiled glyphs stay out of reach.
 pub fn host_icon_spec(spec: &str) -> Option<String> {
     spec.starts_with('/').then(|| spec.to_string())
+}
+
+/// A GIO icon serialized as `!!/abs/path` for a file icon, else a theme name.
+pub fn gio_icon_path(spec: &str) -> Option<String> {
+    if let Some(path) = spec.strip_prefix("!!") {
+        return (!path.is_empty()).then(|| path.to_string());
+    }
+    resolve(spec)
 }
 
 /// What the Lua SDK's `wayrun.icon()` binds: an absolute path, a theme icon

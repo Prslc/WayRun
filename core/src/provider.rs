@@ -1,6 +1,5 @@
 pub mod application;
 pub mod calculator;
-pub mod clipboard;
 pub mod external;
 pub mod file;
 pub mod path;
@@ -157,7 +156,6 @@ pub fn plugin_map() -> HashMap<&'static str, Box<dyn Plugin>> {
     m.insert("file-search", Box::new(file::FileSearch::new()));
     m.insert("path-search", Box::new(file::PathSearch::new()));
     m.insert("path-lookup", Box::new(path::PathLookup::new()));
-    m.insert("clipboard", Box::new(clipboard::Clipboard::new()));
     m.insert(
         "system-commands",
         Box::new(system_commands::SystemCommands::new()),
@@ -174,6 +172,7 @@ mod tests {
         Match, classify, classify_bytes_confident, classify_ci, classify_ci_confident,
         classify_confident,
     };
+    use std::sync::mpsc;
 
     #[test]
     fn a_case_insensitive_classify_matches_the_lowered_one() {
@@ -304,7 +303,7 @@ mod tests {
     #[tokio::test]
     async fn a_stale_entry_answers_while_the_refetch_runs_behind_it() {
         let cache: FreshCache<u32> = stale_cache(vec![1]);
-        let (release, latch) = std::sync::mpsc::channel::<()>();
+        let (release, latch) = mpsc::channel::<()>();
         let rows = cache
             .get(move || {
                 latch.recv().ok()?;

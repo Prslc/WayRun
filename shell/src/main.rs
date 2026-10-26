@@ -1,87 +1,213 @@
-// The same tables the core reads, so one locale covers both sides of the wire.
-rust_i18n::i18n!("../locales", fallback = "en");
-
 mod app;
+mod cli;
 mod config;
 mod session;
-mod ui;
 mod wayland;
 
+use std::env;
+use std::error::Error;
+use std::io::{self, IsTerminal};
+use std::path::Path;
+use std::process;
 use std::time::Instant;
 
 use calloop::EventLoop;
 use calloop::channel::Event as ChannelEvent;
 use calloop_wayland_source::WaylandSource;
+use clap::{CommandFactory, Parser};
 use wayland_client::Connection;
 use wayland_client::globals::registry_queue_init;
 
+use crate::cli::{Cli, Command, ConfigAction, PluginAction};
 use crate::session::{backend, ipc};
-use crate::ui::render;
 use crate::wayland::Shell;
+use wayrun_ui::render;
 
-fn main() -> std::process::ExitCode {
-    wayrun_core::locale::init();
-    let mut args = std::env::args();
+fn main() -> process::ExitCode {
+    let mut args = env::args();
     let invoked_as = args.next().unwrap_or_default();
-    let rest: Vec<String> = args.collect();
 
-    // The Lua plugin host: the VM lives in this same binary, never in the
-    // core's process, and the script path follows the flag.
-    if let Some(at) = rest.iter().position(|arg| arg == "--lua-host") {
-        let script = rest.get(at + 1).map(String::as_str).unwrap_or_default();
+    // A `wayrun-core` symlink keeps the documented stdin/JSON-RPC entry working.
+    if Path::new(&invoked_as)
+        .file_name()
+        .is_some_and(|name| name == "wayrun-core")
+    {
+        return core();
+    }
+
+    let cli = Cli::parse();
+    wayrun_core::locale::init();
+
+    if let Some(script) = cli.lua_host.as_deref() {
         return match wayrun_core::lua::run(script) {
-            Ok(()) => std::process::ExitCode::SUCCESS,
+            Ok(()) => process::ExitCode::SUCCESS,
             Err(error) => {
                 // `{:#}` keeps the cause: a broken script must say why.
                 eprintln!("wayrun: {error:#}");
-                std::process::ExitCode::FAILURE
+                process::ExitCode::FAILURE
             }
         };
     }
+    if cli.core {
+        return core();
+    }
 
-    // The shell re-execs this binary with `--core`; a `wayrun-core` symlink
-    // keeps the documented stdin/JSON-RPC entry point working.
-    let as_core = std::path::Path::new(&invoked_as)
-        .file_name()
-        .is_some_and(|name| name == "wayrun-core");
-    if as_core
-        || rest
-            .iter()
-            .any(|arg| arg == "--core" || arg == "--list-plugins")
-    {
-        return match wayrun_core::run() {
-            Ok(()) => std::process::ExitCode::SUCCESS,
-            Err(error) => {
-                eprintln!("wayrun: {error}");
-                std::process::ExitCode::FAILURE
+    match cli.command {
+        Some(Command::Run) => {}
+        Some(Command::Config { action }) => return config(action),
+        Some(Command::Plugin { action }) => return plugin(action),
+        Some(Command::Bench) => {
+            render::bench();
+            return process::ExitCode::SUCCESS;
+        }
+        Some(Command::Open) => return ipc::client("open"),
+        Some(Command::Close) => return ipc::client("close"),
+        Some(Command::Toggle) => return ipc::client("toggle"),
+        Some(Command::Status) => return ipc::client("status"),
+        None => {
+            // A terminal gets the command list; a keybind, unit or script has
+            // no terminal and keeps the bare form that runs the launcher.
+            if io::stdin().is_terminal() {
+                let _ = Cli::command().print_help();
+                return process::ExitCode::SUCCESS;
             }
-        };
+        }
     }
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
-    if rest.first().map(String::as_str) == Some("bench") {
-        render::bench();
-        return std::process::ExitCode::SUCCESS;
-    }
-
-    if let Some(verb) = rest.first()
-        && matches!(verb.as_str(), "open" | "close" | "toggle" | "status")
-    {
-        return ipc::client(verb);
-    }
-
     match run() {
-        Ok(()) => std::process::ExitCode::SUCCESS,
+        Ok(()) => process::ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("wayrun: {error}");
-            std::process::ExitCode::FAILURE
+            if error
+                .downcast_ref::<io::Error>()
+                .is_some_and(|error| error.kind() == io::ErrorKind::AddrInUse)
+            {
+                eprintln!("hint: the launcher is already running; `wayrun toggle` shows it");
+            }
+            process::ExitCode::FAILURE
         }
     }
 }
 
-fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let resident = std::env::var_os("WAYRUN_RESIDENT").is_some();
+fn core() -> process::ExitCode {
+    match wayrun_core::run() {
+        Ok(()) => process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("wayrun: {error}");
+            process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn list_plugins() -> process::ExitCode {
+    match wayrun_core::print_plugins() {
+        Ok(()) => process::ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("wayrun: {error}");
+            process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn plugin(action: PluginAction) -> process::ExitCode {
+    match action {
+        PluginAction::List => list_plugins(),
+        PluginAction::Check { script } => match wayrun_core::lua::check(&script) {
+            Ok(true) => process::ExitCode::SUCCESS,
+            Ok(false) => process::ExitCode::FAILURE,
+            Err(error) => {
+                eprintln!("wayrun: {error:#}");
+                process::ExitCode::FAILURE
+            }
+        },
+        PluginAction::Add {
+            script,
+            keyword,
+            resident,
+        } => add(&script, keyword, resident),
+        PluginAction::Enable { id } => {
+            outcome(wayrun_core::plugins::set_enabled(&id, true).map(|()| println!("enabled {id}")))
+        }
+        PluginAction::Disable { id } => outcome(
+            wayrun_core::plugins::set_enabled(&id, false).map(|()| println!("disabled {id}")),
+        ),
+        PluginAction::SetKeyword { id, keyword } => outcome(
+            wayrun_core::plugins::set_keyword(&id, &keyword)
+                .map(|()| println!("keyword {id} = {keyword:?}")),
+        ),
+        PluginAction::Remove { id } => {
+            outcome(wayrun_core::plugins::remove_plugin(&id).map(|()| println!("removed {id}")))
+        }
+    }
+}
+
+fn config(action: ConfigAction) -> process::ExitCode {
+    use wayrun_core::config::edit;
+    match action {
+        ConfigAction::List => match edit::list() {
+            Ok(entries) => {
+                for (key, value) in entries {
+                    println!("{key} = {value}");
+                }
+                process::ExitCode::SUCCESS
+            }
+            Err(error) => fail(error),
+        },
+        ConfigAction::Get { key } => match edit::get(&key) {
+            Ok(value) => {
+                println!("{value}");
+                process::ExitCode::SUCCESS
+            }
+            Err(error) => fail(error),
+        },
+        ConfigAction::Set { key, value } => outcome(edit::set(&key, &value).map(|()| {
+            println!("set {key}");
+            if edit::restart_needed(&key) {
+                println!("restart the launcher to apply {key}");
+            }
+        })),
+        ConfigAction::Unset { key } => outcome(edit::unset(&key).map(|()| {
+            println!("unset {key}");
+            if edit::restart_needed(&key) {
+                println!("restart the launcher to apply {key}");
+            }
+        })),
+    }
+}
+
+fn add(script: &str, keyword: Option<String>, resident: bool) -> process::ExitCode {
+    let result = (|| -> anyhow::Result<()> {
+        let plugins = wayrun_core::lua::plugin_ids(script)?;
+        let [(id, name)] = plugins.as_slice() else {
+            anyhow::bail!(
+                "{script} declares {} plugins; register each one by hand",
+                plugins.len()
+            );
+        };
+        let keyword = keyword.unwrap_or_else(|| id.clone());
+        wayrun_core::plugins::add_plugin(id, &keyword, Path::new(script), resident)?;
+        println!("added {id} ({name}), keyword {keyword:?}");
+        Ok(())
+    })();
+    outcome(result)
+}
+
+fn outcome(result: anyhow::Result<()>) -> process::ExitCode {
+    match result {
+        Ok(()) => process::ExitCode::SUCCESS,
+        Err(error) => fail(error),
+    }
+}
+
+fn fail(error: anyhow::Error) -> process::ExitCode {
+    eprintln!("wayrun: {error:#}");
+    process::ExitCode::FAILURE
+}
+
+fn run() -> Result<(), Box<dyn Error>> {
+    let resident = env::var_os("WAYRUN_RESIDENT").is_some();
 
     // The IPC listener is also the single-instance guard: take it before the
     // first Wayland round trip and before any worker starts.
@@ -99,6 +225,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let (paste_tx, paste_channel) = calloop::channel::channel();
     let (icon_tx, icon_channel) = calloop::channel::channel();
     let (appearance_tx, appearance_channel) = calloop::channel::channel();
+    let (family_tx, family_channel) = calloop::channel::channel();
 
     loop_handle.insert_source(backend_channel, |event, _, state: &mut Shell| {
         if let ChannelEvent::Msg(event) = event {
@@ -125,14 +252,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             state.on_appearance(config, Instant::now());
         }
     })?;
+    loop_handle.insert_source(family_channel, |event, _, state: &mut Shell| {
+        if let ChannelEvent::Msg(family) = event {
+            state.on_font_family(family);
+        }
+    })?;
     WaylandSource::new(conn.clone(), event_queue).insert(loop_handle.clone())?;
 
-    let icon_jobs = ui::icons::spawn_worker(icon_tx);
+    let icon_jobs = wayrun_ui::icons::spawn_worker(move |result| icon_tx.send(result).is_ok());
     let paste_jobs = session::clipboard::spawn(paste_tx);
     let mut shell = Shell::new(&conn, &qh, &loop_handle, &globals, paste_jobs, icon_jobs)?;
-    shell.on_appearance(config::AppearanceConfig::load(), Instant::now());
+    shell.on_appearance(config::load(), Instant::now());
     // Held for the process's life: dropping it stops live config updates.
     let _appearance_watcher = config::watch(appearance_tx);
+    let _family_watcher = config::watch_family(family_tx);
 
     backend::start(backend_tx);
 

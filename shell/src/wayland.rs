@@ -4,6 +4,10 @@ mod input;
 mod scale;
 mod surface;
 
+use std::env;
+use std::error::Error;
+use std::process;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use calloop::LoopHandle;
@@ -31,13 +35,14 @@ use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 
 use crate::app::{self, State as Launcher};
-use crate::config::{AppearanceConfig, Mode};
 use crate::session::backend::BackendEvent;
 use crate::session::ipc;
-use crate::ui::icons::{IconCache, IconKey};
-use crate::ui::text::TextEngine;
-use crate::ui::theme;
 use crate::wayland::ime::Pending;
+use wayrun_core::wire::{IconShape, ResultItem};
+use wayrun_ui::config::{AppearanceConfig, Mode};
+use wayrun_ui::icons::{IconCache, IconKey};
+use wayrun_ui::text::TextEngine;
+use wayrun_ui::theme;
 
 /// A changed rectangle in physical buffer pixels. `full` means the whole buffer, a
 /// zero-size rect means nothing changed; it keeps the two shm buffers in step.
@@ -156,7 +161,7 @@ pub struct Shell {
     pointer: Option<wl_pointer::WlPointer>,
     /// Where the clipboard worker takes a show's read request, and where the
     /// decoded text comes back stamped with that show.
-    paste_jobs: std::sync::mpsc::Sender<u64>,
+    paste_jobs: mpsc::Sender<u64>,
     /// Bumped on every `open`: a paste that outlived its show is dropped.
     paste_generation: u64,
     modifiers: Modifiers,
@@ -168,8 +173,11 @@ pub struct Shell {
     configured: bool,
     effect: Option<ExtBackgroundEffectSurfaceV1>,
     pool: Option<SlotPool>,
-    /// Two persistent shm buffers reused across presents; `buffer_stale[i]` is
-    /// what the pixmap changed since buffer `i` was last written.
+    /// The second frame's pool and buffer, rebuilt per show: the compositor
+    /// releases the current buffer only when the next commit replaces it.
+    scratch_pool: Option<SlotPool>,
+    /// Two shm buffers reused across presents; `buffer_stale[i]` is what the
+    /// pixmap changed since buffer `i` was last written.
     buffers: [Option<Buffer>; 2],
     buffer_stale: [Damage; 2],
     /// The buffer to write next, so the two alternate.
@@ -220,9 +228,9 @@ impl Shell {
         qh: &QueueHandle<Shell>,
         handle: &LoopHandle<'static, Shell>,
         globals: &GlobalList,
-        paste_jobs: std::sync::mpsc::Sender<u64>,
-        icon_jobs: std::sync::mpsc::Sender<(u64, IconKey)>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+        paste_jobs: mpsc::Sender<u64>,
+        icon_jobs: mpsc::Sender<(u64, IconKey)>,
+    ) -> Result<Self, Box<dyn Error>> {
         let compositor = CompositorState::bind(globals, qh)?;
         let shm = Shm::bind(globals, qh)?;
         let layer_shell = LayerShell::bind(globals, qh)?;
@@ -258,6 +266,7 @@ impl Shell {
             configured: false,
             effect: None,
             pool: None,
+            scratch_pool: None,
             buffers: [None, None],
             buffer_stale: [Damage::EMPTY, Damage::EMPTY],
             buffer_next: 0,
@@ -273,10 +282,10 @@ impl Shell {
             wheel_accum: 0.0,
             pending: Pending::default(),
             icons: IconCache::new(icon_jobs),
-            text: TextEngine::new(),
+            text: TextEngine::with_family(wayrun_core::config::get().font.family.clone()),
             app: Launcher::new(),
-            resident: std::env::var_os("WAYRUN_RESIDENT").is_some(),
-            ime_log: std::env::var_os("WAYRUN_IME_LOG").is_some(),
+            resident: env::var_os("WAYRUN_RESIDENT").is_some(),
+            ime_log: env::var_os("WAYRUN_IME_LOG").is_some(),
             started: Instant::now(),
             open_at: None,
             last_present: None,
@@ -298,46 +307,58 @@ impl Shell {
                     Mode::from_wire(config.mode.as_deref()),
                 );
             }
-            BackendEvent::Results(items) => {
-                // A payload landing after a dismissal must not repopulate the rows
-                // the dismissal dropped.
-                if self.layer.is_none() {
-                    return;
-                }
-                // Nor may one land in an empty field: a search superseded by a
-                // clear can have been emitted before the cancel reached the core.
-                if self.app.query.is_empty() {
-                    return;
-                }
-                let now = Instant::now();
-                self.app.apply_results(items, now);
-                let font = self.app.appearance.font;
-                let scale = self.app.scale_factor();
-                let icon_size = (font.icon() * scale).round() as u32;
-                let fg = self.app.theme.fg;
-                let layout = self.app.appearance.layout;
-                let first = self.app.cursor.first;
-                // Ask for what the visible window draws; a row scrolled in
-                // later asks when the frame draws it.
-                for row in self.app.rows.iter().skip(first).take(layout.max_rows) {
-                    // Each warm mirrors how the frame draws it: the row icon
-                    // plain, the action glyphs tinted to their theme colour.
-                    if let Some(path) = &row.icon {
-                        self.icons.warm(path, icon_size);
-                    }
-                    for action in &row.actions {
-                        if let Some(path) = &action.icon {
-                            self.icons.warm_tinted(path, icon_size, fg);
-                        }
-                    }
-                }
+            BackendEvent::Results(items) => self.on_results(items, true),
+            BackendEvent::ResultsPartial(items) => self.on_results(items, false),
+            BackendEvent::ImageReady(path) => {
+                self.icons.forget(&path);
+                self.redraw();
             }
             BackendEvent::CoreExited => {
                 eprintln!("wayrun: the core exited");
-                std::process::exit(1);
+                process::exit(1);
             }
         }
         self.redraw();
+    }
+
+    /// A payload from the core; `final_payload` says whether the search ended.
+    fn on_results(&mut self, items: Vec<ResultItem>, final_payload: bool) {
+        // A payload landing after a dismissal or a clear must not repopulate
+        // rows the shell already dropped.
+        if self.layer.is_none() || self.app.query.is_empty() {
+            return;
+        }
+        let now = Instant::now();
+        if final_payload {
+            self.app.apply_results(items, now);
+            if self.app.take_held_submit() {
+                self.submit(now);
+            }
+        } else {
+            self.app.apply_partial(items, now);
+        }
+        let font = self.app.presentation.appearance.font;
+        let scale = self.app.scale_factor();
+        let icon_size = (font.icon() * scale).round() as u32;
+        let fg = self.app.presentation.theme.fg;
+        let layout = self.app.layout();
+        let first = self.app.cursor.first;
+        // Ask for what the visible window draws; a row scrolled in later asks
+        // when the frame draws it.
+        for row in self.app.rows.iter().skip(first).take(layout.max_rows) {
+            // Each warm mirrors how the frame draws it: the row icon plain, the
+            // action glyphs tinted to their theme colour.
+            if let Some(path) = &row.icon {
+                self.icons
+                    .warm(path, icon_size, row.icon_shape.unwrap_or_default());
+            }
+            for action in &row.actions {
+                if let Some(path) = &action.icon {
+                    self.icons
+                        .warm_tinted(path, icon_size, fg, IconShape::Square);
+                }
+            }
+        }
     }
 
     /// A decoded icon came back from the worker: store it and repaint, so a row
@@ -352,6 +373,14 @@ impl Shell {
     pub fn on_appearance(&mut self, config: AppearanceConfig, now: Instant) {
         self.icons.drop_tinted();
         self.app.apply_appearance(config, now);
+        self.needs_full = true;
+        self.redraw();
+    }
+
+    /// `config.toml`'s font family changed; every cached line was shaped with
+    /// the old one.
+    pub fn on_font_family(&mut self, family: String) {
+        self.text.set_family(family);
         self.needs_full = true;
         self.redraw();
     }
