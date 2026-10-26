@@ -7,6 +7,128 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-27
+
+### Added
+
+- A keyword-routed host streams its results. With `"stream": true` in the
+  request, a Lua host receives an `emit` callback as `search`'s second
+  argument and each `emit` replaces the rows on screen; a forked or resident
+  host writes the same `partial` lines. The core forwards them as
+  `results_partial` notifications, the shell keeps the search pending until
+  the final `results`, and a superseded search drops its queued partials.
+- A result's `icon` and an image preview's path may be an `https://` URL. The
+  core fetches it into a bounded background cache — four workers, superseded
+  when a new search starts — rewrites it to a local path and sends
+  `image_ready` when it lands, so the row or preview reloads without a new
+  payload. `icon_shape: "circle"` clips a row's icon.
+- The selected row can carry a split-view preview: an image or plain UTF-8
+  text in one fixed column of 46% of the content width, so the column does not
+  move when the row changes kind. A short list reserves a square for an image
+  or a readable minimum for text, and host text is capped at 64 KiB.
+  `[preview] enabled = false` turns the column off.
+- File and directory rows list the system's handlers for their content type,
+  after the built-in terminal, reveal and copy actions. `open_with` launches
+  one through GIO with the launcher's language context, and the list is cached
+  per content type over the `.desktop` and `mimeapps.list` roots.
+- `wayrun plugin add|enable|disable|set-keyword|remove|list|check` and
+  `wayrun config get|list|set|unset` edit the user's `plugins.toml` and
+  `config.toml` through `toml_edit`, keeping the template's comments,
+  re-parsing the typed model and writing atomically; a running launcher
+  reloads the file through its watcher. `plugin add` loads the script first
+  and refuses a configured id or a keyword another entry owns, and
+  `plugin check` reports a script's shebang, exec bit, manifest, API version
+  and registration.
+- `plugin{plugin,action,payload}` hands a row's command back to its host:
+  `command` routes it to the named plugin's `command` method, inside the
+  plugin's sandbox, and runs it as a pending command so a dismissal cannot cut
+  it.
+- Lua plugins declare the `PATH` programs they may run, and
+  `wayrun.exec(program, args?)` runs one with argv, no shell, in `$HOME` and
+  under a 1.5 s deadline. The sandbox keeps its env whitelist. A plugin also
+  gains a writable cache directory, `fs.write`/`fs.delete`, `wayrun.import`
+  for modules loaded in the same `_ENV`, `wayrun.file_uri`, `wayrun.locale`,
+  `wayrun.http.get_many`, and `wayrun.http.cached`, which answers from the
+  store with `stale = true` when expired. `print` and `wayrun.log` write to
+  the journal, with a per-call budget.
+- A Lua host reloads when its script or a module it imported changes, and a
+  failed reload keeps the last good VM serving.
+- `theme.toml` can pin any derived surface: `[surfaces]` takes `color` and/or
+  `alpha` (and the hairline's `width`), `[surfaces.dark]`/`[surfaces.light]`
+  layer per mode, and an omitted field keeps deriving from the palette.
+  `[footer] enabled = false` drops the hint bar and gives its band back to the
+  card.
+- The list reports its wait: after 150 ms the footer says `Searching…` and
+  suppresses the no-results note, and a host's search error becomes one
+  display-only row with the first line of the message.
+- A LuaLS stub ships for editor completion.
+
+### Changed
+
+- **Breaking**: the clipboard history is no longer built in. The `c` keyword,
+  its provider, strings and glyph are gone; install `examples/lua/cliphist.lua`
+  from the WayRun-Plugins workspace and register it with `keyword = "c"` and
+  `resident = true`. The Lua exec stdout cap is now 1 MiB so a full
+  `cliphist list` fits. `wl-clipboard` stays for copy and paste.
+- **Breaking**: the command line is clap's. A bare `wayrun` on a terminal
+  prints the command list, and `wayrun run` starts the launcher; a spawn
+  without a terminal still runs it. `--list-plugins` is gone, `wayrun-core`
+  always serves the protocol, `--help` and `--version` work, and a second
+  instance says the launcher is already running and points at
+  `wayrun toggle`.
+- **Breaking**: a Lua plugin's relative filesystem names resolve under its own
+  directory, absolute and `~` reads stay inside a declared area, `fs.write`
+  lands in the plugin directory, and `kv.db` and its siblings are reserved.
+- A built-in file row no longer previews an image; the split column is a
+  plugin capability now, and `[preview] enabled` governs plugin previews.
+- The card animates: results extend it through a critically damped height
+  spring (growth ~150 ms, shrink ~240 ms), a reordered row slides from where
+  it is drawn, and a list appearing from nothing fades in with a 4 px rise.
+  The entrance eases its opacity out while the card rises 8 px, and the
+  default card sits at 0.20 of the output height.
+- The UI is its own `wayrun-ui` crate, holding the drawing and the
+  presentation it derives from, and the large modules are split by concern.
+- The render buffer and its shm pool stay for the process's life, so every
+  show after the first commits a warm frame; the allocator is trimmed on
+  dismissal and the shaped-line cache is capped at 32 entries.
+- A search and its dispatch share one lifetime: a newer query aborts the stale
+  dispatch, so a forked host dies with its future, and a resident host whose
+  caller was dropped is replaced instead of leaving the next call to wait out
+  its deadline.
+- Remote images are fetched concurrently and pruned by the newest search; a
+  preview PNG streams row by row and a JPEG decodes at the smallest DCT scale
+  that covers the pane, so a 4K wallpaper no longer builds the full buffers.
+- The dark card is more opaque and its hairline is white 0.12; the light
+  card's hairline is black 0.10.
+
+### Fixed
+
+- Enter no longer launches the row still on screen while a search is pending:
+  the press is held until the final payload lands, and an edit, the action
+  panel or a dismissal drops it.
+- A list refresh faded every row in on each keystroke; only a list appearing
+  from nothing animates now.
+- A keystroke inside the 150 ms loading delay no longer restarts it, so the
+  footer does not keep deferring its first show.
+- A plugin action that runs the row's command stands in for the synthesized
+  Open entry, so the plugin's title and icon lead the panel.
+- The Lua HTTP cache is keyed by the request headers, so an authenticated or
+  language-specific reply never answers another request, and query parameters
+  are sorted so one parameter set builds one URL.
+- An SVG preview reads the SVG's intrinsic size, and an image preview is
+  fitted to its aspect and averaged on a downscale.
+- The builtin icons are packaged from `ui/assets/icons`, so a release build
+  keeps its glyphs.
+- `plugin list` pads by display width (a CJK name takes the columns its glyphs
+  take), clips an overflowing cell, and says enabled or disabled.
+- A host's identity is re-resolved on a chmod as well as an edit, and a spawn
+  failure other than "not found" is named on stderr.
+- An exec child starts in `$HOME` under a 1.5 s deadline, and a `run` action's
+  stderr stays on the journal.
+- The resident unit's template no longer sets `PATH=` (it replaces the user
+  manager's environment; use `environment.d`), and the open-with docs name a
+  content type's handlers correctly.
+
 ## [0.8.0] - 2026-10-18
 
 ### Added
@@ -693,7 +815,9 @@ and, with `--core`, the backend service.
 - Resident mode over `$XDG_RUNTIME_DIR/wayrun.sock` for zero cold-start
   (`wayrun toggle`).
 
-[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/Prslc/WayRun/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/Prslc/WayRun/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Prslc/WayRun/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Prslc/WayRun/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Prslc/WayRun/compare/v0.4.0...v0.5.0
