@@ -57,18 +57,24 @@ first level of `$HOME` is listed the same way.
 `Shift+Enter` opens a Wox-style second level for the highlighted row: the
 commands that type of result offers. It leads with the row's own command
 (**Open**), then the actions its plugin adds for that type — a file row offers
-"Open in terminal", "Reveal in file manager" and "Copy path", then the system's
-other handlers for the content type ("Open with …"); an application row lists
+"Open in terminal", "Reveal in file manager" and "Copy path", then one
+**Open with** group for the system's other handlers; an application row lists
 its `[Desktop Action …]` groups — then anything an external host attached.
 The dot marks the entry `Enter` runs, so **Open** carries it until a default is
 remembered. A row with no command to offer has no panel at all, so the footer
 hides its actions hint.
 
-While the panel is open, `↑`/`↓` (and the wheel) move through it, `Enter` runs
-the highlighted command, and `Esc` or `Shift+Enter` closes it. Typing closes the
-panel and returns to the field. The `Alt+Enter` gesture re-sends the query with
-the panel held open on the entry that changed, so the default dot moves where
-you put it.
+A group (marked with a `›`) opens a third level instead of running: `Enter` on
+**Open with** lists the handlers by application name, where `Enter` runs the
+highlighted one and `Esc` goes back to the row's actions. A handler can be made
+the default from that level like any other entry.
+
+While the panel is open, `↑`/`↓` (and the wheel) move through it, and `Enter`
+runs the highlighted command or opens the highlighted group. `Esc` goes back one
+level and closes the panel at the top; `Shift+Enter` closes it from any level.
+Typing closes the panel and returns to the field. The `Alt+Enter` gesture
+re-sends the query with the panel held open on the entry that changed, so the
+default dot moves where you put it.
 
 `Alt+Enter` remembers the highlighted command as the default for its plugin, so
 `Enter` on later rows of that plugin runs it; the row's own command stays

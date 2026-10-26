@@ -55,6 +55,7 @@ pub(super) fn draw_list(
             bold: true,
             summary: row.summary.as_deref(),
             default_marker: false,
+            expand: false,
         };
         draw_row(canvas, pixmap, frame, text, icons, &body);
     }

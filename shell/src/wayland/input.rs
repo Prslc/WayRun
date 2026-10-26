@@ -58,7 +58,12 @@ impl Shell {
         if self.app.menu.is_some() {
             match event.keysym {
                 Keysym::Escape => {
-                    self.close_panel(now);
+                    // Escape leaves one submenu at a time, and the panel at the top.
+                    if self.app.menu_back() {
+                        self.retarget_panel(now);
+                    } else {
+                        self.close_panel(now);
+                    }
                     return;
                 }
                 Keysym::Return | Keysym::KP_Enter if shift => {
@@ -72,7 +77,7 @@ impl Shell {
                     return;
                 }
                 Keysym::Return | Keysym::KP_Enter => {
-                    self.run_action(now);
+                    self.menu_enter(now);
                     return;
                 }
                 Keysym::Up => {
@@ -356,7 +361,7 @@ impl PointerHandler for Shell {
                             .app
                             .menu
                             .as_ref()
-                            .map(|menu| (menu.cursor.first, menu.actions.len()))
+                            .map(|menu| (menu.cursor().first, menu.actions().len()))
                             .unwrap_or_default();
                         if let Some(index) = self.app.layout().action_at(
                             self.app.surface,
@@ -365,10 +370,8 @@ impl PointerHandler for Shell {
                             event.position.0 as f32,
                             event.position.1 as f32,
                         ) {
-                            if let Some(menu) = &mut self.app.menu {
-                                menu.cursor.selected = index;
-                            }
-                            self.run_action(now);
+                            self.app.menu_select(index);
+                            self.menu_enter(now);
                             return;
                         }
                         if inside_card {

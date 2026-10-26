@@ -17,6 +17,9 @@ pub const TEXT_INSET: f32 = geom::PAD + MAGNIFIER_BOX + MAGNIFIER_GAP + INPUT_PA
 /// family may lack and then fall back widely.
 pub const ENTER_GLYPH: &str = "⏎";
 
+/// A group entry's trailing mark: Enter opens a further panel level.
+pub const SUBMENU_GLYPH: &str = "›";
+
 /// Everything logical→physical scaling goes through here.
 pub struct Canvas {
     pub scale: f32,

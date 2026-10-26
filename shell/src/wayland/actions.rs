@@ -93,12 +93,7 @@ impl Shell {
         }
         self.app.cancel_held_submit();
         if self.app.open_actions() {
-            self.app.retarget_height(now);
-            self.app.resync_hover();
-            // The panel is taller than the row list was: the band below the
-            // current card edge belongs to the backdrop during the reflow.
-            self.needs_full = true;
-            self.redraw();
+            self.retarget_panel(now);
         }
     }
 
@@ -106,18 +101,26 @@ impl Shell {
         // The user closed it: a panel action's pending reply must not bring it back.
         self.app.cancel_panel_resume();
         if self.app.menu.take().is_some() {
-            self.app.retarget_height(now);
-            self.app.resync_hover();
-            self.needs_full = true;
-            self.redraw();
+            self.retarget_panel(now);
         }
     }
 
-    pub(super) fn run_action(&mut self, now: Instant) {
-        let Some(action) = self.app.selected_action() else {
-            return;
-        };
-        self.execute_action(&action, now);
+    /// Enter in the panel: run the highlighted command, or step into its group.
+    pub(super) fn menu_enter(&mut self, now: Instant) {
+        match self.app.menu_enter() {
+            app::MenuEnter::Run(action) => self.execute_action(&action, now),
+            app::MenuEnter::Opened => self.retarget_panel(now),
+            app::MenuEnter::Nothing => {}
+        }
+    }
+
+    /// The card's body changed shape: the band below the current card edge
+    /// belongs to the backdrop during the reflow.
+    pub(super) fn retarget_panel(&mut self, now: Instant) {
+        self.app.retarget_height(now);
+        self.app.resync_hover();
+        self.needs_full = true;
+        self.redraw();
     }
 
     /// Alt+Enter in the panel: remember the highlighted action as its plugin's default;
@@ -135,7 +138,9 @@ impl Shell {
 
     /// One action-panel command: record the row, run the action and dismiss.
     fn execute_action(&mut self, action: &ActionItem, now: Instant) {
-        let command = &action.action;
+        let Some(command) = &action.action else {
+            return;
+        };
         if let Some(launch) = self.app.selected_row() {
             self.record_row_for(&launch.target, command);
         }

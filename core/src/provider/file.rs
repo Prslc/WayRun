@@ -106,7 +106,8 @@ pub(super) fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
     let mut actions = vec![
         ActionItem {
             title: t!("action.terminal"),
-            action: Action::Terminal { uri: uri.clone() },
+            action: Some(Action::Terminal { uri: uri.clone() }),
+            children: Vec::new(),
             icon: Some("builtin:terminal".to_string()),
             id: Some("terminal".to_string()),
             plugin: None,
@@ -114,7 +115,8 @@ pub(super) fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
         },
         ActionItem {
             title: t!("action.reveal"),
-            action: Action::Reveal { uri: uri.clone() },
+            action: Some(Action::Reveal { uri: uri.clone() }),
+            children: Vec::new(),
             icon: Some("builtin:reveal".to_string()),
             id: Some("reveal".to_string()),
             plugin: None,
@@ -122,9 +124,10 @@ pub(super) fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
         },
         ActionItem {
             title: t!("action.copy_path"),
-            action: Action::Copy {
+            action: Some(Action::Copy {
                 text: path.to_string_lossy().into_owned(),
-            },
+            }),
+            children: Vec::new(),
             icon: Some("builtin:copy".to_string()),
             id: Some("copy_path".to_string()),
             plugin: None,
@@ -138,21 +141,36 @@ pub(super) fn file_actions(item: &ResultItem) -> Vec<ActionItem> {
     actions
 }
 
+/// One `Open with` group, so the alternative handlers open on a further panel
+/// level instead of crowding the row's own commands.
 fn open_with_actions(uri: &str, handlers: Arc<[Handler]>) -> Vec<ActionItem> {
-    handlers
+    if handlers.is_empty() {
+        return Vec::new();
+    }
+    let children = handlers
         .iter()
         .map(|handler| ActionItem {
-            title: t!("action.open_with", app = handler.title),
-            action: Action::OpenWith {
+            title: handler.title.clone(),
+            action: Some(Action::OpenWith {
                 desktop_id: handler.desktop_id.clone(),
                 uri: uri.to_string(),
-            },
+            }),
+            children: Vec::new(),
             icon: handler.icon_spec.as_deref().and_then(gio_icon_path),
             id: Some(format!("open_with:{}", handler.desktop_id)),
             plugin: None,
             default: false,
         })
-        .collect()
+        .collect();
+    vec![ActionItem {
+        title: t!("action.open_with"),
+        action: None,
+        children,
+        icon: Some("builtin:app".to_string()),
+        id: Some("open_with".to_string()),
+        plugin: None,
+        default: false,
+    }]
 }
 
 search_plugin!(
@@ -376,13 +394,19 @@ mod tests {
         let all = file_actions(&row("a.txt", file("file:///tmp/a.txt")));
         assert!(all.len() >= 3);
         let (fixed, openers) = all.split_at(3);
-        assert!(
-            openers.iter().all(|action| action
-                .id
-                .as_deref()
-                .is_some_and(|id| id.starts_with("open_with:"))),
-            "the system's openers follow the fixed commands"
-        );
+        assert!(openers.len() <= 1, "the openers follow as one group");
+        if let Some(group) = openers.first() {
+            assert_eq!(group.id.as_deref(), Some("open_with"));
+            assert_eq!(group.action, None, "a group opens a level, it runs nothing");
+            assert!(
+                !group.children.is_empty()
+                    && group.children.iter().all(|child| child
+                        .id
+                        .as_deref()
+                        .is_some_and(|id| id.starts_with("open_with:"))),
+                "the system's openers sit in that group"
+            );
+        }
         let titles: Vec<&str> = fixed.iter().map(|a| a.title.as_str()).collect();
         assert_eq!(
             titles,
@@ -395,21 +419,21 @@ mod tests {
         );
         assert_eq!(
             fixed[0].action,
-            Action::Terminal {
+            Some(Action::Terminal {
                 uri: "file:///tmp/a.txt".to_string()
-            }
+            })
         );
         assert_eq!(
             fixed[1].action,
-            Action::Reveal {
+            Some(Action::Reveal {
                 uri: "file:///tmp/a.txt".to_string()
-            }
+            })
         );
         assert_eq!(
             fixed[2].action,
-            Action::Copy {
+            Some(Action::Copy {
                 text: "/tmp/a.txt".to_string()
-            }
+            })
         );
 
         assert!(
@@ -433,14 +457,14 @@ mod tests {
             .expect("the row offers a copy");
         assert_eq!(
             copy.action,
-            Action::Copy {
+            Some(Action::Copy {
                 text: "/tmp/a b".to_string()
-            }
+            })
         );
     }
 
     #[test]
-    fn a_handler_becomes_an_open_with_action() {
+    fn the_handlers_become_one_open_with_group() {
         let actions = open_with_actions(
             "file:///tmp/a.txt",
             Arc::from(vec![Handler {
@@ -449,17 +473,28 @@ mod tests {
                 icon_spec: Some("!!/tmp/code.svg".to_string()),
             }]),
         );
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].title, t!("action.open_with", app = "VS Code"));
+        assert_eq!(actions.len(), 1, "the handlers share one group");
+        let group = &actions[0];
+        assert_eq!(group.title, t!("action.open_with"));
+        assert_eq!(group.id.as_deref(), Some("open_with"));
+        assert_eq!(group.children.len(), 1);
+
+        let child = &group.children[0];
+        assert_eq!(child.title, "VS Code", "the group names the app, not again");
         assert_eq!(
-            actions[0].action,
-            Action::OpenWith {
+            child.action,
+            Some(Action::OpenWith {
                 desktop_id: "code.desktop".to_string(),
                 uri: "file:///tmp/a.txt".to_string(),
-            }
+            })
         );
-        assert_eq!(actions[0].id.as_deref(), Some("open_with:code.desktop"));
-        assert_eq!(actions[0].icon.as_deref(), Some("/tmp/code.svg"));
+        assert_eq!(child.id.as_deref(), Some("open_with:code.desktop"));
+        assert_eq!(child.icon.as_deref(), Some("/tmp/code.svg"));
+
+        assert!(
+            open_with_actions("file:///tmp/a.txt", Arc::from(Vec::new())).is_empty(),
+            "no handler, no group"
+        );
     }
 
     #[test]

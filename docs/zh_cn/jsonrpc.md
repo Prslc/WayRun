@@ -176,11 +176,12 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"command","params":{"plugin":"todo","ac
 显示在选中行的右侧列；`text` 携带纯 UTF-8 文本，由启动器换行并裁切，上限
 64 KiB。主题名或 `builtin:` 字形不是预览。
 
-`actions` 元素为 `{"title": string, "action": Action, "icon"?: string}`，
-`icon` 与结果行的 `icon` 采用同样的规范解析。动作还可以带 `id`（稳定的动作类型）、
-`plugin`（归属插件，用于限定默认动作的作用域）与 `default`（为 true 表示 Enter
-执行它）：`plugin` 与 `default` 由后端赋值，主机传来的这两个字段会被忽略；外部主机
-给自己的动作填 `id` 即可使其可被设为默认。
+`actions` 元素要么是一条命令 `{"title": string, "action": Action, "icon"?: string}`，
+要么是一个分组 `{"title": string, "children": [ …元素… ]}`，按 `Enter` 展开动作面板
+的第三层。`icon` 与结果行的 `icon` 采用同样的规范解析。动作还可以带 `id`（稳定的
+动作类型）、`plugin`（归属插件，用于限定默认动作的作用域）与 `default`（为 true 表示
+Enter 执行它）：`plugin` 与 `default` 由后端赋值，主机传来的这两个字段会被忽略；
+外部主机给自己的动作填 `id` 即可使其可被设为默认，分组里层同样适用。
 
 产出该行的内置提供者会补上类型专属动作（文件定位、复制路径、在终端打开、该类型的
 其他打开方式、`[Desktop Action …]`、复制链接），外部主机自带的动作排在其后。

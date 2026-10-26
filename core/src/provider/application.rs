@@ -307,10 +307,11 @@ impl Plugin for AppSearch {
             .iter()
             .map(|action| ActionItem {
                 title: action.name.clone(),
-                action: Action::DesktopAction {
+                action: Some(Action::DesktopAction {
                     desktop_id: desktop_id.clone(),
                     action_id: action.id.clone(),
-                },
+                }),
+                children: Vec::new(),
                 icon: app.icon_path(),
                 // scope the id to the app, so a remembered default stays with it
                 id: Some(format!("desktop_action:{}:{}", desktop_id, action.id)),

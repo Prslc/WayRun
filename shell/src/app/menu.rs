@@ -3,19 +3,70 @@ use wayrun_core::wire::{Action, ActionItem, ResultItem};
 use super::State;
 use super::cursor::Cursor;
 
-/// The action panel (Wox-style) opened with Shift+Enter over the selected row. It
-/// replaces the result list; `parent` is the row it belongs to.
+/// The action panel (Wox-style) opened with Shift+Enter over the selected row,
+/// `levels` stacking each open group over the one that opened it.
 pub struct Menu {
     pub parent: usize,
+    pub levels: Vec<MenuLevel>,
+}
+
+/// One panel level: the row's actions at the root, a group's children below it.
+pub struct MenuLevel {
+    /// The header line; the root leaves it to the row's title.
+    pub title: Option<String>,
     pub actions: Vec<ActionItem>,
     pub cursor: Cursor,
 }
 
 impl Menu {
+    /// The level the panel draws.
+    fn current(&self) -> Option<&MenuLevel> {
+        self.levels.last()
+    }
+
+    /// The entries the panel draws, at its current depth.
+    pub fn actions(&self) -> &[ActionItem] {
+        self.current().map_or(&[], |level| &level.actions)
+    }
+
+    /// The current level's window.
+    pub fn cursor(&self) -> Cursor {
+        self.current()
+            .map_or_else(Cursor::default, |level| level.cursor)
+    }
+
+    /// The current level's own header, when it has one.
+    pub fn title(&self) -> Option<&str> {
+        self.current()?.title.as_deref()
+    }
+
     /// The action the panel would run.
     pub fn selected_action(&self) -> Option<&ActionItem> {
-        self.actions.get(self.cursor.selected)
+        let level = self.current()?;
+        level.actions.get(level.cursor.selected)
     }
+
+    /// The entry the current level dots.
+    pub fn marked(&self, row: Option<&ResultItem>) -> Option<usize> {
+        let level = self.current()?;
+        if self.levels.len() > 1 {
+            return level
+                .actions
+                .iter()
+                .position(|action| action.default && action.action.is_some());
+        }
+        row.and_then(marked_entry)
+    }
+}
+
+/// What Enter in the panel did.
+pub enum MenuEnter {
+    /// Run this entry's command.
+    Run(Box<ActionItem>),
+    /// Step into the highlighted group.
+    Opened,
+    /// Nothing was selected.
+    Nothing,
 }
 
 /// A panel entry, named so a re-emit can find it again: an action id survives
@@ -44,27 +95,60 @@ impl PanelKey {
 /// Whether a panel entry runs the row's own command: the core's leading "Open"
 /// entry and nothing else.
 pub(super) fn is_row_command(row: &ResultItem, action: &ActionItem) -> bool {
-    row.on_click.as_ref() == Some(&action.action)
+    action.action.is_some() && row.on_click.as_ref() == action.action.as_ref()
 }
 
-/// The entry the panel dots: the remembered default, else the row's own command,
-/// so exactly one entry shows what the row's `Enter` runs.
+/// The remembered default anywhere in the panel tree; a submenu entry can be
+/// the row's default, so the root alone is not enough.
+pub(super) fn default_entry(actions: &[ActionItem]) -> Option<&ActionItem> {
+    for action in actions {
+        if action.default && action.action.is_some() {
+            return Some(action);
+        }
+        if let Some(found) = default_entry(&action.children) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// The entry the panel dots at its root: the remembered default, else the row's
+/// own command while nothing anywhere is remembered.
 pub fn marked_entry(row: &ResultItem) -> Option<usize> {
+    if let Some(index) = row
+        .actions
+        .iter()
+        .position(|action| action.default && action.action.is_some())
+    {
+        return Some(index);
+    }
+    if default_entry(&row.actions).is_some() {
+        return None;
+    }
     row.actions
         .iter()
-        .position(|action| action.default)
-        .or_else(|| {
-            row.actions
-                .iter()
-                .position(|action| is_row_command(row, action))
-        })
+        .position(|action| is_row_command(row, action))
 }
 
 /// The action a row's `Enter` runs instead of the row's own command, which only
 /// a remembered default changes.
 pub fn effective_action(row: &ResultItem) -> Option<&ActionItem> {
-    let action = row.actions.iter().find(|action| action.default)?;
-    (row.on_click.as_ref() != Some(&action.action)).then_some(action)
+    let action = default_entry(&row.actions)?;
+    (row.on_click.as_ref() != action.action.as_ref()).then_some(action)
+}
+
+/// The index per level from the root to the entry a panel key names.
+fn key_path(actions: &[ActionItem], key: &PanelKey) -> Option<Vec<usize>> {
+    for (index, action) in actions.iter().enumerate() {
+        if key.matches(action) {
+            return Some(vec![index]);
+        }
+        if let Some(mut rest) = key_path(&action.children, key) {
+            rest.insert(0, index);
+            return Some(rest);
+        }
+    }
+    None
 }
 
 impl State {
@@ -78,8 +162,11 @@ impl State {
         }
         self.menu = Some(Menu {
             parent: self.cursor.selected,
-            actions: row.actions.clone(),
-            cursor: Cursor::default(),
+            levels: vec![MenuLevel {
+                title: None,
+                actions: row.actions.clone(),
+                cursor: Cursor::default(),
+            }],
         });
         true
     }
@@ -103,8 +190,8 @@ impl State {
         self.panel_resume = None;
     }
 
-    /// Put the panel back on the row `row_key` names with `key` highlighted. A
-    /// row or entry that did not survive the re-emit leaves the panel closed.
+    /// Put the panel back on the row `row_key` names with `key` highlighted and
+    /// its group reopened; an entry that did not survive leaves it closed.
     pub(super) fn resume_panel(&mut self, row_key: &Action, key: &PanelKey) {
         let Some(index) = self
             .rows
@@ -120,15 +207,34 @@ impl State {
         if row.actions.is_empty() {
             return;
         }
-        let actions = row.actions.clone();
-        let selected = actions
-            .iter()
-            .position(|action| key.matches(action))
-            .unwrap_or(0);
+        let path = key_path(&row.actions, key).unwrap_or_else(|| vec![0]);
+        let mut levels = vec![MenuLevel {
+            title: None,
+            actions: row.actions.clone(),
+            cursor: Cursor::default(),
+        }];
+        for depth in 1..path.len() {
+            let (title, actions) = {
+                let Some(entry) = levels
+                    .last()
+                    .and_then(|level| level.actions.get(path[depth - 1]))
+                else {
+                    return;
+                };
+                (entry.title.clone(), entry.children.clone())
+            };
+            levels.push(MenuLevel {
+                title: Some(title),
+                actions,
+                cursor: Cursor::default(),
+            });
+        }
+        for (level, selected) in levels.iter_mut().zip(&path) {
+            level.cursor.selected = *selected;
+        }
         self.menu = Some(Menu {
             parent: index,
-            actions,
-            cursor: Cursor { selected, first: 0 },
+            levels,
         });
         self.menu_contain();
     }
@@ -143,6 +249,8 @@ impl State {
     pub fn selected_default(&self) -> Option<(&str, Option<&str>)> {
         let menu = self.menu.as_ref()?;
         let action = menu.selected_action()?;
+        // A group opens a level instead of running, so it cannot be a default.
+        action.action.as_ref()?;
         let plugin = action.plugin.as_deref();
         if action.default {
             return Some((plugin?, None));
@@ -151,10 +259,7 @@ impl State {
         // The row's own command is the implicit default, so picking it under any
         // title drops what the row remembered — whichever plugin's scope did.
         if is_row_command(row, action) {
-            return row
-                .actions
-                .iter()
-                .find(|action| action.default)
+            return default_entry(&row.actions)
                 .and_then(|action| action.plugin.as_deref())
                 .or(plugin)
                 .map(|scope| (scope, None));
@@ -164,58 +269,102 @@ impl State {
             .map(|(scope, id)| (scope, Some(id)))
     }
 
-    /// The title of the row the panel belongs to, for its header.
-    pub fn menu_parent_title(&self) -> Option<&str> {
+    /// The panel's header: the row's title at the root, a group's title inside.
+    pub fn menu_title(&self) -> Option<&str> {
         let menu = self.menu.as_ref()?;
-        self.rows.get(menu.parent).map(|row| row.title.as_str())
+        menu.title()
+            .or_else(|| self.rows.get(menu.parent).map(|row| row.title.as_str()))
+    }
+
+    /// Enter in the panel: step into the highlighted group, or hand back the
+    /// command to run.
+    pub fn menu_enter(&mut self) -> MenuEnter {
+        let Some(entry) = self.menu.as_ref().and_then(Menu::selected_action) else {
+            return MenuEnter::Nothing;
+        };
+        if entry.children.is_empty() {
+            return MenuEnter::Run(Box::new(entry.clone()));
+        }
+        let next = MenuLevel {
+            title: Some(entry.title.clone()),
+            actions: entry.children.clone(),
+            cursor: Cursor::default(),
+        };
+        let Some(menu) = &mut self.menu else {
+            return MenuEnter::Nothing;
+        };
+        menu.levels.push(next);
+        self.menu_contain();
+        MenuEnter::Opened
+    }
+
+    /// Leave a submenu for the level that opened it; `false` at the root.
+    pub fn menu_back(&mut self) -> bool {
+        let Some(menu) = &mut self.menu else {
+            return false;
+        };
+        if menu.levels.len() <= 1 {
+            return false;
+        }
+        menu.levels.pop();
+        self.menu_contain();
+        true
+    }
+
+    /// Move the panel's selection to an entry the pointer hit.
+    pub fn menu_select(&mut self, index: usize) {
+        let level = self.menu.as_mut().and_then(|menu| menu.levels.last_mut());
+        if let Some(level) = level {
+            level.cursor.selected = index;
+        }
     }
 
     pub fn menu_up(&mut self) {
-        if let Some(menu) = &mut self.menu {
-            menu.cursor.up();
+        if let Some(level) = self.menu.as_mut().and_then(|menu| menu.levels.last_mut()) {
+            level.cursor.up();
         }
         self.menu_contain();
     }
 
     pub fn menu_down(&mut self) {
-        if let Some(menu) = &mut self.menu {
-            menu.cursor.down(menu.actions.len());
+        if let Some(level) = self.menu.as_mut().and_then(|menu| menu.levels.last_mut()) {
+            level.cursor.down(level.actions.len());
         }
         self.menu_contain();
     }
 
     /// The wheel moves the panel's selection, like the arrows.
     pub fn menu_scroll(&mut self, rows: i32) {
-        let Some(menu) = &mut self.menu else {
+        let Some(level) = self.menu.as_mut().and_then(|menu| menu.levels.last_mut()) else {
             return;
         };
-        if menu.actions.is_empty() || rows == 0 {
+        if level.actions.is_empty() || rows == 0 {
             return;
         }
-        menu.cursor.scroll(rows, menu.actions.len());
+        level.cursor.scroll(rows, level.actions.len());
         self.menu_contain();
     }
 
     pub fn menu_page_up(&mut self) {
         let page = self.layout().max_rows;
-        if let Some(menu) = &mut self.menu {
-            menu.cursor.page_up(page);
+        if let Some(level) = self.menu.as_mut().and_then(|menu| menu.levels.last_mut()) {
+            level.cursor.page_up(page);
         }
         self.menu_contain();
     }
 
     pub fn menu_page_down(&mut self) {
         let page = self.layout().max_rows;
-        if let Some(menu) = &mut self.menu {
-            menu.cursor.page_down(menu.actions.len(), page);
+        if let Some(level) = self.menu.as_mut().and_then(|menu| menu.levels.last_mut()) {
+            level.cursor.page_down(level.actions.len(), page);
         }
         self.menu_contain();
     }
 
     fn menu_contain(&mut self) {
         let layout = self.layout();
-        if let Some(menu) = &mut self.menu {
-            menu.cursor.contain(menu.actions.len(), layout);
+        if let Some(level) = self.menu.as_mut().and_then(|menu| menu.levels.last_mut()) {
+            level.cursor.contain(level.actions.len(), layout);
         }
         self.resync_hover();
     }
@@ -224,7 +373,9 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::test_support::{file_row, item, plugin_action, run, state, with_actions};
+    use crate::app::test_support::{
+        file_row, item, plugin_action, run, state, submenu, with_actions,
+    };
     use std::time::Instant;
 
     #[test]
@@ -234,7 +385,8 @@ mod tests {
         let execute =
             |title: &str, command: Action, id: Option<&str>, plugin: Option<&str>| ActionItem {
                 title: title.to_string(),
-                action: command,
+                action: Some(command),
+                children: Vec::new(),
                 icon: None,
                 id: id.map(str::to_string),
                 plugin: plugin.map(str::to_string),
@@ -280,7 +432,7 @@ mod tests {
         assert!(state.open_actions());
 
         fn remember(state: &mut State, selected: usize) -> Option<(String, Option<String>)> {
-            state.menu.as_mut().unwrap().cursor.selected = selected;
+            state.menu_select(selected);
             state
                 .selected_default()
                 .map(|(plugin, id)| (plugin.to_string(), id.map(str::to_string)))
@@ -311,7 +463,8 @@ mod tests {
         let mut row = item("name", None, Some(copy.clone()), None);
         row.actions = vec![ActionItem {
             title: "Copy name".to_string(),
-            action: copy,
+            action: Some(copy),
+            children: Vec::new(),
             icon: None,
             id: Some("copy_name".to_string()),
             plugin: Some("icons".to_string()),
@@ -363,7 +516,7 @@ mod tests {
         )];
 
         assert!(state.open_actions());
-        assert_eq!(state.menu_parent_title(), Some("Firefox"));
+        assert_eq!(state.menu_title(), Some("Firefox"));
         assert_eq!(
             state.selected_action().unwrap().title,
             "Reveal in file manager"
@@ -416,9 +569,10 @@ mod tests {
         let uri = "file:///tmp/a.txt";
         let open = ActionItem {
             title: "Open".to_string(),
-            action: Action::Open {
+            action: Some(Action::Open {
                 uri: uri.to_string(),
-            },
+            }),
+            children: Vec::new(),
             icon: None,
             id: None,
             plugin: Some("file-search".to_string()),
@@ -475,9 +629,10 @@ mod tests {
         row.actions = vec![
             ActionItem {
                 title: "Open".to_string(),
-                action: Action::Open {
+                action: Some(Action::Open {
                     uri: uri.to_string(),
-                },
+                }),
+                children: Vec::new(),
                 icon: None,
                 id: None,
                 plugin: None,
@@ -485,9 +640,10 @@ mod tests {
             },
             ActionItem {
                 title: "Mark done".to_string(),
-                action: Action::Run {
+                action: Some(Action::Run {
                     cmd: "done".to_string(),
-                },
+                }),
+                children: Vec::new(),
                 icon: None,
                 id: Some("done".to_string()),
                 plugin: Some("todo".to_string()),
@@ -534,7 +690,7 @@ mod tests {
             now,
         );
         assert!(state.open_actions());
-        state.menu.as_mut().unwrap().cursor.selected = 1;
+        state.menu_select(1);
 
         // Alt+Enter on "Open in terminal": the reply carries the dot and the
         // panel must land back on that entry, not on the top of the list.
@@ -546,9 +702,9 @@ mod tests {
         );
 
         let menu = state.menu.as_ref().expect("the panel comes back");
-        assert_eq!(menu.cursor.selected, 1);
+        assert_eq!(menu.cursor().selected, 1);
         assert!(
-            menu.actions[1].default,
+            menu.actions()[1].default,
             "the highlighted entry is the marked one"
         );
         assert_eq!(state.cursor.selected, 0, "the panel's row is the selection");
@@ -634,11 +790,11 @@ mod tests {
         state.menu_down();
         state.menu_down();
         state.menu_down();
-        assert_eq!(state.menu.as_ref().unwrap().cursor.selected, 5);
-        assert_eq!(state.menu.as_ref().unwrap().cursor.first, 5 - max + 1);
+        assert_eq!(state.menu.as_ref().unwrap().cursor().selected, 5);
+        assert_eq!(state.menu.as_ref().unwrap().cursor().first, 5 - max + 1);
 
         state.menu_page_up();
-        assert_eq!(state.menu.as_ref().unwrap().cursor.selected, 5 - max);
+        assert_eq!(state.menu.as_ref().unwrap().cursor().selected, 5 - max);
     }
 
     #[test]
@@ -656,9 +812,10 @@ mod tests {
         );
         row.actions = vec![ActionItem {
             title: "Open in terminal".into(),
-            action: Action::Terminal {
+            action: Some(Action::Terminal {
                 uri: uri.to_string(),
-            },
+            }),
+            children: Vec::new(),
             icon: None,
             id: Some("terminal".into()),
             plugin: Some("file-search".into()),
@@ -676,14 +833,143 @@ mod tests {
         state.menu = None;
 
         // a default that runs the row's own command is not a different outcome
-        row.actions[0].action = Action::Open {
+        row.actions[0].action = Some(Action::Open {
             uri: uri.to_string(),
-        };
+        });
         state.apply_results(vec![row.clone()], now);
         assert_eq!(state.frame(now).footer.effective_label, None);
 
         row.actions.clear();
         state.apply_results(vec![row], now);
         assert_eq!(state.frame(now).footer.effective_label, None);
+    }
+
+    fn open_with(title: &str, desktop_id: &str, uri: &str) -> ActionItem {
+        plugin_action(
+            title,
+            Action::OpenWith {
+                desktop_id: desktop_id.to_string(),
+                uri: uri.to_string(),
+            },
+            &format!("open_with:{desktop_id}"),
+            false,
+        )
+    }
+
+    #[test]
+    fn enter_opens_a_group_and_the_panel_header_names_it() {
+        let uri = "file:///tmp/a.txt";
+        let mut state = state();
+        state.apply_results(
+            vec![file_row(
+                uri,
+                vec![
+                    plugin_action(
+                        "Reveal in file manager",
+                        Action::Reveal {
+                            uri: uri.to_string(),
+                        },
+                        "reveal",
+                        false,
+                    ),
+                    submenu(
+                        "Open with",
+                        vec![
+                            open_with("Firefox", "firefox.desktop", uri),
+                            open_with("VS Code", "code.desktop", uri),
+                        ],
+                    ),
+                ],
+            )],
+            Instant::now(),
+        );
+
+        assert!(state.open_actions());
+        assert_eq!(state.menu_title(), Some("a.txt"));
+        state.menu_select(1);
+        assert!(matches!(state.menu_enter(), MenuEnter::Opened));
+        assert_eq!(state.menu_title(), Some("Open with"));
+        assert_eq!(state.content_height(), state.layout().panel_h(2));
+        assert_eq!(state.selected_action().unwrap().title, "Firefox");
+
+        match state.menu_enter() {
+            MenuEnter::Run(action) => assert_eq!(action.title, "Firefox"),
+            _ => panic!("a submenu entry runs its command"),
+        }
+
+        assert!(state.menu_back(), "escape returns to the row's actions");
+        assert_eq!(state.menu_title(), Some("a.txt"));
+        assert!(!state.menu_back(), "the root level has nowhere to go");
+    }
+
+    #[test]
+    fn a_group_is_not_a_defaultable_entry() {
+        let uri = "file:///tmp/a.txt";
+        let mut state = state();
+        state.apply_results(
+            vec![file_row(
+                uri,
+                vec![submenu(
+                    "Open with",
+                    vec![open_with("Firefox", "firefox.desktop", uri)],
+                )],
+            )],
+            Instant::now(),
+        );
+        assert!(state.open_actions());
+        assert_eq!(
+            state.selected_default(),
+            None,
+            "a group opens a level, so it cannot be what Enter runs"
+        );
+
+        state.menu_select(0);
+        assert!(matches!(state.menu_enter(), MenuEnter::Opened));
+        assert_eq!(
+            state.selected_default(),
+            Some(("file-search", Some("open_with:firefox.desktop")))
+        );
+    }
+
+    #[test]
+    fn a_nested_default_resumes_into_its_submenu() {
+        let now = Instant::now();
+        let uri = "file:///tmp/a.txt";
+        let group = |default: bool| {
+            let mut entry = open_with("Firefox", "firefox.desktop", uri);
+            entry.default = default;
+            submenu("Open with", vec![entry])
+        };
+        let mut state = state();
+        state.apply_results(vec![file_row(uri, vec![group(false)])], now);
+        assert!(state.open_actions());
+        state.menu_select(0);
+        assert!(matches!(state.menu_enter(), MenuEnter::Opened));
+
+        // Alt+Enter on the handler: the reply carries the dot inside the group,
+        // and the panel must come back into that group, not to its root.
+        let chosen = state.selected_action().unwrap();
+        state.keep_panel(&chosen);
+        state.apply_results(vec![file_row(uri, vec![group(true)])], now);
+
+        let row = state.rows.first().unwrap();
+        assert_eq!(
+            marked_entry(row),
+            None,
+            "nothing at the root runs the remembered handler"
+        );
+
+        let menu = state.menu.as_ref().expect("the panel comes back");
+        assert_eq!(menu.levels.len(), 2);
+        assert!(menu.title().is_some(), "the submenu keeps its own header");
+        assert!(menu.actions()[0].default);
+        assert_eq!(menu.cursor().selected, 0);
+
+        state.menu = None;
+        assert_eq!(
+            state.frame(now).footer.effective_label,
+            Some("Firefox"),
+            "the footer still names what Enter runs"
+        );
     }
 }

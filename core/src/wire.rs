@@ -57,11 +57,16 @@ impl Action {
     }
 }
 
-/// One action-panel entry of a row, never run by Enter unless it is the default.
+/// One action-panel entry: a leaf runs its `action`, a group opens its
+/// `children` as a further panel level.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ActionItem {
     pub title: String,
-    pub action: Action,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<Action>,
+    /// The entries a group opens on Enter; empty for a leaf.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<ActionItem>,
     /// The icon spec; the core resolves system lookups and passes a `builtin:`
     /// glyph through, like a row's `icon`.
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -11,7 +11,7 @@ pub enum Hover {
 
 /// The window a list moves through: the highlighted index and the top row of
 /// the fixed `max_rows` window; list and panel move theirs by the same rules.
-#[derive(Default)]
+#[derive(Default, Clone, Copy)]
 pub struct Cursor {
     pub selected: usize,
     pub first: usize,
@@ -54,7 +54,13 @@ impl State {
         let layout = self.layout();
         let hover = if let Some(menu) = &self.menu {
             layout
-                .action_at(self.surface, menu.cursor.first, menu.actions.len(), x, y)
+                .action_at(
+                    self.surface,
+                    menu.cursor().first,
+                    menu.actions().len(),
+                    x,
+                    y,
+                )
                 .map(Hover::Action)
         } else {
             layout
@@ -89,7 +95,13 @@ impl State {
         let hit = self.pointer.and_then(|(x, y)| {
             if let Some(menu) = &self.menu {
                 layout
-                    .action_at(self.surface, menu.cursor.first, menu.actions.len(), x, y)
+                    .action_at(
+                        self.surface,
+                        menu.cursor().first,
+                        menu.actions().len(),
+                        x,
+                        y,
+                    )
                     .map(Hover::Action)
             } else {
                 layout

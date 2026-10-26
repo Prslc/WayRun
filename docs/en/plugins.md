@@ -79,11 +79,12 @@ instead; they then keep no cache.
 
 A result row can carry secondary commands, shown in the `Shift+Enter` panel. They
 differ by result type: `file-search`/`path-search` offer "Open in terminal",
-"Reveal in file manager" and "Copy path", then the system's other handlers for
-the content type ("Open with …"); `app-search` lists the entry's
-`[Desktop Action …]` groups, and an external host's rows carry whatever `actions`
-it attaches (the workspace's `web.lua` offers "Copy URL"). The row's own command
-leads the panel, and an external host's own `actions` follow the plugin's.
+"Reveal in file manager" and "Copy path", then an **Open with** group for the
+system's other handlers, which opens a further panel level; `app-search` lists
+the entry's `[Desktop Action …]` groups, and an external host's rows carry
+whatever `actions` it attaches (the workspace's `web.lua` offers "Copy URL").
+The row's own command leads the panel, and an external host's own `actions`
+follow the plugin's.
 
 Give an action an `id` to let the user make it the default `Enter` action with
 `Alt+Enter`; the panel's **Open** entry — the row's own command — takes the
