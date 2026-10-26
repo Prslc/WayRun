@@ -99,6 +99,15 @@ wayrun run
 启动器以全屏覆盖打开，带调暗背景与居中卡片。默认的热键拉起方式下，`Esc` 或点击卡片
 外会退出；常驻模式下热键切换窗口，关闭改为隐藏。
 
+同一个二进制也自带控制命令：
+
+```bash
+wayrun                                  # 在终端里列出全部命令
+wayrun toggle                           # 常驻模式：经 socket 显示或隐藏
+wayrun config set font.family "Noto Sans"
+wayrun plugin add ~/plugins/firefox.lua --keyword ff
+```
+
 ## 合成器后端
 
 覆盖层与合成器无关；只有窗口搜索（`w`）需要按合成器单独编译，由 cargo feature 选择

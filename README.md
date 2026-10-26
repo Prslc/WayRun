@@ -113,6 +113,15 @@ The launcher is a full-screen overlay with a dimmed backdrop and a centered card
 In the default spawn-per-hotkey flow, `Esc` / clicking outside quits it; in
 resident mode the hotkey toggles the surface and dismiss hides it.
 
+The same binary carries its own controls:
+
+```bash
+wayrun                                  # list the commands in a terminal
+wayrun toggle                           # resident mode: show or hide over the socket
+wayrun config set font.family "Noto Sans"
+wayrun plugin add ~/plugins/firefox.lua --keyword ff
+```
+
 ## Compositor backends
 
 The overlay works on any supported compositor; only open-window search (`w`)
