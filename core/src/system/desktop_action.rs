@@ -19,7 +19,7 @@ unsafe extern "C" {
         info: *mut gio::glib::gobject_ffi::GObject,
         action_name: *const c_char,
         context: *mut gio::ffi::GAppLaunchContext,
-    ) -> gio::glib::ffi::gboolean;
+    );
 }
 
 /// Every path a desktop id may live at, in XDG precedence order: the user's own
@@ -267,7 +267,7 @@ fn expand(exec: &str, entry: &DesktopEntry, action_id: &str, path: &Path) -> Vec
 }
 
 /// Runs one action of one desktop entry; GLib's launcher first, with the hand
-/// expanded `Exec=` as the fallback.
+/// expanded `Exec=` as the fallback when GLib refuses the file.
 pub fn launch(desktop_id: &str, action_id: &str) -> bool {
     if launch_with_glib(desktop_id, action_id) {
         return true;
@@ -294,6 +294,8 @@ pub fn launch(desktop_id: &str, action_id: &str) -> bool {
     true
 }
 
+/// Whether GLib accepted the entry and was asked to launch the action; the call
+/// reports nothing (it returns `void`), so only a refused file falls back.
 fn launch_with_glib(desktop_id: &str, action_id: &str) -> bool {
     let Some(path) = find(desktop_id) else {
         return false;
@@ -312,10 +314,9 @@ fn launch_with_glib(desktop_id: &str, action_id: &str) -> bool {
         if info.is_null() {
             return false;
         }
-        let launched =
-            g_desktop_app_info_launch_action(info, action.as_ptr(), context.to_glib_none().0) != 0;
+        g_desktop_app_info_launch_action(info, action.as_ptr(), context.to_glib_none().0);
         gio::glib::gobject_ffi::g_object_unref(info as *mut _);
-        launched
+        true
     }
 }
 
