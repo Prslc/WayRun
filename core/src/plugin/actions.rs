@@ -61,32 +61,35 @@ fn attach_actions(
 
     // Every plugin action carries its owner, so the shell can scope a default.
     if let Some(owner) = &owner {
-        for action in &mut actions {
+        walk(&mut actions, &mut |action| {
             if action.plugin.is_none() {
                 action.plugin = Some(owner.clone());
             }
-        }
+        });
     }
 
     // A remembered default elevates its action to Enter, whichever plugin the
     // scope belongs to: a host's action is remembered under the host's id.
-    for action in &mut actions {
+    walk(&mut actions, &mut |action| {
         action.default = action
             .plugin
             .as_deref()
             .and_then(|plugin| defaults.get(plugin))
             .is_some_and(|id| action.id.as_deref() == Some(id.as_str()));
-    }
+    });
 
     // The row's own command leads the panel when no plugin action already names
     // it; re-picking it takes the default back, and a lone command shows none.
-    let named = actions.iter().any(|action| action.action == on_click);
+    let named = actions
+        .iter()
+        .any(|action| action.action.as_ref() == Some(&on_click));
     if !actions.is_empty() && !named {
         actions.insert(
             0,
             ActionItem {
                 title: t!("action.open"),
-                action: on_click.clone(),
+                action: Some(on_click.clone()),
+                children: Vec::new(),
                 icon: Some("builtin:open".to_string()),
                 id: None,
                 plugin: owner.clone(),
@@ -97,15 +100,23 @@ fn attach_actions(
 
     // Core and plugin actions carry `builtin:` specs; a host action's icon is
     // already absolute, so anything unresolved keeps no icon.
-    for action in &mut actions {
+    walk(&mut actions, &mut |action| {
         action.icon = action
             .icon
             .as_deref()
             .filter(|spec| !spec.is_empty())
             .and_then(find_icon_spec);
-    }
+    });
 
     item.actions = actions;
+}
+
+/// Every entry of the panel tree in turn, an entry before its children.
+fn walk(actions: &mut [ActionItem], f: &mut impl FnMut(&mut ActionItem)) {
+    for action in actions {
+        f(action);
+        walk(&mut action.children, f);
+    }
 }
 
 #[cfg(test)]
@@ -131,9 +142,10 @@ mod tests {
         );
         let reveal = ActionItem {
             title: "Reveal in file manager".to_string(),
-            action: Action::Reveal {
+            action: Some(Action::Reveal {
                 uri: "file:///tmp/a.txt".to_string(),
-            },
+            }),
+            children: Vec::new(),
             icon: None,
             id: Some("reveal".to_string()),
             plugin: None,
@@ -164,7 +176,8 @@ mod tests {
         let mut row = item("download", copy.clone());
         row.actions = vec![ActionItem {
             title: "Copy name".to_string(),
-            action: copy,
+            action: Some(copy),
+            children: Vec::new(),
             icon: None,
             id: Some("copy_name".to_string()),
             plugin: Some("icons".to_string()),
@@ -205,7 +218,8 @@ mod tests {
         );
         row.actions = vec![ActionItem {
             title: "Mark done".to_string(),
-            action: run("done"),
+            action: Some(run("done")),
+            children: Vec::new(),
             icon: None,
             id: Some("done".to_string()),
             plugin: Some("todo".to_string()),
@@ -235,7 +249,8 @@ mod tests {
         );
         row.actions = vec![ActionItem {
             title: "Mark done".to_string(),
-            action: run("done"),
+            action: Some(run("done")),
+            children: Vec::new(),
             icon: None,
             id: Some("done".to_string()),
             plugin: Some("todo".to_string()),
@@ -270,7 +285,8 @@ mod tests {
     fn file_action(title: &str, id: &str, command: Action) -> ActionItem {
         ActionItem {
             title: title.to_string(),
-            action: command,
+            action: Some(command),
+            children: Vec::new(),
             icon: None,
             id: Some(id.to_string()),
             plugin: None,
@@ -319,9 +335,9 @@ mod tests {
         assert_eq!(open.plugin.as_deref(), Some("file-search"));
         assert_eq!(
             open.action,
-            Action::Open {
+            Some(Action::Open {
                 uri: uri.to_string()
-            }
+            })
         );
         let default = row.actions.iter().find(|a| a.default).unwrap();
         assert_eq!(default.id.as_deref(), Some("terminal"));
@@ -361,5 +377,49 @@ mod tests {
             t!("action.open"),
             "the row command always leads"
         );
+    }
+
+    #[test]
+    fn a_grouped_entry_is_stamped_and_marked_like_a_flat_one() {
+        let uri = "file:///tmp/a.txt";
+        let mut row = item(
+            "a.txt",
+            Action::Open {
+                uri: uri.to_string(),
+            },
+        );
+        let group = ActionItem {
+            title: "Open with".to_string(),
+            action: None,
+            children: vec![file_action(
+                "Firefox",
+                "open_with:firefox.desktop",
+                Action::OpenWith {
+                    desktop_id: "firefox.desktop".to_string(),
+                    uri: uri.to_string(),
+                },
+            )],
+            icon: None,
+            id: Some("open_with".to_string()),
+            plugin: None,
+            default: false,
+        };
+        let mut defaults = HashMap::new();
+        defaults.insert(
+            "file-search".to_string(),
+            "open_with:firefox.desktop".to_string(),
+        );
+        attach_actions(
+            &mut row,
+            &defaults,
+            (Some("file-search".to_string()), vec![group]),
+        );
+
+        let group = &row.actions[1];
+        assert_eq!(group.plugin.as_deref(), Some("file-search"));
+        assert!(!group.default, "the group itself is never the default");
+        let child = &group.children[0];
+        assert_eq!(child.plugin.as_deref(), Some("file-search"));
+        assert!(child.default, "a grouped entry can carry the default");
     }
 }

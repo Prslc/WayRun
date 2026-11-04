@@ -23,7 +23,6 @@ reboot        restart-alt
 reveal        folder-open
 suspend       bedtime
 terminal      terminal
-window        window
 
 The `app` mark is WayRun's own work and carries no third-party licence; every
 other file below is Material Symbols under the Apache License, Version 2.0.

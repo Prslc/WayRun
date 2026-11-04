@@ -19,7 +19,7 @@ unsafe extern "C" {
         info: *mut gio::glib::gobject_ffi::GObject,
         action_name: *const c_char,
         context: *mut gio::ffi::GAppLaunchContext,
-    ) -> gio::glib::ffi::gboolean;
+    );
 }
 
 /// Every path a desktop id may live at, in XDG precedence order: the user's own
@@ -184,20 +184,6 @@ fn program_name(word: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// The icon of the app a Wayland `app_id` names: the id's `.desktop` file wins
-/// when one exists, otherwise the id is tried as a theme icon name.
-pub fn icon_for_app_id(app_id: &str) -> Option<String> {
-    if app_id.is_empty() {
-        return None;
-    }
-    if let Some(icon) = entry(app_id, None).and_then(|e| e.icon().map(str::to_owned))
-        && let Some(path) = crate::system::icon::resolve(&icon)
-    {
-        return Some(path);
-    }
-    crate::system::icon::resolve(app_id)
-}
-
 /// What this entry's field codes stand for. `%i` names the action group's own
 /// `Icon=` when it has one, as the spec's action groups allow.
 struct Codes<'a> {
@@ -267,7 +253,7 @@ fn expand(exec: &str, entry: &DesktopEntry, action_id: &str, path: &Path) -> Vec
 }
 
 /// Runs one action of one desktop entry; GLib's launcher first, with the hand
-/// expanded `Exec=` as the fallback.
+/// expanded `Exec=` as the fallback when GLib refuses the file.
 pub fn launch(desktop_id: &str, action_id: &str) -> bool {
     if launch_with_glib(desktop_id, action_id) {
         return true;
@@ -294,6 +280,8 @@ pub fn launch(desktop_id: &str, action_id: &str) -> bool {
     true
 }
 
+/// Whether GLib accepted the entry and was asked to launch the action; the call
+/// reports nothing (it returns `void`), so only a refused file falls back.
 fn launch_with_glib(desktop_id: &str, action_id: &str) -> bool {
     let Some(path) = find(desktop_id) else {
         return false;
@@ -312,10 +300,9 @@ fn launch_with_glib(desktop_id: &str, action_id: &str) -> bool {
         if info.is_null() {
             return false;
         }
-        let launched =
-            g_desktop_app_info_launch_action(info, action.as_ptr(), context.to_glib_none().0) != 0;
+        g_desktop_app_info_launch_action(info, action.as_ptr(), context.to_glib_none().0);
         gio::glib::gobject_ffi::g_object_unref(info as *mut _);
-        launched
+        true
     }
 }
 
@@ -423,17 +410,6 @@ Exec=nautilus %i --profile \"100%% sure\"
     fn the_plain_entry_is_not_an_action() {
         assert!(argv("").is_empty());
         assert!(argv("does-not-exist").is_empty());
-    }
-
-    #[test]
-    fn a_window_app_id_maps_to_its_desktop_icon() {
-        // `firefox` is both an app_id and a desktop id; the entry's `Icon=` is
-        // what the row should render.
-        if find("firefox").is_none() {
-            return; // no desktop entry on this machine
-        }
-        let path = icon_for_app_id("firefox").unwrap();
-        assert!(path.starts_with('/'), "{path}");
     }
 
     #[test]

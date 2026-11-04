@@ -73,6 +73,7 @@ pub(super) fn draw_actions(
             bold: false,
             summary: None,
             default_marker: panel.marked == Some(index),
+            expand: !action.children.is_empty(),
             alpha: 1.0,
         };
         draw_row(canvas, pixmap, frame, text, icons, &body);

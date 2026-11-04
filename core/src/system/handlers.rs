@@ -15,7 +15,7 @@ pub struct Handler {
     pub icon_spec: Option<String>,
 }
 
-/// Beyond the usual handful, a type's handler list is noise in a flat panel.
+/// A type may answer with an unbounded list; the group keeps the first few.
 const MAX_HANDLERS: usize = 8;
 
 fn handler_roots() -> Vec<PathBuf> {

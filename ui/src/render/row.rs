@@ -7,7 +7,7 @@ use crate::icons::{IconCache, IconDraw};
 use crate::text::TextEngine;
 use crate::view::Frame;
 
-use super::canvas::{Canvas, ENTER_GLYPH, Rect};
+use super::canvas::{Canvas, ENTER_GLYPH, Rect, SUBMENU_GLYPH};
 
 /// The highlight shared by the result list and the action panel: a primary tint
 /// for the selected or hovered row, plus the accent bar on the selected one.
@@ -52,6 +52,8 @@ pub(super) struct RowBody<'a> {
     pub bold: bool,
     pub summary: Option<&'a str>,
     pub default_marker: bool,
+    /// Whether Enter opens a further level, drawn as a trailing chevron.
+    pub expand: bool,
     /// A new row's enter fade; 1 once it has settled.
     pub alpha: f32,
 }
@@ -94,16 +96,21 @@ pub(super) fn draw_row(
     }
 
     let labels_x = icon_x + font.icon() + 12.0;
-    // The selected row's ↵ hint and the default marker are part of the layout:
-    // the labels must leave room for both.
-    let enter = body
-        .selected
+    // The ↵ hint, the chevron and the default marker are part of the layout:
+    // the labels must leave room for all three.
+    let enter = (body.selected && !body.expand)
         .then(|| text.shape(ENTER_GLYPH, 13.0 * canvas.scale, Weight::NORMAL));
     let enter_w = enter
         .as_ref()
         .map_or(0.0, |shaped| shaped.width / canvas.scale + 12.0);
+    let chevron = body
+        .expand
+        .then(|| text.shape(SUBMENU_GLYPH, 13.0 * canvas.scale, Weight::NORMAL));
+    let chevron_w = chevron
+        .as_ref()
+        .map_or(0.0, |shaped| shaped.width / canvas.scale + 12.0);
     let marker_w = if body.default_marker { 12.0 } else { 0.0 };
-    let labels_max = (rect.right() - 10.0 - labels_x - enter_w - marker_w).max(0.0);
+    let labels_max = (rect.right() - 10.0 - labels_x - enter_w - chevron_w - marker_w).max(0.0);
 
     let title = text.fit(
         body.title,
@@ -169,6 +176,17 @@ pub(super) fn draw_row(
             frame.fade_scaled(theme.primary, frame.muted_alpha(), body.alpha),
             canvas.px(rect.right() - 10.0) - check.width,
             canvas.px(rect.center_y()) - check.height / 2.0,
+            None,
+        );
+    }
+
+    if let Some(chevron) = &chevron {
+        text.draw(
+            pixmap,
+            chevron,
+            frame.fade_scaled(theme.fg, frame.muted_alpha(), body.alpha),
+            canvas.px(rect.right() - 10.0) - chevron.width,
+            canvas.px(rect.center_y()) - chevron.height / 2.0,
             None,
         );
     }

@@ -1,4 +1,3 @@
-pub mod compositor;
 pub mod db;
 pub mod desktop_action;
 pub mod executor;

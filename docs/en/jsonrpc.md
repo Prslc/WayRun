@@ -200,13 +200,14 @@ path or, from a host, an `https://` URL the core fetches into its image cache
 selected row; `text` carries plain UTF-8, wrapped by the launcher and capped at
 64 KiB. A theme name or a `builtin:` glyph is not a preview.
 
-An `actions` entry is
-`{"title": string, "action": Action, "icon"?: string}`, with the same icon-spec
-resolution as a row's `icon`. An entry may also carry `id` (its stable kind),
-`plugin` (the owner, which scopes a remembered default) and `default` (true when
-Enter runs it). The core assigns `plugin` and `default` — a host's values for
-those are ignored — and a host sets `id` on its own actions to make them
-defaultable.
+An `actions` entry is either a command,
+`{"title": string, "action": Action, "icon"?: string}`, or a group,
+`{"title": string, "children": [ …entries… ]}`, which Enter opens as a further
+level of the action panel. Icons use the same resolution as a row's `icon`. An
+entry may also carry `id` (its stable kind), `plugin` (the owner, which scopes a
+remembered default) and `default` (true when Enter runs it). The core assigns
+`plugin` and `default` — a host's values for those are ignored — and a host sets
+`id` on its own actions to make them defaultable, a grouped entry included.
 
 The owning built-in provider adds its type-specific entries (a file reveal, copy
 path or open in terminal, the system's other handlers for the content type, a

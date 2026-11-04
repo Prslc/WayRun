@@ -25,9 +25,6 @@ plugin.runner.ready: Run an executable on PATH
 plugin.system.name: System Commands
 plugin.system.ready: Search system commands
 
-plugin.window.name: Window
-plugin.window.ready: Switch open windows
-
 plugin.external.ready: External plugin via %{command}
 plugin.search_failed: Search failed
 
@@ -38,7 +35,7 @@ command.shutdown: Shutdown
 command.logout: Logout
 
 action.open: Open
-action.open_with: "Open with %{app}"
+action.open_with: Open with
 action.copy_path: Copy path
 action.reveal: Reveal in file manager
 action.terminal: Open in terminal
@@ -47,9 +44,6 @@ help.usage_default: "* (default)"
 help.usage_keyword: "%{keyword} <query>"
 help.line: "%{usage} - %{ready}"
 help.line_default: "%{usage} - %{ready} · Enter: %{action}"
-
-window.untitled: Untitled
-window.workspace: "%{app} · workspace %{workspace}"
 
 field.placeholder: Type to search...
 

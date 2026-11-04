@@ -9,9 +9,11 @@ mod rank;
 mod registry;
 mod search;
 
+#[cfg(test)]
+pub use rank::classify;
 /// The ranking vocabulary providers and the dispatcher share.
 pub use rank::{
-    Match, Rank, Ranked, classify, classify_bytes_confident, classify_ci, classify_ci_confident,
+    Match, Rank, Ranked, classify_bytes_confident, classify_ci, classify_ci_confident,
     classify_confident,
 };
 pub use registry::{

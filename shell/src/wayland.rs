@@ -143,6 +143,9 @@ pub struct Shell {
     compositor_state: CompositorState,
     shm: Shm,
     layer_shell: LayerShell,
+    /// Whether the compositor is KWin, whose IME panel and open/close animation
+    /// need the surface in a lower layer and a non-normal window type.
+    kwin: bool,
     output_state: OutputState,
     seat_state: SeatState,
     effect_state: BackgroundEffectState,
@@ -237,6 +240,10 @@ impl Shell {
         let effect_state = BackgroundEffectState::new(globals, qh);
         let ime_manager = ime::bind(globals, qh).ok();
         let fractional = scale::bind(globals, qh);
+        let kwin = globals.contents().with_list(|list| {
+            list.iter()
+                .any(|global| global.interface == "org_kde_plasma_shell")
+        });
 
         Ok(Shell {
             conn: conn.clone(),
@@ -246,6 +253,7 @@ impl Shell {
             compositor_state: compositor,
             shm,
             layer_shell,
+            kwin,
             output_state: OutputState::new(globals, qh),
             seat_state: SeatState::new(globals, qh),
             effect_state,

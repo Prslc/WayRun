@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-04
+
+### Added
+
+- A KDE session follows its colour scheme. The accent is `[General]
+  AccentColor`, else the scheme's `DecorationFocus`; the mode is the window
+  background's luminance; and `~/.config/kdeglobals` is watched like the DMS
+  palette. A leftover `dms-colors.json` no longer decides the mode.
+- An action entry can be a group: file and directory rows gather their content
+  type's handlers under one `Open with` entry instead of flattening them into
+  the row's own commands. `Enter` descends, `Esc` backs out one level and
+  `Shift+Enter` closes the panel from any level. The remembered default and a
+  resumed command follow the tree, and a group carries a trailing chevron.
+
+### Changed
+
+- **Breaking**: the built-in `w` open-window search and the
+  `compositor-niri` / `compositor-hyprland` build features are gone; one
+  binary runs on every supported compositor. A user who wants window search
+  needs a plugin that provides it.
+
+### Fixed
+
+- A desktop action runs once. `g_desktop_app_info_launch_action` returns
+  `void`, and reading its return register as a success flag made `launch()`
+  run the hand-expanded `Exec=` after GLib had already started the action.
+- KWin: the launcher uses `Layer::Top` and the `utility` namespace, so it no
+  longer covers the input-method candidate window and KWin does not animate
+  the dimmed backdrop as a normal window on open.
+- A settled repaint no longer accumulates the hairline: the antialiased rim
+  falls outside the card rect, and the restore and damage now carry a
+  one-logical-pixel pad.
+- The blur region follows the card's rounded corner instead of a rectangle
+  that left a staircase on it.
+
 ## [0.9.0] - 2026-10-27
 
 ### Added
@@ -815,7 +850,8 @@ and, with `--core`, the backend service.
 - Resident mode over `$XDG_RUNTIME_DIR/wayrun.sock` for zero cold-start
   (`wayrun toggle`).
 
-[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/Prslc/WayRun/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Prslc/WayRun/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Prslc/WayRun/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Prslc/WayRun/compare/v0.6.0...v0.7.0

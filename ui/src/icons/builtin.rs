@@ -22,7 +22,6 @@ pub(super) const GLYPHS: &[(&str, &[u8])] = &[
         "terminal",
         include_bytes!("../../assets/icons/terminal.svg"),
     ),
-    ("window", include_bytes!("../../assets/icons/window.svg")),
 ];
 
 /// The bytes for `name`, falling back to the app glyph so every row draws one.

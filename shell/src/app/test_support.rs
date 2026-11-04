@@ -36,7 +36,8 @@ pub(super) fn with_actions(mut row: ResultItem, titles: &[&str]) -> ResultItem {
         .iter()
         .map(|title| ActionItem {
             title: title.to_string(),
-            action: run(title),
+            action: Some(run(title)),
+            children: Vec::new(),
             icon: None,
             id: None,
             plugin: None,
@@ -64,10 +65,24 @@ pub(super) fn file_row(uri: &str, actions: Vec<ActionItem>) -> ResultItem {
 pub(super) fn plugin_action(title: &str, command: Action, id: &str, default: bool) -> ActionItem {
     ActionItem {
         title: title.to_string(),
-        action: command,
+        action: Some(command),
+        children: Vec::new(),
         icon: None,
         id: Some(id.to_string()),
         plugin: Some("file-search".to_string()),
         default,
+    }
+}
+
+/// A group entry a panel opens a further level on.
+pub(super) fn submenu(title: &str, actions: Vec<ActionItem>) -> ActionItem {
+    ActionItem {
+        title: title.to_string(),
+        action: None,
+        children: actions,
+        icon: None,
+        id: Some("open_with".to_string()),
+        plugin: Some("file-search".to_string()),
+        default: false,
     }
 }

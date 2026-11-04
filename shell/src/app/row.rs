@@ -42,11 +42,8 @@ impl State {
     pub fn selected_row(&self) -> Option<Launch> {
         let row = self.rows.get(self.cursor.selected)?;
         let target = row.on_click.clone()?;
-        let effective = row
-            .actions
-            .iter()
-            .find(|action| action.default)
-            .map(|action| action.action.clone())
+        let effective = super::menu::default_entry(&row.actions)
+            .and_then(|action| action.action.clone())
             .unwrap_or_else(|| target.clone());
         Some(Launch { target, effective })
     }
@@ -449,9 +446,10 @@ mod tests {
         );
         row.actions = vec![ActionItem {
             title: "Open in terminal".to_string(),
-            action: Action::Terminal {
+            action: Some(Action::Terminal {
                 uri: uri.to_string(),
-            },
+            }),
+            children: Vec::new(),
             icon: None,
             id: Some("terminal".to_string()),
             plugin: Some("file-search".to_string()),

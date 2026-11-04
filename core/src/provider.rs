@@ -6,11 +6,8 @@ pub mod path;
 pub(crate) mod resident;
 pub mod runner;
 pub mod system_commands;
-pub mod window;
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
 
 use crate::plugin::Plugin;
 use crate::wire::ResultItem;
@@ -18,109 +15,6 @@ use crate::wire::ResultItem;
 /// Rows a provider shows: the one cap every scored provider passes to
 /// [`rank_results`], so the index and the fallback walk cannot diverge.
 pub const SHOW_CAP: usize = 50;
-
-/// How long a provider's fetch stays fresh: a typing burst shares one
-/// shell-out, and a row a beat stale is harmless.
-pub const BURST_TTL: Duration = Duration::from_millis(500);
-
-/// A provider's short-lived fetch cache, so a burst of keystrokes does not
-/// re-run the same shell-out on every one; failures are never cached.
-pub struct FreshCache<T> {
-    state: Arc<Mutex<State<T>>>,
-}
-
-struct State<T> {
-    rows: Option<(Instant, Arc<Vec<T>>)>,
-    refreshing: bool,
-}
-
-impl<T> State<T> {
-    /// The rows while the entry is still inside [`BURST_TTL`].
-    fn fresh(&self) -> Option<Arc<Vec<T>>> {
-        let (at, rows) = self.rows.as_ref()?;
-        (at.elapsed() < BURST_TTL).then(|| Arc::clone(rows))
-    }
-}
-
-impl<T: Send + Sync + 'static> FreshCache<T> {
-    pub fn new() -> Self {
-        Self {
-            state: Arc::new(Mutex::new(State {
-                rows: None,
-                refreshing: false,
-            })),
-        }
-    }
-
-    /// The cached rows: a fresh entry answers directly, a stale one answers
-    /// while a background refetch replaces it, and only a cold cache waits.
-    pub async fn get(
-        &self,
-        fetch: impl FnOnce() -> Option<Vec<T>> + Send + 'static,
-    ) -> Option<Arc<Vec<T>>> {
-        let (stale, start) = {
-            let mut state = self.lock();
-            if let Some(rows) = state.fresh() {
-                return Some(rows);
-            }
-            let stale = state.rows.as_ref().map(|(_, rows)| Arc::clone(rows));
-            let start = stale.is_some() && !state.refreshing;
-            state.refreshing |= start;
-            (stale, start)
-        };
-        match stale {
-            Some(rows) => {
-                if start {
-                    self.refresh(fetch);
-                }
-                Some(rows)
-            }
-            None => self.fetch_now(fetch).await,
-        }
-    }
-
-    /// Like [`get`], but a stale entry is revalidated before it answers: for a
-    /// caller whose whole content is this list, a stale answer is wrong.
-    pub async fn get_fresh(
-        &self,
-        fetch: impl FnOnce() -> Option<Vec<T>> + Send + 'static,
-    ) -> Option<Arc<Vec<T>>> {
-        if let Some(rows) = self.lock().fresh() {
-            return Some(rows);
-        }
-        self.fetch_now(fetch).await
-    }
-
-    /// The first read waits for the fetch; a cold search has no rows to answer
-    /// with, and every later one rides the cache.
-    async fn fetch_now(
-        &self,
-        fetch: impl FnOnce() -> Option<Vec<T>> + Send + 'static,
-    ) -> Option<Arc<Vec<T>>> {
-        let rows = tokio::task::spawn_blocking(fetch).await.ok().flatten()?;
-        let rows = Arc::new(rows);
-        self.lock().rows = Some((Instant::now(), Arc::clone(&rows)));
-        Some(rows)
-    }
-
-    /// Revalidate past [`BURST_TTL`] without blocking the caller; the flag
-    /// clears on any outcome, so a failed fetch retries on the next read.
-    fn refresh(&self, fetch: impl FnOnce() -> Option<Vec<T>> + Send + 'static) {
-        let state = Arc::clone(&self.state);
-        tokio::spawn(async move {
-            let rows = tokio::task::spawn_blocking(fetch).await.ok().flatten();
-            let mut state = state.lock().unwrap_or_else(|err| err.into_inner());
-            if let Some(rows) = rows {
-                state.rows = Some((Instant::now(), Arc::new(rows)));
-            }
-            state.refreshing = false;
-        });
-    }
-
-    fn lock(&self) -> MutexGuard<'_, State<T>> {
-        self.state.lock().unwrap_or_else(|err| err.into_inner())
-    }
-}
 
 /// The common tail every scored provider shares: strongest score first,
 /// optionally one row per title, capped at `max` results.
@@ -161,7 +55,6 @@ pub fn plugin_map() -> HashMap<&'static str, Box<dyn Plugin>> {
         Box::new(system_commands::SystemCommands::new()),
     );
     m.insert("runner", Box::new(runner::Runner::new()));
-    m.insert("window", Box::new(window::WindowPlugin::new()));
     m
 }
 
@@ -172,8 +65,6 @@ mod tests {
         Match, classify, classify_bytes_confident, classify_ci, classify_ci_confident,
         classify_confident,
     };
-    use std::sync::mpsc;
-
     #[test]
     fn a_case_insensitive_classify_matches_the_lowered_one() {
         for (name, query) in [
@@ -242,112 +133,5 @@ mod tests {
             push_lowered(&mut out, s);
             assert_eq!(out, format!("keep/{}", s.to_lowercase()), "{s}");
         }
-    }
-
-    /// A cache holding `rows` as if it fetched them past [`BURST_TTL`] ago.
-    fn stale_cache<T: Send + Sync + 'static>(rows: Vec<T>) -> FreshCache<T> {
-        let cache: FreshCache<T> = FreshCache::new();
-        let at = Instant::now() - BURST_TTL - Duration::from_millis(1);
-        cache.lock().rows = Some((at, Arc::new(rows)));
-        cache
-    }
-
-    async fn wait_refreshed<T: Send + Sync + 'static>(cache: &FreshCache<T>) {
-        for _ in 0..1000 {
-            if !cache.lock().refreshing {
-                return;
-            }
-            tokio::task::yield_now().await;
-        }
-        panic!("the background refetch never finished");
-    }
-
-    #[tokio::test]
-    async fn a_fresh_entry_answers_without_fetching() {
-        let cache: FreshCache<u32> = FreshCache::new();
-        let first = cache.get(|| Some(vec![1])).await.unwrap();
-        let second = cache
-            .get(|| panic!("a fresh entry must not refetch"))
-            .await
-            .unwrap();
-        assert!(Arc::ptr_eq(&first, &second));
-    }
-
-    #[tokio::test]
-    async fn get_fresh_answers_a_fresh_entry_without_fetching() {
-        let cache: FreshCache<u32> = FreshCache::new();
-        cache.get(|| Some(vec![1])).await;
-        let rows = cache
-            .get_fresh(|| panic!("a fresh entry must not refetch"))
-            .await;
-        assert_eq!(*rows.unwrap(), vec![1]);
-    }
-
-    #[tokio::test]
-    async fn get_fresh_revalidates_a_stale_entry_before_answering() {
-        let cache: FreshCache<u32> = stale_cache(vec![1]);
-        let rows = cache.get_fresh(|| Some(vec![2])).await;
-        assert_eq!(*rows.unwrap(), vec![2], "the fetch replaces the stale rows");
-        let rows = cache
-            .get(|| panic!("the revalidation is already in the cache"))
-            .await;
-        assert_eq!(*rows.unwrap(), vec![2]);
-    }
-
-    #[tokio::test]
-    async fn a_failed_revalidation_answers_get_fresh_with_nothing() {
-        let cache: FreshCache<u32> = stale_cache(vec![1]);
-        assert!(cache.get_fresh(|| None).await.is_none());
-    }
-
-    #[tokio::test]
-    async fn a_stale_entry_answers_while_the_refetch_runs_behind_it() {
-        let cache: FreshCache<u32> = stale_cache(vec![1]);
-        let (release, latch) = mpsc::channel::<()>();
-        let rows = cache
-            .get(move || {
-                latch.recv().ok()?;
-                Some(vec![2])
-            })
-            .await;
-        assert_eq!(*rows.unwrap(), vec![1], "the stale rows answer at once");
-
-        // one refetch is in flight, so a second stale read must not start another
-        let rows = cache.get(|| panic!("a refetch is already in flight")).await;
-        assert_eq!(*rows.unwrap(), vec![1]);
-
-        release.send(()).unwrap();
-        wait_refreshed(&cache).await;
-        let rows = cache.get(|| panic!("the refetch just revalidated")).await;
-        assert_eq!(*rows.unwrap(), vec![2]);
-    }
-
-    #[tokio::test]
-    async fn a_failed_refetch_keeps_the_stale_rows_and_retries() {
-        let cache: FreshCache<u32> = stale_cache(vec![1]);
-        let rows = cache.get(|| None).await;
-        assert_eq!(*rows.unwrap(), vec![1]);
-        wait_refreshed(&cache).await;
-
-        // still stale, so the next read starts the refetch again
-        let rows = cache.get(|| Some(vec![3])).await;
-        assert_eq!(*rows.unwrap(), vec![1]);
-        wait_refreshed(&cache).await;
-        let rows = cache.get(|| panic!("the retry just landed")).await;
-        assert_eq!(*rows.unwrap(), vec![3]);
-    }
-
-    #[tokio::test]
-    async fn an_empty_fetch_is_a_cached_value() {
-        let cache: FreshCache<u32> = FreshCache::new();
-        let rows = cache.get(|| Some(vec![])).await.unwrap();
-        assert!(rows.is_empty());
-
-        // an empty list is a value, not a miss: it must not refetch
-        let rows = cache
-            .get(|| panic!("an empty list is not a miss"))
-            .await
-            .unwrap();
-        assert!(rows.is_empty());
     }
 }

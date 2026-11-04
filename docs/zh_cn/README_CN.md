@@ -26,19 +26,19 @@
 ## 演示
 
 <p align="center">
-  <img src="../../images/demo.avif" alt="WayRun —— 应用搜索、文件搜索与动态主题" width="780">
+  <img src="../../images/demo.avif" alt="WayRun —— 应用搜索、文件搜索、动作面板与图片预览" width="780">
 </p>
 
 ## 功能特性
 
 - **应用启动**：模糊搜索已安装应用，按桌面自身的方式启动，并逐行显示 Flatpak 应用与
   主题图标。
-- **快速搜索**：文件与路径、`$PATH` 命令、打开的窗口、系统命令，以及即时计算。
+- **快速搜索**：文件与路径、`$PATH` 命令、系统命令，以及即时计算。
 - **动作面板**：`Shift+Enter` 打开按类型区分的动作面板（定位文件、运行 Desktop
   Action、复制链接）。
-- **可主题化**：跟随 DankMaterialShell 的 Material You 调色板，并可用 `theme.toml`
-  覆盖配色、模糊、布局、字体与动效。
-- **可扩展**：二进制内置 8 个插件，其余都通过有文档的 JSON-RPC 契约作为外部主机接入。
+- **可主题化**：跟随桌面的配色（KDE 配色方案或 DankMaterialShell 的 Material You
+  调色板），并可用 `theme.toml` 覆盖配色、模糊、布局、字体与动效。
+- **可扩展**：二进制内置 7 个插件，其余都通过有文档的 JSON-RPC 契约作为外部主机接入。
   可以用 Python（自带框架）写，也可以就是一个由启动器本体运行的 Lua 脚本。`resident`
   主机会跨调用保留进程，每次调用约 1 毫秒。
 
@@ -60,10 +60,9 @@
 
 | 功能 | 依赖 |
 | --- | --- |
-| `w` 打开窗口搜索 | 编译时选择 niri（默认）或 Hyprland 后端，见[合成器后端](#合成器后端) |
 | 复制/粘贴与“复制…”动作 | `wl-clipboard`（`wl-copy` / `wl-paste`） |
 | 仅能在终端中运行的 `$PATH` 结果（`r`） | 终端模拟器（`$TERMINAL`，否则取 `PATH` 上的一个） |
-| 卡片模糊 | `ext-background-effect-v1`（niri），或由合成器按 namespace 自行模糊 |
+| 卡片模糊 | `ext-background-effect-v1`（niri、KWin），或由合成器按 namespace 自行模糊 |
 | 结果行图标 | 桌面**图标主题**（可选）；没有时回退到内置占位图 |
 
 面板与内置插件的图形都已编入二进制，因此完全不装图标主题也能正常使用。应用与文件
@@ -99,81 +98,14 @@ wayrun run
 启动器以全屏覆盖打开，带调暗背景与居中卡片。默认的热键拉起方式下，`Esc` 或点击卡片
 外会退出；常驻模式下热键切换窗口，关闭改为隐藏。
 
-## 合成器后端
-
-覆盖层与合成器无关；只有窗口搜索（`w`）需要按合成器单独编译，由 cargo feature 选择
-后端：`compositor-niri`（默认）与 `compositor-hyprland`（实验性）。只编译你要用的
-那一个；如果一个后端也不编译，启动器照常运行，只是 `w` 没有结果。
+同一个二进制也自带控制命令：
 
 ```bash
-cargo build --release                                            # niri
-cargo build --release -p wayrun-shell --no-default-features --features compositor-hyprland
-cargo build --release -p wayrun-shell --no-default-features      # 不做窗口搜索
+wayrun                                  # 在终端里列出全部命令
+wayrun toggle                           # 常驻模式：经 socket 显示或隐藏
+wayrun config set font.family "Noto Sans"
+wayrun plugin add ~/plugins/firefox.lua --keyword ff
 ```
-
-## 性能
-
-常驻 core 的 warm（预热后）查询经 JSON-RPC 管道返回，含结果载荷，耗时 0.2–2 ms：
-
-| 查询 | 行数 | P50 | P95 |
-|---|---|---|---|
-| 应用搜索 — `firefox` | 1 | 0.18 ms | 0.29 ms |
-| 文件搜索 — `f report` | 50 | 1.88 ms | 2.03 ms |
-| 目录搜索 — `d download` | 50 | 1.10 ms | 1.31 ms |
-| 路径查找 — `~/` | 15 | 0.50 ms | 0.61 ms |
-
-冷启动时首个 `ping` 回复为 10.0 ms，冷启动下的首次应用搜索为 24 ms。
-
-面板 warm 拉起（进程第一次之后的每次显示）首帧提交为 4.4 ms（P95 5.3 ms），进程
-第一次显示约 10 ms。首帧是全透明的（入场从 alpha 0 开始），真正可见还要再等一个
-刷新周期；240 ms 的淡入是设计中的动画。
-
-<details>
-<summary>完整表格、冷启动与测量方法</summary>
-
-warm 稳态（每次丢弃 3 轮 + 测量 30 轮，乱序）：
-
-| Provider | 查询 | 行数 | P50 (ms) | P95 (ms) | Max (ms) |
-|---|---|---|---|---|---|
-| `ping` | — | — | 0.042 | 0.060 | 0.123 |
-| `calculator` | `2 + 3 * 4` | 1 | 0.163 | 0.290 | 0.334 |
-| `system-commands` | `reboot` | 1 | 0.189 | 0.258 | 0.276 |
-| `app-search` | `firefox` | 1 | 0.180 | 0.290 | 0.325 |
-| `runner` | `r htop` | 10 | 0.383 | 0.583 | 0.638 |
-| `file-search` | `f report` | 50 | 1.876 | 2.029 | 2.598 |
-| `path-search` | `d download` | 50 | 1.104 | 1.312 | 1.400 |
-| `path-lookup` | `~/` | 15 | 0.500 | 0.609 | 0.689 |
-| `home-fallback` | `Proj` | 1 | 0.263 | 0.345 | 0.444 |
-| `window` | `w kitty` | 1 | 0.085 | 0.110 | 0.114 |
-
-冷启动首次调用（每次全新 `wayrun --core`，共 3 次，取第 1 次）：
-
-| Provider | 查询 | 行数 | 索引 | Wall (ms) | MaxRSS (MB) |
-|---|---|---|---|---|---|
-| `ping` | — | — | — | 10.0 | 10.4 |
-| `calculator` | `2 + 3 * 4` | 1 | — | 23.3 | 14.2 |
-| `system-commands` | `reboot` | 1 | — | 23.1 | 14.8 |
-| `app-search` | `firefox` | 1 | — | 23.6 | 14.8 |
-| `runner` | `r htop` | 10 | — | 33.6 | 15.2 |
-| `file-search` | `f report` | 50 | 加载 | 57.5 | 52.8 |
-| `path-search` | `d download` | 50 | 加载 | 48.7 | 40.1 |
-| `path-lookup` | `~/` | 15 | — | 23.7 | 14.7 |
-| `home-fallback` | `Proj` | 1 | — | 22.4 | 14.2 |
-| `window` | `w kitty` | 1 | — | 24.0 | 16.5 |
-
-面板延迟（IPC open → 首帧 commit，3 次预热 + 20 次 show）：
-
-| | 冷启动 | warm P50 | warm P95 |
-|---|---|---|---|
-| show | 10.1 ms | 4.4 ms | 5.3 ms |
-
-测量于 2026-10-18：AMD Ryzen 5 5500U（6c/12t，`performance` 调频）、Arch Linux、
-niri 26.04、release 构建。warm 行是对同一个常驻 `--core` 的同步 `search` 调用；
-cold 行每次启动全新进程，用 GNU time 计时；面板行测的是常驻实例从 `toggle` 到首帧
-提交（`WAYRUN_TIMING`）。测试读取真实 `$HOME`，42 MB 的文件索引覆盖 11.1 万个目录、
-74.2 万个文件。`ping` 是测量程序自身的往返下限；window 行命中 500 ms 的短时缓存。
-
-</details>
 
 ## 文档
 

@@ -5,10 +5,10 @@ use tokio::sync::mpsc;
 
 use crate::notify::{watch, watch_paths};
 
-/// Watch the DMS palette and re-emit a theme message to the UI on change, since
-/// a resident core otherwise reads the theme once at start.
+/// Watch the session's palette and re-emit a theme message to the UI on change,
+/// since a resident core otherwise reads the theme once at start.
 pub fn watch_theme(tx: &mpsc::Sender<String>) -> Option<RecommendedWatcher> {
-    let path = crate::system::theme::dms_colors_path()?;
+    let path = crate::system::theme::system_theme_path()?;
 
     // Seed the dedup with the startup theme, so an unchanged file never re-emits.
     let mut last_sent = serde_json::to_string(&crate::protocol::theme_notification()).ok();

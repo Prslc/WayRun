@@ -1,10 +1,28 @@
 # 主题
 
 WayRun 的配色方式，以及 `$XDG_CONFIG_HOME/wayrun/theme.toml`（默认
-`~/.config/wayrun/theme.toml`）控制的内容。分两层：系统调色板（来自
-DankMaterialShell）与 `theme.toml` 的覆盖。两者都会被监听，改动实时生效。
+`~/.config/wayrun/theme.toml`）控制的内容。分两层：系统调色板（来自当前桌面）与
+`theme.toml` 的覆盖。两者都会被监听，改动实时生效。
 
 ## 系统调色板
+
+调色板跟随当前会话。KDE Plasma 下取的是当前配色方案：
+
+```
+~/.config/kdeglobals
+```
+
+KDE 会把应用后的配色方案合并写在这里；手动选的或从壁纸提取的强调色也会回写到
+`[General] AccentColor`。这里没有模式键：以窗口背景的亮度判断当前是亮色还是暗色，
+所以切换亮暗也会实时生效。
+
+| WayRun | KDE，取自 `kdeglobals` |
+| --- | --- |
+| `mode` | `[Colors:Window] BackgroundNormal` 的亮度 |
+| `primary` | `[General] AccentColor`，缺省用 `[Colors:Window] DecorationFocus` |
+| `fg` | `[Colors:Window] ForegroundNormal` |
+| `container` | `[Colors:Button] BackgroundNormal` |
+| `bg` | `[Colors:Window] BackgroundNormal` |
 
 在 DankMaterialShell 桌面上，Material You 调色板来自 DMS 用 matugen 生成的文件：
 
@@ -21,7 +39,8 @@ DankMaterialShell）与 `theme.toml` 的覆盖。两者都会被监听，改动�
 | `fg` | `on_surface` |
 | `container` | `surface_container_high` |
 
-没有 DMS 时使用内置深色调色板（`mode = "dark"`）。
+KDE 会话只读 `kdeglobals`，即使另一台桌面留下的 DMS 文件还在。两种来源都没有时使用
+内置深色调色板（`mode = "dark"`）。
 
 ## `$XDG_CONFIG_HOME/wayrun/theme.toml`
 
@@ -143,6 +162,9 @@ decoration {
 }
 layerrule = blur, WayRun
 ```
+
+KWin 实现了 `ext-background-effect-v1`；启用 Plasma 的“模糊”桌面特效后卡片直接模糊，
+不需要 layer rule。启动器映射到 `utility` namespace，KWin 的打开/关闭特效会跳过它。
 
 | 键 | 类型 | 默认值 | 含义 |
 | --- | --- | --- | --- |

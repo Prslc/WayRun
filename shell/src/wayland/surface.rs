@@ -33,11 +33,21 @@ impl Shell {
         }
 
         let surface = self.compositor_state.create_surface(&self.qh);
+        // KWin's input-method panel sits in the topmost layer, so an Overlay
+        // surface would cover its candidate window; KWin gets one layer lower.
+        let layer_kind = if self.kwin {
+            Layer::Top
+        } else {
+            Layer::Overlay
+        };
+        // KWin maps the namespace to a window type and animates an unknown name
+        // as a normal window, which would scale the full-screen dim too.
+        let namespace = if self.kwin { "utility" } else { NAMESPACE };
         let layer = self.layer_shell.create_layer_surface(
             &self.qh,
             surface,
-            Layer::Overlay,
-            Some(NAMESPACE),
+            layer_kind,
+            Some(namespace),
             None,
         );
         layer.set_anchor(Anchor::all());
@@ -197,12 +207,15 @@ impl Shell {
         let damage = if full {
             Damage::FULL
         } else {
+            // The card damage carries the hairline's antialiased rim, one
+            // logical pixel beyond the card rect, like the renderer's restore.
+            let pad = (scale.ceil() as i32).max(1);
             let base_bottom = new_bottom.max(self.app.last_card_bottom);
             Damage::rect(
-                (layout.card_x(surface_size) * scale).floor() as i32 - 1,
-                (top * scale).floor() as i32 - 1,
-                (layout.card_w(surface_size) * scale).ceil() as i32 + 2,
-                ((base_bottom - top) * scale).ceil() as i32 + 3,
+                (layout.card_x(surface_size) * scale).floor() as i32 - pad,
+                (top * scale).floor() as i32 - pad,
+                (layout.card_w(surface_size) * scale).ceil() as i32 + 2 * pad,
+                ((base_bottom - top) * scale).ceil() as i32 + 3 * pad,
             )
         };
         self.pending_damage.add(damage);
@@ -263,8 +276,8 @@ impl Shell {
         }
     }
 
-    /// The blur region covers the card's rounded rect, deduped on the
-    /// 4px-quantised rect: a present must not re-apply the stored region.
+    /// The blur region covers the card's rounded rect, deduped on the middle
+    /// band: a present must not re-apply the stored region.
     fn sync_blur(&mut self) {
         let (Some(layer), Some(effect)) = (self.layer.as_ref(), self.effect.as_ref()) else {
             return;
@@ -281,6 +294,14 @@ impl Shell {
 
         let now = Instant::now();
         let height = self.app.card_height();
+        // A reflow in flight would commit a region per frame, so it stays
+        // quantised while the card moves; at rest it takes the card's exact
+        // height, or the strip past the last 4px step would go unblurred.
+        let height = if self.app.animating(now) {
+            (height / 4.0).floor() * 4.0
+        } else {
+            height
+        };
         let rects = self
             .app
             .presentation

@@ -19,7 +19,7 @@ use wayrun_ui::view::{Body, FieldView, FooterView, Frame, ListView, PanelView, P
 use self::menu::PanelKey;
 
 pub use self::cursor::{Cursor, Hover, whole_rows};
-pub use self::menu::{Menu, effective_action, marked_entry};
+pub use self::menu::{Menu, MenuEnter, effective_action};
 
 /// Launch dismissals wait this long before the surface goes away.
 pub const EXIT_DELAY_MS: u64 = 150;
@@ -168,7 +168,7 @@ impl State {
     pub fn content_height(&self) -> f32 {
         let layout = self.layout();
         match &self.menu {
-            Some(menu) => layout.panel_h(menu.actions.len()),
+            Some(menu) => layout.panel_h(menu.actions().len()),
             None if self.rows.is_empty() && self.query.is_empty() => layout.empty_h(),
             None => match self.preview_kind() {
                 Some(kind) => layout.content_h_for(layout.split_h(self.rows.len(), kind)),
@@ -216,12 +216,12 @@ impl State {
         };
         let body = match &self.menu {
             Some(menu) => Body::Panel(PanelView {
-                parent_title: self.menu_parent_title(),
-                actions: &menu.actions,
-                first: menu.cursor.first,
-                selected: menu.cursor.selected,
+                parent_title: self.menu_title(),
+                actions: menu.actions(),
+                first: menu.cursor().first,
+                selected: menu.cursor().selected,
                 hovered: hovered_action,
-                marked: self.rows.get(menu.parent).and_then(marked_entry),
+                marked: menu.marked(self.rows.get(menu.parent)),
             }),
             None => Body::List(ListView {
                 rows: &self.rows,
@@ -240,7 +240,7 @@ impl State {
             .is_some_and(|started| now.saturating_duration_since(started) >= SEARCH_LOADING_DELAY);
         let footer = FooterView {
             rows: self.rows.len(),
-            action_count: self.menu.as_ref().map_or(0, |menu| menu.actions.len()),
+            action_count: self.menu.as_ref().map_or(0, |menu| menu.actions().len()),
             query_empty: self.query.is_empty(),
             panel,
             loading,

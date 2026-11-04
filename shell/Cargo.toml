@@ -1,6 +1,6 @@
 [package]
 name = "wayrun-shell"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
@@ -9,15 +9,8 @@ license = "MIT OR Apache-2.0"
 name = "wayrun"
 path = "src/main.rs"
 
-# Compositor backends are a compile-time toggle; forward them so a build of
-# `wayrun` can drop the default. `hyprland` is experimental.
-[features]
-default = ["compositor-niri"]
-compositor-niri = ["wayrun-core/compositor-niri"]
-compositor-hyprland = ["wayrun-core/compositor-hyprland"]
-
 [dependencies]
-wayrun-core = { path = "../core", default-features = false }
+wayrun-core = { path = "../core" }
 wayrun-ui = { path = "../ui" }
 anyhow = "1.0.102"
 calloop = "0.14"
