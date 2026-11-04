@@ -33,11 +33,21 @@ impl Shell {
         }
 
         let surface = self.compositor_state.create_surface(&self.qh);
+        // KWin's input-method panel sits in the topmost layer, so an Overlay
+        // surface would cover its candidate window; KWin gets one layer lower.
+        let layer_kind = if self.kwin {
+            Layer::Top
+        } else {
+            Layer::Overlay
+        };
+        // KWin maps the namespace to a window type and animates an unknown name
+        // as a normal window, which would scale the full-screen dim too.
+        let namespace = if self.kwin { "utility" } else { NAMESPACE };
         let layer = self.layer_shell.create_layer_surface(
             &self.qh,
             surface,
-            Layer::Overlay,
-            Some(NAMESPACE),
+            layer_kind,
+            Some(namespace),
             None,
         );
         layer.set_anchor(Anchor::all());
