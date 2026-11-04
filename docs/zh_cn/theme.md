@@ -163,6 +163,9 @@ decoration {
 layerrule = blur, WayRun
 ```
 
+KWin 实现了 `ext-background-effect-v1`；启用 Plasma 的“模糊”桌面特效后卡片直接模糊，
+不需要 layer rule。启动器映射到 `utility` namespace，KWin 的打开/关闭特效会跳过它。
+
 | 键 | 类型 | 默认值 | 含义 |
 | --- | --- | --- | --- |
 | `enabled` | bool | `true` | 是否向合成器声明背景模糊区域。`false` 时不再声明，背景保持清晰；卡片的半透明填充不变。 |

@@ -69,7 +69,7 @@ history, and more) install from the
 | --- | --- |
 | copy / paste and the "Copy …" actions | `wl-clipboard` (`wl-copy` / `wl-paste`) |
 | a terminal-only `$PATH` hit (`r`) | a terminal emulator (`$TERMINAL`, else one on `PATH`) |
-| a blurred card | `ext-background-effect-v1` (niri) or the compositor's own blur by namespace |
+| a blurred card | `ext-background-effect-v1` (niri, KWin) or the compositor's own blur by namespace |
 | per-row icons | a desktop **icon theme** (optional); without one, rows fall back to a bundled placeholder |
 
 The action panel and built-in plugin glyphs are compiled into the binary,

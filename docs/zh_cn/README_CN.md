@@ -62,7 +62,7 @@
 | --- | --- |
 | 复制/粘贴与“复制…”动作 | `wl-clipboard`（`wl-copy` / `wl-paste`） |
 | 仅能在终端中运行的 `$PATH` 结果（`r`） | 终端模拟器（`$TERMINAL`，否则取 `PATH` 上的一个） |
-| 卡片模糊 | `ext-background-effect-v1`（niri），或由合成器按 namespace 自行模糊 |
+| 卡片模糊 | `ext-background-effect-v1`（niri、KWin），或由合成器按 namespace 自行模糊 |
 | 结果行图标 | 桌面**图标主题**（可选）；没有时回退到内置占位图 |
 
 面板与内置插件的图形都已编入二进制，因此完全不装图标主题也能正常使用。应用与文件

@@ -189,6 +189,10 @@ decoration {
 layerrule = blur, WayRun
 ```
 
+KWin implements `ext-background-effect-v1`, so Plasma blurs the card once the
+Blur desktop effect is enabled; no layer rule is needed. The launcher maps to
+the `utility` namespace, which KWin's open/close effects skip.
+
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `enabled` | bool | `true` | Declare the blur region. `false` declares nothing, so the backdrop stays sharp; the card's translucent fill is unchanged. |
