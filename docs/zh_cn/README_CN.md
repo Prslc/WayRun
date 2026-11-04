@@ -36,8 +36,8 @@
 - **快速搜索**：文件与路径、`$PATH` 命令、打开的窗口、系统命令，以及即时计算。
 - **动作面板**：`Shift+Enter` 打开按类型区分的动作面板（定位文件、运行 Desktop
   Action、复制链接）。
-- **可主题化**：跟随 DankMaterialShell 的 Material You 调色板，并可用 `theme.toml`
-  覆盖配色、模糊、布局、字体与动效。
+- **可主题化**：跟随桌面的配色（KDE 配色方案或 DankMaterialShell 的 Material You
+  调色板），并可用 `theme.toml` 覆盖配色、模糊、布局、字体与动效。
 - **可扩展**：二进制内置 8 个插件，其余都通过有文档的 JSON-RPC 契约作为外部主机接入。
   可以用 Python（自带框架）写，也可以就是一个由启动器本体运行的 Lua 脚本。`resident`
   主机会跨调用保留进程，每次调用约 1 毫秒。

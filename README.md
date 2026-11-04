@@ -38,8 +38,9 @@ needs no GPU stack and no GUI toolkit.
   commands, and inline math.
 - **Action panel** — `Shift+Enter` opens a per-type action menu (reveal a
   file, run a desktop action, copy a link).
-- **Themeable** — follows DankMaterialShell's Material You palette, with
-  `theme.toml` overrides for colors, blur, layout, typography and motion.
+- **Themeable** — follows the desktop's colours (KDE's colour scheme or
+  DankMaterialShell's Material You palette), with `theme.toml` overrides for
+  colors, blur, layout, typography and motion.
 - **Extensible** — eight built-ins in the binary; everything else is an
   external host over a documented JSON-RPC contract, written in Python (a
   shipped framework) or as one Lua script the launcher runs itself. A

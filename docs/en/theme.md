@@ -3,10 +3,30 @@
 How WayRun is coloured, and what `$XDG_CONFIG_HOME/wayrun/theme.toml` (default
 `~/.config/wayrun/theme.toml`) controls.
 
-There are two layers: the system palette, which comes from DankMaterialShell, and
+There are two layers: the system palette, which comes from the desktop, and
 the overrides in `theme.toml`. Both are watched, so an edit applies live.
 
 ## System palette
+
+The palette follows the session. On KDE Plasma it is the active colour scheme
+from:
+
+```
+~/.config/kdeglobals
+```
+
+KDE merges the applied scheme's roles there, and writes an explicit or
+wallpaper-derived accent back to `[General] AccentColor`. There is no mode
+key: the window background's luminance says which mode is active, so a
+light/dark switch is picked up live.
+
+| WayRun | KDE, from `kdeglobals` |
+| --- | --- |
+| `mode` | luminance of `[Colors:Window] BackgroundNormal` |
+| `primary` | `[General] AccentColor`, else `[Colors:Window] DecorationFocus` |
+| `fg` | `[Colors:Window] ForegroundNormal` |
+| `container` | `[Colors:Button] BackgroundNormal` |
+| `bg` | `[Colors:Window] BackgroundNormal` |
 
 On a DankMaterialShell desktop the Material You palette is the one DMS generated
 with matugen:
@@ -24,7 +44,9 @@ light/dark or changing the wallpaper is picked up live.
 | `fg` | `on_surface` |
 | `container` | `surface_container_high` |
 
-Without DMS the built-in dark palette is used, with `mode = "dark"`.
+On a KDE session `kdeglobals` is the file read, even if a DMS file is left over
+from another desktop. With neither source the built-in dark palette is used,
+with `mode = "dark"`.
 
 ## `$XDG_CONFIG_HOME/wayrun/theme.toml`
 
