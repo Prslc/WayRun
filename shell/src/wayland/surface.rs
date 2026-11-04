@@ -276,8 +276,8 @@ impl Shell {
         }
     }
 
-    /// The blur region covers the card's rounded rect, deduped on the
-    /// 4px-quantised rect: a present must not re-apply the stored region.
+    /// The blur region covers the card's rounded rect, deduped on the middle
+    /// band: a present must not re-apply the stored region.
     fn sync_blur(&mut self) {
         let (Some(layer), Some(effect)) = (self.layer.as_ref(), self.effect.as_ref()) else {
             return;
@@ -294,6 +294,14 @@ impl Shell {
 
         let now = Instant::now();
         let height = self.app.card_height();
+        // A reflow in flight would commit a region per frame, so it stays
+        // quantised while the card moves; at rest it takes the card's exact
+        // height, or the strip past the last 4px step would go unblurred.
+        let height = if self.app.animating(now) {
+            (height / 4.0).floor() * 4.0
+        } else {
+            height
+        };
         let rects = self
             .app
             .presentation

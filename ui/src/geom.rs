@@ -222,20 +222,20 @@ impl Layout {
         (index < count).then_some(index)
     }
 
-    /// The blur region covering the card's rounded rect, as 2px scanline bands
-    /// inset by `r - sqrt(r² - (r - dy)²)` so no rect pokes past the edge.
+    /// The blur region covering the card's rounded rect, as 1px scanline bands
+    /// inset by `r - sqrt(r² - (r - dy)²)`. A region is a set of integer rects,
+    /// so the compositor draws its edge as a staircase: the bands step one
+    /// pixel at a time to keep that edge on the card's own antialiased one.
     pub fn blur_rects(&self, surface: (u32, u32), card_height: f32) -> Vec<BlurRect> {
-        // Floor to 4px so an in-flight reflow does not commit a region per frame.
-        let height = ((card_height / 4.0).floor() * 4.0).max(4.0);
         let (x, y) = (
             self.card_x(surface).round() as i32,
             self.card_top(surface).round() as i32,
         );
         let width = self.card_w(surface).round() as i32;
-        let height = height.round() as i32;
+        let height = card_height.round().max(4.0) as i32;
         let radius = self.radius.round() as i32;
 
-        let mut rects = Vec::with_capacity(radius as usize + 4);
+        let mut rects = Vec::with_capacity(2 * radius as usize + 1);
 
         if height <= 2 * radius {
             rects.push(BlurRect {
@@ -255,18 +255,18 @@ impl Layout {
         });
 
         let r = radius as f32;
-        for offset in (0..radius).step_by(2) {
+        for offset in 0..radius {
             let f = offset as f32;
-            let inset = (r - (r * r - (r - f) * (r - f)).max(0.0).sqrt()).floor() as i32;
+            let inset = (r - (r * r - (r - f) * (r - f)).max(0.0).sqrt()).round() as i32;
             let band = BlurRect {
                 x: x + inset,
                 y: y + offset,
                 width: width - 2 * inset,
-                height: 2,
+                height: 1,
             };
             rects.push(band);
             rects.push(BlurRect {
-                y: y + height - offset - 2,
+                y: y + height - offset - 1,
                 ..band
             });
         }
@@ -460,7 +460,11 @@ mod tests {
         // top of the card, and they alternate top/bottom per offset
         assert_eq!(rects[1].x, x + l.radius as i32);
         assert_eq!(rects[1].y, y);
-        assert_eq!(rects[2].y + 2, y + h);
+        assert_eq!(rects[2].y + 1, y + h);
+        // one band per pixel row: the compositor's blur edge steps as finely as
+        // a region allows, so it tracks the card's antialiased corner
+        assert_eq!(rects[1].height, 1);
+        assert_eq!(rects.len(), 1 + 2 * l.radius as usize);
         // a card shorter than two radii degrades to one rect
         assert_eq!(l.blur_rects(surface, 20.0).len(), 1);
     }
