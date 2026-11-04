@@ -26,7 +26,7 @@
 ## 演示
 
 <p align="center">
-  <img src="../../images/demo.avif" alt="WayRun —— 应用搜索、文件搜索与动态主题" width="780">
+  <img src="../../images/demo.avif" alt="WayRun —— 应用搜索、文件搜索、动作面板与图片预览" width="780">
 </p>
 
 ## 功能特性

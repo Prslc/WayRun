@@ -27,7 +27,7 @@ needs no GPU stack and no GUI toolkit.
 ## Demo
 
 <p align="center">
-  <img src="images/demo.avif" alt="WayRun — app search, file search and dynamic theming" width="780">
+  <img src="images/demo.avif" alt="WayRun — app search, file search, the action panel and an image preview" width="780">
 </p>
 
 ## Features
