@@ -53,14 +53,17 @@ pub fn draw(
     } else {
         // A shrink has to erase the old card's rows too, so the region spans the
         // union of the previous and current bottoms, not just the current card.
+        // The hairline's antialiased rim reaches a pixel past the card rect:
+        // restore that band too, or each settled repaint accumulates its alpha.
+        const PAD: f32 = 1.0;
         let base_bottom = card.bottom().max(frame.last_card_bottom);
         canvas.restore_dim(
             pixmap,
             Rect {
-                x: card.x,
-                y: card.y,
-                w: card.w,
-                h: base_bottom - card.y,
+                x: card.x - PAD,
+                y: card.y - PAD,
+                w: card.w + 2.0 * PAD,
+                h: base_bottom - card.y + 2.0 * PAD,
             },
             dim,
             dim_rgb,
@@ -259,6 +262,58 @@ mod tests {
         // over the translucent card.
         let inside = pixmap.pixel((x + 5.0) as u32, y as u32).unwrap();
         assert_ne!((inside.red(), inside.green(), inside.blue()), (255, 0, 0));
+    }
+
+    #[test]
+    fn settled_frames_do_not_accumulate_the_hairline() {
+        let mut frame = test_frame((1600, 1080));
+        // A half-pixel card top puts the hairline's outer rim on the pixel row
+        // just above the card rect. A settled repaint must clear that row too.
+        frame.layout = frame.layout.shifted(0.5);
+        frame.surfaces.hairline = [255, 255, 255, 32];
+        frame.surfaces.hairline_width = 0.5;
+
+        let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
+        let mut icons = idle_icons();
+        let mut pixmap = Pixmap::new(1600, 1080).unwrap();
+        draw(
+            &mut pixmap,
+            &frame,
+            &mut text,
+            &mut icons,
+            Instant::now(),
+            true,
+        );
+        draw(
+            &mut pixmap,
+            &frame,
+            &mut text,
+            &mut icons,
+            Instant::now(),
+            false,
+        );
+
+        let x =
+            (frame.layout.card_x(frame.surface) + frame.layout.card_w(frame.surface) / 2.0) as u32;
+        let y = frame.layout.card_top(frame.surface) as u32;
+        let once = pixmap.pixel(x, y).unwrap();
+
+        for _ in 0..7 {
+            draw(
+                &mut pixmap,
+                &frame,
+                &mut text,
+                &mut icons,
+                Instant::now(),
+                false,
+            );
+        }
+        let after = pixmap.pixel(x, y).unwrap();
+        assert_eq!(
+            (after.red(), after.green(), after.blue(), after.alpha()),
+            (once.red(), once.green(), once.blue(), once.alpha()),
+            "the hairline rim gains alpha on every settled repaint"
+        );
     }
 
     #[test]
