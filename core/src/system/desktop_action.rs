@@ -184,20 +184,6 @@ fn program_name(word: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// The icon of the app a Wayland `app_id` names: the id's `.desktop` file wins
-/// when one exists, otherwise the id is tried as a theme icon name.
-pub fn icon_for_app_id(app_id: &str) -> Option<String> {
-    if app_id.is_empty() {
-        return None;
-    }
-    if let Some(icon) = entry(app_id, None).and_then(|e| e.icon().map(str::to_owned))
-        && let Some(path) = crate::system::icon::resolve(&icon)
-    {
-        return Some(path);
-    }
-    crate::system::icon::resolve(app_id)
-}
-
 /// What this entry's field codes stand for. `%i` names the action group's own
 /// `Icon=` when it has one, as the spec's action groups allow.
 struct Codes<'a> {
@@ -424,17 +410,6 @@ Exec=nautilus %i --profile \"100%% sure\"
     fn the_plain_entry_is_not_an_action() {
         assert!(argv("").is_empty());
         assert!(argv("does-not-exist").is_empty());
-    }
-
-    #[test]
-    fn a_window_app_id_maps_to_its_desktop_icon() {
-        // `firefox` is both an app_id and a desktop id; the entry's `Icon=` is
-        // what the row should render.
-        if find("firefox").is_none() {
-            return; // no desktop entry on this machine
-        }
-        let path = icon_for_app_id("firefox").unwrap();
-        assert!(path.starts_with('/'), "{path}");
     }
 
     #[test]

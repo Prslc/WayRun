@@ -33,12 +33,12 @@
 
 - **应用启动**：模糊搜索已安装应用，按桌面自身的方式启动，并逐行显示 Flatpak 应用与
   主题图标。
-- **快速搜索**：文件与路径、`$PATH` 命令、打开的窗口、系统命令，以及即时计算。
+- **快速搜索**：文件与路径、`$PATH` 命令、系统命令，以及即时计算。
 - **动作面板**：`Shift+Enter` 打开按类型区分的动作面板（定位文件、运行 Desktop
   Action、复制链接）。
 - **可主题化**：跟随桌面的配色（KDE 配色方案或 DankMaterialShell 的 Material You
   调色板），并可用 `theme.toml` 覆盖配色、模糊、布局、字体与动效。
-- **可扩展**：二进制内置 8 个插件，其余都通过有文档的 JSON-RPC 契约作为外部主机接入。
+- **可扩展**：二进制内置 7 个插件，其余都通过有文档的 JSON-RPC 契约作为外部主机接入。
   可以用 Python（自带框架）写，也可以就是一个由启动器本体运行的 Lua 脚本。`resident`
   主机会跨调用保留进程，每次调用约 1 毫秒。
 
@@ -60,7 +60,6 @@
 
 | 功能 | 依赖 |
 | --- | --- |
-| `w` 打开窗口搜索 | 编译时选择 niri（默认）或 Hyprland 后端，见[合成器后端](#合成器后端) |
 | 复制/粘贴与“复制…”动作 | `wl-clipboard`（`wl-copy` / `wl-paste`） |
 | 仅能在终端中运行的 `$PATH` 结果（`r`） | 终端模拟器（`$TERMINAL`，否则取 `PATH` 上的一个） |
 | 卡片模糊 | `ext-background-effect-v1`（niri），或由合成器按 namespace 自行模糊 |
@@ -108,18 +107,6 @@ wayrun config set font.family "Noto Sans"
 wayrun plugin add ~/plugins/firefox.lua --keyword ff
 ```
 
-## 合成器后端
-
-覆盖层与合成器无关；只有窗口搜索（`w`）需要按合成器单独编译，由 cargo feature 选择
-后端：`compositor-niri`（默认）与 `compositor-hyprland`（实验性）。只编译你要用的
-那一个；如果一个后端也不编译，启动器照常运行，只是 `w` 没有结果。
-
-```bash
-cargo build --release                                            # niri
-cargo build --release -p wayrun-shell --no-default-features --features compositor-hyprland
-cargo build --release -p wayrun-shell --no-default-features      # 不做窗口搜索
-```
-
 ## 性能
 
 常驻 core 的 warm（预热后）查询经 JSON-RPC 管道返回，含结果载荷，耗时 0.2–2 ms：
@@ -153,7 +140,6 @@ warm 稳态（每次丢弃 3 轮 + 测量 30 轮，乱序）：
 | `path-search` | `d download` | 50 | 1.104 | 1.312 | 1.400 |
 | `path-lookup` | `~/` | 15 | 0.500 | 0.609 | 0.689 |
 | `home-fallback` | `Proj` | 1 | 0.263 | 0.345 | 0.444 |
-| `window` | `w kitty` | 1 | 0.085 | 0.110 | 0.114 |
 
 冷启动首次调用（每次全新 `wayrun --core`，共 3 次，取第 1 次）：
 
@@ -168,7 +154,6 @@ warm 稳态（每次丢弃 3 轮 + 测量 30 轮，乱序）：
 | `path-search` | `d download` | 50 | 加载 | 48.7 | 40.1 |
 | `path-lookup` | `~/` | 15 | — | 23.7 | 14.7 |
 | `home-fallback` | `Proj` | 1 | — | 22.4 | 14.2 |
-| `window` | `w kitty` | 1 | — | 24.0 | 16.5 |
 
 面板延迟（IPC open → 首帧 commit，3 次预热 + 20 次 show）：
 
@@ -180,7 +165,7 @@ warm 稳态（每次丢弃 3 轮 + 测量 30 轮，乱序）：
 niri 26.04、release 构建。warm 行是对同一个常驻 `--core` 的同步 `search` 调用；
 cold 行每次启动全新进程，用 GNU time 计时；面板行测的是常驻实例从 `toggle` 到首帧
 提交（`WAYRUN_TIMING`）。测试读取真实 `$HOME`，42 MB 的文件索引覆盖 11.1 万个目录、
-74.2 万个文件。`ping` 是测量程序自身的往返下限；window 行命中 500 ms 的短时缓存。
+74.2 万个文件。`ping` 是测量程序自身的往返下限。
 
 </details>
 

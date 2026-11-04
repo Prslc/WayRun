@@ -24,9 +24,6 @@ plugin.runner.ready: 运行 PATH 中的可执行文件
 plugin.system.name: 系统命令
 plugin.system.ready: 搜索系统命令
 
-plugin.window.name: 窗口
-plugin.window.ready: 切换已打开的窗口
-
 plugin.external.ready: 来自 %{command} 的外部插件
 plugin.search_failed: 搜索失败
 
@@ -46,9 +43,6 @@ help.usage_default: "*（默认）"
 help.usage_keyword: "%{keyword} <关键词>"
 help.line: "%{usage} - %{ready}"
 help.line_default: "%{usage} - %{ready} · Enter: %{action}"
-
-window.untitled: 无标题
-window.workspace: "%{app} · 工作区 %{workspace}"
 
 field.placeholder: 输入以搜索…
 

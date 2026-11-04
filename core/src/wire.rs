@@ -159,7 +159,6 @@ pub const BUILTIN_GLYPHS: &[&str] = &[
     "reveal",
     "suspend",
     "terminal",
-    "window",
 ];
 
 /// The spec a missing icon falls back to; its name is in [`BUILTIN_GLYPHS`].

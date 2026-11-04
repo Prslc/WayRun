@@ -324,15 +324,8 @@ mod tests {
     #[test]
     fn safe_tokens_stay_bare() {
         assert_eq!(
-            shell_join(&argv(&[
-                "niri",
-                "msg",
-                "action",
-                "focus-window",
-                "--id",
-                "42"
-            ])),
-            "niri msg action focus-window --id 42"
+            shell_join(&argv(&["systemctl", "--user", "restart", "wayrun.service"])),
+            "systemctl --user restart wayrun.service"
         );
     }
 

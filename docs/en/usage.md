@@ -13,13 +13,12 @@ shows no rows.
 | `f <query>` | search files by name or path |
 | `d <query>` | search directories by path (multi-token) |
 | `r <query>` | fuzzy-search `$PATH` executables and run one |
-| `w <query>` | switch focus to a matching open window |
 | `?` | show keyword modes, default functions, hints and each plugin's remembered default action |
 | `lock` / `reboot` / `shutdown` | system commands |
 | `2 + 3` | inline calculator |
 
-Some prefixes need an optional component: `w` a compositor backend, and
-copy/paste `wl-clipboard`. Without it, the keyword returns no rows. Anything
+Some features need an optional component: copy/paste needs `wl-clipboard`.
+Without it, the keyword returns no rows. Anything
 else a `plugins.toml` host registers — the WayRun-Plugins workspace's Firefox,
 web search and clipboard history among them — adds its own keyword the same
 way; the full dependency list is in the

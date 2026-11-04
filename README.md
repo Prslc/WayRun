@@ -34,14 +34,14 @@ needs no GPU stack and no GUI toolkit.
 
 - **Launcher** — fuzzy search of installed applications, launched the way the
   desktop itself would, with Flatpak apps and themed icons per row.
-- **Quick search** — files and paths, `$PATH` commands, open windows, system
-  commands, and inline math.
+- **Quick search** — files and paths, `$PATH` commands, system commands, and
+  inline math.
 - **Action panel** — `Shift+Enter` opens a per-type action menu (reveal a
   file, run a desktop action, copy a link).
 - **Themeable** — follows the desktop's colours (KDE's colour scheme or
   DankMaterialShell's Material You palette), with `theme.toml` overrides for
   colors, blur, layout, typography and motion.
-- **Extensible** — eight built-ins in the binary; everything else is an
+- **Extensible** — seven built-ins in the binary; everything else is an
   external host over a documented JSON-RPC contract, written in Python (a
   shipped framework) or as one Lua script the launcher runs itself. A
   `resident` host stays warm at about a millisecond per call.
@@ -67,7 +67,6 @@ history, and more) install from the
 
 | Feature | Needs |
 | --- | --- |
-| `w` open-window search | the niri (default) or Hyprland build — see [Compositor backends](#compositor-backends) |
 | copy / paste and the "Copy …" actions | `wl-clipboard` (`wl-copy` / `wl-paste`) |
 | a terminal-only `$PATH` hit (`r`) | a terminal emulator (`$TERMINAL`, else one on `PATH`) |
 | a blurred card | `ext-background-effect-v1` (niri) or the compositor's own blur by namespace |
@@ -123,19 +122,6 @@ wayrun config set font.family "Noto Sans"
 wayrun plugin add ~/plugins/firefox.lua --keyword ff
 ```
 
-## Compositor backends
-
-The overlay works on any supported compositor; only open-window search (`w`)
-needs a per-compositor build, selected by cargo features: `compositor-niri`
-(the default) and `compositor-hyprland` (experimental). Build just the one you
-run; with no backend compiled the launcher still runs and `w` returns nothing.
-
-```bash
-cargo build --release                                            # niri
-cargo build --release -p wayrun-shell --no-default-features --features compositor-hyprland
-cargo build --release -p wayrun-shell --no-default-features      # no window search
-```
-
 ## Performance
 
 A resident core answers a warm query over its JSON-RPC pipe in 0.2–2 ms,
@@ -172,7 +158,6 @@ Warm steady state (3 discarded + 30 measured rounds per run, shuffled):
 | `path-search` | `d download` | 50 | 1.104 | 1.312 | 1.400 |
 | `path-lookup` | `~/` | 15 | 0.500 | 0.609 | 0.689 |
 | `home-fallback` | `Proj` | 1 | 0.263 | 0.345 | 0.444 |
-| `window` | `w kitty` | 1 | 0.085 | 0.110 | 0.114 |
 
 Cold first call (a fresh `wayrun --core` per run, 3 runs, run 1 shown):
 
@@ -187,7 +172,6 @@ Cold first call (a fresh `wayrun --core` per run, 3 runs, run 1 shown):
 | `path-search` | `d download` | 50 | loaded | 48.7 | 40.1 |
 | `path-lookup` | `~/` | 15 | — | 23.7 | 14.7 |
 | `home-fallback` | `Proj` | 1 | — | 22.4 | 14.2 |
-| `window` | `w kitty` | 1 | — | 24.0 | 16.5 |
 
 Show latency (IPC open → first committed frame, 3 warmups + 20 shows):
 
@@ -201,8 +185,7 @@ calls against one resident `--core` over stdin/stdout; cold rows start a fresh
 process each run, timed with GNU time; show rows measure a resident shell's
 `toggle` to its first committed frame (`WAYRUN_TIMING`). The real `$HOME` is
 read, with a 42 MB file index over 111k directories and 742k files. `ping` is
-the harness's own round-trip floor, and the window row hits a 500 ms burst
-cache.
+the harness's own round-trip floor.
 
 </details>
 

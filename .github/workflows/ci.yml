@@ -64,12 +64,6 @@ jobs:
       - name: cargo test
         run: cargo test --all --all-features --locked
 
-      # niri-only is the default build below; these pin the two remaining combos.
-      - name: cargo check (feature combos)
-        run: |
-          cargo check --locked -p wayrun-shell --no-default-features --features compositor-hyprland
-          cargo check --locked -p wayrun-shell --no-default-features
-
       - name: cargo build --release
         run: cargo build --release --locked
 
