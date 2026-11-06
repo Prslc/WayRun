@@ -268,7 +268,7 @@ fn exec_program(
             command.env(name, value);
         }
     }
-    let output = crate::system::process::output_within_capped(
+    let capped = crate::system::process::output_within_capped(
         command,
         EXEC_TIMEOUT,
         EXEC_STDOUT_CAP,
@@ -282,15 +282,17 @@ fn exec_program(
     })?;
 
     let result = lua.create_table()?;
-    result.set("code", output.status.code().unwrap_or(-1))?;
+    result.set("code", capped.output.status.code().unwrap_or(-1))?;
     result.set(
         "stdout",
-        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&capped.output.stdout).into_owned(),
     )?;
     result.set(
         "stderr",
-        String::from_utf8_lossy(&output.stderr).into_owned(),
+        String::from_utf8_lossy(&capped.output.stderr).into_owned(),
     )?;
+    result.set("stdout_truncated", capped.stdout_truncated)?;
+    result.set("stderr_truncated", capped.stderr_truncated)?;
     Ok(result)
 }
 
