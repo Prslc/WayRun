@@ -259,9 +259,8 @@ pub(super) fn split_wide(
     chunks
 }
 
-/// The byte end of the longest prefix of `text` that fits `max_w`. Probing
-/// doubles from a few chars and then binary-searches, so only the chunk being
-/// cut is shaped, never the whole remainder.
+/// The byte end of the longest prefix that fits `max_w`; probing doubles from
+/// a few chars and then binary-searches, so only the cut chunk is shaped.
 fn longest_prefix(
     engine: &mut TextEngine,
     text: &str,

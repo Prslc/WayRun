@@ -1,3 +1,4 @@
+use std::mem;
 use std::rc::Rc;
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
@@ -293,7 +294,7 @@ impl Builder {
     fn finish(mut self) -> Document {
         self.close_inline();
         let blocks = match self.frames.first_mut() {
-            Some(Frame::Blocks(blocks)) => std::mem::take(blocks),
+            Some(Frame::Blocks(blocks)) => mem::take(blocks),
             _ => Vec::new(),
         };
         Document { blocks }
