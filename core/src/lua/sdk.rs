@@ -6,7 +6,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::rc::Rc;
-use std::time::SystemTime;
 use std::time::{Duration, UNIX_EPOCH};
 
 use gio::prelude::FileExt;
@@ -19,6 +18,7 @@ use super::http;
 use super::kv;
 use super::log::Log;
 use super::sqlite;
+use super::time;
 
 /// Every declared plugin's readable environment names, by plugin id; filled
 /// after the script is read, refused for a name the calling plugin omits.
@@ -94,7 +94,24 @@ pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua:
         "file_uri",
         lua.create_function(|_, path: String| Ok(file_uri(&path)))?,
     )?;
-    sdk.set("time", lua.create_function(|_, ()| Ok(now_seconds()))?)?;
+    sdk.set(
+        "time",
+        lua.create_function(|_, ()| Ok(time::now_seconds()))?,
+    )?;
+    sdk.set(
+        "date",
+        lua.create_function(|lua, seconds: Option<i64>| {
+            let date = time::date(seconds.unwrap_or_else(time::now_seconds));
+            let fields = lua.create_table()?;
+            fields.set("year", date.year)?;
+            fields.set("month", date.month)?;
+            fields.set("day", date.day)?;
+            fields.set("hour", date.hour)?;
+            fields.set("minute", date.minute)?;
+            fields.set("second", date.second)?;
+            Ok(fields)
+        })?,
+    )?;
     sdk.set(
         "locale",
         lua.create_function(|_, ()| Ok(rust_i18n::locale()))?,
@@ -303,14 +320,6 @@ pub(super) fn file_uri(path: &str) -> Option<String> {
         .then(|| gio::File::for_path(path).uri().to_string())
 }
 
-/// Unix seconds, the host clock a signature or a cache TTL needs.
-pub(super) fn now_seconds() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|since| since.as_secs() as i64)
-        .unwrap_or(0)
-}
-
 /// The script's own directory, so a plugin can ship an icon beside itself; the
 /// host has just read the file, so canonicalize only fails in theory.
 pub(super) fn script_dir(script: &str) -> Option<PathBuf> {
@@ -516,6 +525,8 @@ fn delete_path(target: &Path) -> io::Result<bool> {
 mod tests {
     use std::collections::BTreeSet;
     use std::path::Path;
+
+    use mlua::Function;
 
     use super::*;
 
@@ -763,6 +774,34 @@ mod tests {
             }
         }
         names
+    }
+
+    #[test]
+    fn the_date_binding_returns_utc_fields() {
+        let lua = Lua::new_with(mlua::StdLib::ALL_SAFE, mlua::LuaOptions::default()).unwrap();
+        let active = Rc::new(RefCell::new(None));
+        let shared = Shared {
+            active: Rc::clone(&active),
+            kv_paths: Rc::new(RefCell::new(HashMap::new())),
+            env_scope: Rc::new(RefCell::new(HashMap::new())),
+            exec_scope: Rc::new(RefCell::new(HashMap::new())),
+            read_areas: Rc::new(RefCell::new(HashMap::new())),
+        };
+        let table = build(
+            &lua,
+            "/test/script.lua",
+            &shared,
+            Log::new("/test/script.lua", Rc::clone(&active)),
+        )
+        .unwrap();
+        let date: Function = table.get("date").unwrap();
+        let fields: Table = date.call(1_600_000_000_i64).unwrap();
+        assert_eq!(fields.get::<i64>("year").unwrap(), 2020);
+        assert_eq!(fields.get::<i64>("month").unwrap(), 9);
+        assert_eq!(fields.get::<i64>("day").unwrap(), 13);
+        assert_eq!(fields.get::<i64>("hour").unwrap(), 12);
+        assert_eq!(fields.get::<i64>("minute").unwrap(), 26);
+        assert_eq!(fields.get::<i64>("second").unwrap(), 40);
     }
 
     #[test]

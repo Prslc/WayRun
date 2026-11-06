@@ -123,6 +123,7 @@ on_click = { type = "plugin", plugin = "my-plugin", action = "new",
 | `wayrun.file_uri(path)` | the `file://` URI for an absolute path, encoded like a built-in row's; nil for a relative one |
 | `wayrun.log(message)` | writes to the launcher's journal under the script's and calling plugin's name |
 | `wayrun.time()` | Unix seconds, for signatures and cache TTLs |
+| `wayrun.date(seconds?)` | the UTC civil fields (`year`, `month`, `day`, `hour`, `minute`, `second`) for a Unix timestamp; defaults to now, and is absent on a launcher that predates it |
 | `wayrun.locale()` | the launcher's resolved locale, the stem its own tables use (`en`, `zh_cn`, …) |
 | `wayrun.env(name)` | a variable the plugin declares in `env`, or nil when unset; an undeclared name raises |
 | `wayrun.which(name)` | an executable's path on the launcher's `$PATH`, or nil; the same PATH a `run` row's command will see |

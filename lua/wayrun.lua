@@ -137,6 +137,19 @@ function wayrun.log(message) end
 ---@return integer
 function wayrun.time() end
 
+--- The UTC civil-date fields for a Unix timestamp.
+---@class WayrunDate
+---@field year integer
+---@field month integer   1-12
+---@field day integer     1-31
+---@field hour integer    0-23
+---@field minute integer
+---@field second integer
+
+---@param seconds integer?   Unix seconds; defaults to now
+---@return WayrunDate
+function wayrun.date(seconds) end
+
 ---@return string
 function wayrun.locale() end
 
