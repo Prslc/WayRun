@@ -143,8 +143,10 @@ fn usage_keys(rows: &[(Rank, u32, ResultItem)]) -> Vec<String> {
 }
 
 /// How long the default chain waits for a keyword-less external host before
-/// answering without it.
-const DEFAULT_DEADLINE: Duration = Duration::from_millis(50);
+/// answering without it. A forked Lua host starts in milliseconds, but a plugin
+/// that reads system data on its first call can need far more than 50ms; the
+/// bound still keeps a stalled host from holding the card.
+const DEFAULT_DEADLINE: Duration = Duration::from_millis(250);
 
 /// Order the default providers' rows: the strongest kind first, then the most
 /// picked of that kind, then the registry order that otherwise ties them.

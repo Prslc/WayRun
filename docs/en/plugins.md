@@ -53,8 +53,8 @@ title the query only sits inside of.
 
 A provider that cannot score an item (an external host) lists its rows instead:
 they sit below every scored row and fill the remaining slots in the provider's
-own order. A keyword-less external host is bounded by a short deadline in that
-chain, so a stalled host never delays the card.
+own order. A keyword-less external host is bounded by a quarter-second deadline
+in that chain, so a stalled host never delays the card.
 
 ## Built-in plugins
 
