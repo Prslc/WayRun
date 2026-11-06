@@ -17,6 +17,8 @@ image = { version = "0.25", default-features = false, features = ["bmp", "gif", 
 # build the full RGB and RGBA buffers `image` or tiny-skia would.
 jpeg-decoder = "0.3"
 png = "0.17"
+# The preview parser only; the default `html`/`getopts` features are not used.
+pulldown-cmark = { version = "0.13", default-features = false }
 libc = "0.2"
 # Icons are paths, never text: the default `text`/`system-fonts` features would
 # build and load a system font database for every `Options::default()`, which

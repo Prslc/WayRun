@@ -191,14 +191,20 @@ only when set:
 | `on_click` | [`Action`](#actions) \| null | action bound to Enter |
 | `icon` | string \| null | the icon spec, an absolute path or a `builtin:` glyph; a host's result may be an `https://` URL the core caches; see [Icon specs](#icon-specs) |
 | `icon_shape` | string | optional; `"circle"` clips the icon box to a circle, absent draws the file as it is |
-| `preview` | object | optional split-view payload, `{"type":"image","path":"/abs/file.png"}` or `{"type":"text","text":"…"}`; a host's image path may be an `https://` URL |
+| `preview` | object | optional split-view payload, `{"type":"image","path":"/abs/file.png"}` or `{"type":"text","text":"…","format":"markdown"}`; a host's image path may be an `https://` URL |
 | `actions` | array | optional secondary commands for the `Shift+Enter` action panel |
 
 A `preview` is tagged by `type` like an `Action`: `image` carries an absolute
 path or, from a host, an `https://` URL the core fetches into its image cache
 (PNG, SVG, JPEG, WebP, GIF or BMP), and is shown in the right column for the
-selected row; `text` carries plain UTF-8, wrapped by the launcher and capped at
-64 KiB. A theme name or a `builtin:` glyph is not a preview.
+selected row; `text` carries UTF-8, laid out by the launcher and capped at
+64 KiB. A text preview's optional `format` is `"plain"` (the default when
+absent) or `"markdown"`; an unknown value fails the row like an unknown
+`icon_shape`. Markdown renders headings, bold/italic/strikethrough, inline
+code, code blocks, ordered and unordered lists, block quotes, thematic breaks
+and link text; tables, images, inline HTML and task lists degrade to plain
+text in the same column. An older launcher ignores `format` and shows the
+source as plain text. A theme name or a `builtin:` glyph is not a preview.
 
 An `actions` entry is either a command,
 `{"title": string, "action": Action, "icon"?: string}`, or a group,

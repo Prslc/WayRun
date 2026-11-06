@@ -4,6 +4,7 @@ rust_i18n::i18n!("../locales", fallback = "en");
 pub mod config;
 pub mod geom;
 pub mod icons;
+pub mod markdown;
 pub mod present;
 pub mod render;
 pub mod text;

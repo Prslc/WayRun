@@ -42,7 +42,7 @@ pub(super) fn parse_rows(
                 .or_else(|| host_icon_spec(path))
                 .map(|path| Preview::Image { path });
         }
-        if let Some(Preview::Text { text }) = &mut item.preview {
+        if let Some(Preview::Text { text, .. }) = &mut item.preview {
             const MAX: usize = 64 * 1024;
             if text.len() > MAX {
                 let mut end = MAX;
@@ -90,7 +90,7 @@ fn resolve_item_icon(icon: &str, fallback: Option<String>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wire::{Action, IconShape};
+    use crate::wire::{Action, IconShape, TextFormat};
 
     #[test]
     fn empty_icon_falls_back_to_plugin_icon() {
@@ -306,8 +306,27 @@ mod tests {
         });
         let items = parse_result_items(response, "p", "").unwrap();
         match &items[0].preview {
-            Some(Preview::Text { text }) => assert_eq!(text.len(), 64 * 1024),
+            Some(Preview::Text { text, .. }) => assert_eq!(text.len(), 64 * 1024),
             other => panic!("expected a capped text preview, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_hosts_markdown_preview_keeps_its_format_and_is_capped() {
+        let long = "x".repeat(70 * 1024);
+        let response = serde_json::json!({
+            "result": [{
+                "title": "t",
+                "preview": {"type": "text", "text": long, "format": "markdown"}
+            }]
+        });
+        let items = parse_result_items(response, "p", "").unwrap();
+        match &items[0].preview {
+            Some(Preview::Text { text, format }) => {
+                assert_eq!(text.len(), 64 * 1024);
+                assert_eq!(*format, TextFormat::Markdown);
+            }
+            other => panic!("expected a capped markdown preview, got {other:?}"),
         }
     }
 }

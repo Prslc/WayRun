@@ -30,6 +30,7 @@ pub struct ListView<'a> {
 pub enum PreviewView<'a> {
     Image { path: &'a str },
     Text { text: &'a str },
+    Markdown { text: &'a str },
 }
 
 impl PreviewView<'_> {
@@ -37,7 +38,7 @@ impl PreviewView<'_> {
     pub fn kind(&self) -> PreviewKind {
         match self {
             Self::Image { .. } => PreviewKind::Image,
-            Self::Text { .. } => PreviewKind::Text,
+            Self::Text { .. } | Self::Markdown { .. } => PreviewKind::Text,
         }
     }
 }

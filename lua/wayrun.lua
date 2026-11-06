@@ -57,6 +57,7 @@
 ---@field type "image"|"text"
 ---@field path string?   image: a file the script ships, or an https:// URL
 ---@field text string?   text: at most 64 KiB
+---@field format "plain"|"markdown"?   text: render as plain text (default) or Markdown
 
 --- One result row a `search` or `top` returns.
 ---@class WayrunRow

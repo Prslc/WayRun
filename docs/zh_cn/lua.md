@@ -37,6 +37,8 @@ return {
 `https://` URL）会在选中行旁边打开分栏预览；当前版本解码 PNG、SVG、JPEG、WebP、
 GIF 与 BMP。
 `preview = { type = "text", text = "…" }` 在同一列显示按宽度换行的纯文本摘要。
+再加 `format = "markdown"` 就按 Markdown 渲染标题、强调、代码、列表与引用；
+旧版启动器会忽略该字段，照旧显示纯文本源码。
 
 流式搜索还会收到 `emit`：后端支持流式时传入一个函数，每次 `emit(rows)` 立刻显示
 这批行，搜索仍在继续；最终返回值仍是权威结果。旧后端传 `nil`，因此写成

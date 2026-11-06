@@ -147,6 +147,7 @@ impl Shell {
         // and these grow with every distinct payload.
         self.icons.clear();
         self.text.clear_cache();
+        self.markdown.clear();
         // The dismissal cancels the core's pending search and reaps the warm hosts.
         backend::dismiss();
         self.app.hidden();
@@ -196,7 +197,15 @@ impl Shell {
             let Some(pixmap) = self.pixmap.as_mut() else {
                 return;
             };
-            render::draw(pixmap, &frame, &mut self.text, &mut self.icons, now, full);
+            render::draw(
+                pixmap,
+                &frame,
+                &mut self.text,
+                &mut self.markdown,
+                &mut self.icons,
+                now,
+                full,
+            );
         }
 
         // What the frame just changed, in physical pixels: a settled repaint is

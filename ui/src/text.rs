@@ -2,12 +2,32 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use cosmic_text::{
-    Attrs, Buffer, Family, FontSystem, Metrics, Shaping, SwashCache, SwashContent, Weight, fontdb,
+    Attrs, Buffer, Family, FontSystem, Metrics, Shaping, Style, SwashCache, SwashContent, Weight,
+    fontdb,
 };
 use tiny_skia::Pixmap;
 
 /// The card's line height as a multiple of the font size.
 pub const LINE_HEIGHT: f32 = 1.2;
+
+/// The weight/slant/family a shaped line uses; colour is not part of it, so a
+/// theme change never invalidates the cache.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TextStyle {
+    pub weight: Weight,
+    pub italic: bool,
+    pub mono: bool,
+}
+
+impl TextStyle {
+    pub const fn normal(weight: Weight) -> Self {
+        Self {
+            weight,
+            italic: false,
+            mono: false,
+        }
+    }
+}
 
 pub struct Shaped {
     buffer: Buffer,
@@ -15,22 +35,25 @@ pub struct Shaped {
     pub width: f32,
     /// Line-box height (`size * LINE_HEIGHT`).
     pub height: f32,
+    /// The line-box top to the baseline (the largest `run.line_y`), so runs of
+    /// different families can share one baseline.
+    pub baseline: f32,
 }
 
-/// The identity of a shaped line: text, size (as bits — `f32` is not `Eq`) and weight.
+/// The identity of a shaped line: text, size (as bits — `f32` is not `Eq`) and style.
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct ShapeKey {
     text: String,
     size: u32,
-    weight: Weight,
+    style: TextStyle,
 }
 
 impl ShapeKey {
-    fn new(text: &str, size: f32, weight: Weight) -> Self {
+    fn new(text: &str, size: f32, style: TextStyle) -> Self {
         Self {
             text: text.to_string(),
             size: size.to_bits(),
-            weight,
+            style,
         }
     }
 }
@@ -49,9 +72,9 @@ struct Line {
     used: u64,
 }
 
-/// Distinct lines kept before the least recently used is evicted; a show's
-/// live set is tiny, so the cap stays small.
-const LINE_CACHE_MAX: usize = 32;
+/// Distinct lines kept before the least recently used is evicted; Markdown's
+/// per-word measurement needs a far larger set than the rows alone.
+const LINE_CACHE_MAX: usize = 512;
 
 pub struct TextEngine {
     font_system: FontSystem,
@@ -90,15 +113,19 @@ impl TextEngine {
         self.lines.clear();
     }
 
-    /// Shape one unwrapped line, cached by text/size/weight; every later frame
+    /// Shape one unwrapped line, cached by text/size/style; every later frame
     /// that draws it is a hash lookup.
     pub fn shape(&mut self, text: &str, size: f32, weight: Weight) -> Rc<Shaped> {
-        let key = LineKey::Plain(ShapeKey::new(text, size, weight));
+        self.shape_styled(text, size, TextStyle::normal(weight))
+    }
+
+    pub fn shape_styled(&mut self, text: &str, size: f32, style: TextStyle) -> Rc<Shaped> {
+        let key = LineKey::Plain(ShapeKey::new(text, size, style));
         if let Some(shaped) = self.touch(&key) {
             return shaped;
         }
 
-        let shaped = Rc::new(self.shape_uncached(text, size, weight));
+        let shaped = Rc::new(self.shape_uncached(text, size, style));
         self.store(key, Rc::clone(&shaped));
         shaped
     }
@@ -136,38 +163,63 @@ impl TextEngine {
         );
     }
 
-    fn shape_uncached(&mut self, text: &str, size: f32, weight: Weight) -> Shaped {
+    fn shape_uncached(&mut self, text: &str, size: f32, style: TextStyle) -> Shaped {
         let line_height = (size * LINE_HEIGHT).round();
         let mut buffer = Buffer::new(&mut self.font_system, Metrics::new(size, line_height));
         // No constraints: a single line, whatever its width (long titles are
         // clipped by the caller).
         buffer.set_size(&mut self.font_system, None, None);
 
-        let attrs = Attrs::new().family(family_of(&self.family)).weight(weight);
+        let family = if style.mono {
+            "monospace"
+        } else {
+            &self.family
+        };
+        let attrs = Attrs::new()
+            .family(family_of(family))
+            .weight(style.weight)
+            .style(if style.italic {
+                Style::Italic
+            } else {
+                Style::Normal
+            });
         buffer.set_text(&mut self.font_system, text, &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut self.font_system, false);
 
-        let width = buffer
-            .layout_runs()
-            .map(|run| run.line_w)
-            .fold(0.0_f32, f32::max);
+        let mut width = 0.0_f32;
+        let mut baseline = 0.0_f32;
+        for run in buffer.layout_runs() {
+            width = width.max(run.line_w);
+            baseline = baseline.max(run.line_y);
+        }
 
         Shaped {
             buffer,
             width,
             height: line_height,
+            baseline,
         }
     }
 
     /// Shape one line elided with `…` to fit `max_width`, keyed by all four
     /// inputs so a redraw re-uses it; only an overlong line pays the search.
     pub fn fit(&mut self, text: &str, size: f32, weight: Weight, max_width: f32) -> Rc<Shaped> {
-        let key = LineKey::Fitted(ShapeKey::new(text, size, weight), max_width.to_bits());
+        self.fit_styled(text, size, TextStyle::normal(weight), max_width)
+    }
+
+    fn fit_styled(
+        &mut self,
+        text: &str,
+        size: f32,
+        style: TextStyle,
+        max_width: f32,
+    ) -> Rc<Shaped> {
+        let key = LineKey::Fitted(ShapeKey::new(text, size, style), max_width.to_bits());
         if let Some(shaped) = self.touch(&key) {
             return shaped;
         }
 
-        let shaped = self.fit_uncached(text, size, weight, max_width);
+        let shaped = self.fit_uncached(text, size, style, max_width);
         self.store(key, Rc::clone(&shaped));
         shaped
     }
@@ -176,15 +228,15 @@ impl TextEngine {
         &mut self,
         text: &str,
         size: f32,
-        weight: Weight,
+        style: TextStyle,
         max_width: f32,
     ) -> Rc<Shaped> {
-        let full = self.shape(text, size, weight);
+        let full = self.shape_styled(text, size, style);
         if full.width <= max_width {
             return full;
         }
 
-        let ellipsis = self.shape("…", size, weight);
+        let ellipsis = self.shape_styled("…", size, style);
         if max_width <= ellipsis.width {
             return ellipsis;
         }
@@ -198,7 +250,7 @@ impl TextEngine {
             let mid = low + (high - low).div_ceil(2);
             // The probe is a throwaway width, never drawn, so it stays out of the cache.
             let prefix = &text[..boundaries[mid]];
-            let width = self.shape_uncached(prefix, size, weight).width;
+            let width = self.shape_uncached(prefix, size, style).width;
             if width + ellipsis.width <= max_width {
                 low = mid;
             } else {
@@ -209,7 +261,7 @@ impl TextEngine {
         let mut display = String::with_capacity(boundaries[low] + 4);
         display.push_str(&text[..boundaries[low]]);
         display.push('…');
-        self.shape(&display, size, weight)
+        self.shape_styled(&display, size, style)
     }
 
     /// Draw a shaped line with its line-box's top-left corner at `(x, top)`.
@@ -362,7 +414,7 @@ fn release_font_pages(_: &FontSystem) {}
 
 #[cfg(test)]
 mod tests {
-    use super::{TextEngine, blend, family_of};
+    use super::{LINE_CACHE_MAX, TextEngine, TextStyle, blend, family_of};
     use cosmic_text::{Family, Weight};
     use std::rc::Rc;
 
@@ -410,19 +462,59 @@ mod tests {
     #[test]
     fn the_line_cache_evicts_only_the_oldest() {
         let mut engine = TextEngine::with_family("Source Han Sans CN".to_string());
-        let lines: Vec<String> = (0..300).map(|index| format!("line {index}")).collect();
+        let lines: Vec<String> = (0..LINE_CACHE_MAX + 1)
+            .map(|index| format!("line {index}"))
+            .collect();
         let first = engine.shape(&lines[0], 14.0, Weight::NORMAL);
         for line in &lines[1..] {
             engine.shape(line, 14.0, Weight::NORMAL);
         }
-        let recent = engine.shape(&lines[299], 14.0, Weight::NORMAL);
+        let recent = engine.shape(&lines[LINE_CACHE_MAX], 14.0, Weight::NORMAL);
 
-        // 300 distinct lines against the 256-line cap: eviction took the oldest
-        // one; a wholesale clear would have dropped the rest of the table too.
+        // One line past the cap: eviction took the oldest; a wholesale clear
+        // would have dropped the rest of the table too.
         let again = engine.shape(&lines[0], 14.0, Weight::NORMAL);
         assert!(!Rc::ptr_eq(&first, &again), "the oldest is gone");
-        let hit = engine.shape(&lines[299], 14.0, Weight::NORMAL);
+        let hit = engine.shape(&lines[LINE_CACHE_MAX], 14.0, Weight::NORMAL);
         assert!(Rc::ptr_eq(&recent, &hit), "the newest survived");
+    }
+
+    #[test]
+    fn styled_lines_are_distinct_cache_entries() {
+        let mut engine = TextEngine::with_family("Source Han Sans CN".to_string());
+        let normal = engine.shape("code", 14.0, Weight::NORMAL);
+        let bold = engine.shape("code", 14.0, Weight::BOLD);
+        let italic = engine.shape_styled(
+            "code",
+            14.0,
+            TextStyle {
+                weight: Weight::NORMAL,
+                italic: true,
+                mono: false,
+            },
+        );
+        let mono = engine.shape_styled(
+            "code",
+            14.0,
+            TextStyle {
+                weight: Weight::NORMAL,
+                italic: false,
+                mono: true,
+            },
+        );
+
+        assert!(!Rc::ptr_eq(&normal, &bold));
+        assert!(!Rc::ptr_eq(&normal, &italic));
+        assert!(!Rc::ptr_eq(&normal, &mono));
+        assert!(Rc::ptr_eq(&bold, &engine.shape("code", 14.0, Weight::BOLD)));
+    }
+
+    #[test]
+    fn a_shaped_line_reports_its_baseline() {
+        let mut engine = TextEngine::with_family("Source Han Sans CN".to_string());
+        let shaped = engine.shape("baseline", 14.0, Weight::NORMAL);
+        assert!(shaped.baseline > 0.0);
+        assert!(shaped.baseline <= shaped.height);
     }
 
     #[test]

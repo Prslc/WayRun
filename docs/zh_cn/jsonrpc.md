@@ -168,13 +168,17 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"command","params":{"plugin":"todo","ac
 | `on_click` | [`Action`](#动作) \| null | Enter 绑定的动作 |
 | `icon` | string \| null | 图标规范：绝对路径或 `builtin:` 字形；外部主机的结果行也可以是 `https://` URL，由后端抓取缓存；见 [图标规范](#图标规范) |
 | `icon_shape` | string | 可选；`"circle"` 把图标框裁成圆形，缺省按文件原样绘制 |
-| `preview` | object | 可选的分栏预览载荷：`{"type":"image","path":"/abs/file.png"}` 或 `{"type":"text","text":"…"}`；外部主机的 image 路径也可以是 `https://` URL |
+| `preview` | object | 可选的分栏预览载荷：`{"type":"image","path":"/abs/file.png"}` 或 `{"type":"text","text":"…","format":"markdown"}`；外部主机的 image 路径也可以是 `https://` URL |
 | `actions` | array | 可选，`Shift+Enter` 动作面板的次级命令 |
 
 `preview` 与 `Action` 一样用 `type` 标记：`image` 携带绝对路径，或外部主机的
 `https://` URL（由后端抓取到图片缓存，支持 PNG、SVG、JPEG、WebP、GIF、BMP），
-显示在选中行的右侧列；`text` 携带纯 UTF-8 文本，由启动器换行并裁切，上限
-64 KiB。主题名或 `builtin:` 字形不是预览。
+显示在选中行的右侧列；`text` 携带 UTF-8 文本，由启动器排版并裁切，上限
+64 KiB。文本预览的可选 `format` 取 `"plain"`（缺省值）或 `"markdown"`；未知值
+与未知 `icon_shape` 一样让整行解析失败。Markdown 渲染标题、粗体/斜体/删除线、
+行内代码、代码块、有序与无序列表、引用块、分隔线与链接文字；表格、图片、内嵌
+HTML 与任务列表降级为同一列里的纯文本。旧版启动器会忽略 `format`，按纯文本
+显示源码。主题名或 `builtin:` 字形不是预览。
 
 `actions` 元素要么是一条命令 `{"title": string, "action": Action, "icon"?: string}`，
 要么是一个分组 `{"title": string, "children": [ …元素… ]}`，按 `Enter` 展开动作面板

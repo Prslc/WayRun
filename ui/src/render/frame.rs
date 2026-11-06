@@ -3,6 +3,7 @@ use std::time::Instant;
 use tiny_skia::Pixmap;
 
 use crate::icons::IconCache;
+use crate::markdown::MarkdownCache;
 use crate::text::TextEngine;
 use crate::view::{Body, Frame};
 
@@ -13,6 +14,7 @@ pub fn draw(
     pixmap: &mut Pixmap,
     frame: &Frame<'_>,
     text: &mut TextEngine,
+    markdown: &mut MarkdownCache,
     icons: &mut IconCache,
     now: Instant,
     full: bool,
@@ -117,8 +119,11 @@ pub fn draw(
                     frame,
                     view.rows.len(),
                     preview,
-                    text,
-                    icons,
+                    preview::PreviewCaches {
+                        text: &mut *text,
+                        markdown: &mut *markdown,
+                        icons: &mut *icons,
+                    },
                 );
             }
         }
@@ -164,6 +169,7 @@ mod tests {
     use super::super::canvas::dim_u8;
     use super::*;
     use crate::view::test_frame;
+    use std::collections::HashSet;
     use std::sync::mpsc;
     use tiny_skia::Color;
 
@@ -173,14 +179,58 @@ mod tests {
         IconCache::new(jobs)
     }
 
+    #[test]
+    fn a_markdown_preview_paints_structured_text() {
+        use crate::view::{ListView, PreviewView};
+        use wayrun_core::wire::ResultItem;
+
+        let mut frame = test_frame((1600, 1080));
+        let rows = vec![ResultItem {
+            title: "note".into(),
+            summary: None,
+            on_click: None,
+            icon: None,
+            icon_shape: None,
+            preview: None,
+            actions: Vec::new(),
+        }];
+        frame.body = Body::List(ListView {
+            rows: &rows,
+            motion: &[],
+            first: 0,
+            selected: 0,
+            hovered: None,
+            preview: Some(PreviewView::Markdown {
+                text: "# Title\n\n**bold** and `code`\n\n- one\n- two",
+            }),
+        });
+        let kind = crate::geom::PreviewKind::Text;
+        frame.card_h = frame.layout.content_h_for(frame.layout.split_h(1, kind));
+        frame.content_h = frame.card_h;
+
+        let pixmap = render(&frame);
+        let (band_x, band_w) = frame.layout.preview_band(frame.surface);
+        let top = frame.layout.rows_top(frame.surface) + 4.0;
+        let mut colours = HashSet::new();
+        for y in (top as u32)..((top + 100.0) as u32) {
+            for x in (band_x as u32)..((band_x + band_w) as u32) {
+                let pixel = pixmap.pixel(x, y).unwrap();
+                colours.insert((pixel.red(), pixel.green(), pixel.blue(), pixel.alpha()));
+            }
+        }
+        assert!(colours.len() > 10, "the pane painted text over its fill");
+    }
+
     fn render(frame: &Frame<'_>) -> Pixmap {
         let mut pixmap = Pixmap::new(frame.surface.0, frame.surface.1).unwrap();
         let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
+        let mut markdown = MarkdownCache::default();
         let mut icons = idle_icons();
         draw(
             &mut pixmap,
             frame,
             &mut text,
+            &mut markdown,
             &mut icons,
             Instant::now(),
             true,
@@ -219,11 +269,13 @@ mod tests {
 
         let mut pixmap = Pixmap::new(64, 64).unwrap();
         let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
+        let mut markdown = MarkdownCache::default();
         let mut icons = idle_icons();
         draw(
             &mut pixmap,
             &frame,
             &mut text,
+            &mut markdown,
             &mut icons,
             Instant::now(),
             true,
@@ -243,12 +295,14 @@ mod tests {
         frame.surfaces.hairline_width = 4.0;
 
         let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
+        let mut markdown = MarkdownCache::default();
         let mut icons = idle_icons();
         let mut pixmap = Pixmap::new(1600, 1080).unwrap();
         draw(
             &mut pixmap,
             &frame,
             &mut text,
+            &mut markdown,
             &mut icons,
             Instant::now(),
             true,
@@ -274,12 +328,14 @@ mod tests {
         frame.surfaces.hairline_width = 0.5;
 
         let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
+        let mut markdown = MarkdownCache::default();
         let mut icons = idle_icons();
         let mut pixmap = Pixmap::new(1600, 1080).unwrap();
         draw(
             &mut pixmap,
             &frame,
             &mut text,
+            &mut markdown,
             &mut icons,
             Instant::now(),
             true,
@@ -288,6 +344,7 @@ mod tests {
             &mut pixmap,
             &frame,
             &mut text,
+            &mut markdown,
             &mut icons,
             Instant::now(),
             false,
@@ -303,6 +360,7 @@ mod tests {
                 &mut pixmap,
                 &frame,
                 &mut text,
+                &mut markdown,
                 &mut icons,
                 Instant::now(),
                 false,
@@ -321,6 +379,7 @@ mod tests {
         let frame = test_frame((1600, 1080));
 
         let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
+        let mut markdown = MarkdownCache::default();
         let mut icons = idle_icons();
         let mut pixmap = Pixmap::new(1600, 1080).unwrap();
         // A sentinel everywhere: a region repaint must leave the backdrop alone.
@@ -330,6 +389,7 @@ mod tests {
             &mut pixmap,
             &frame,
             &mut text,
+            &mut markdown,
             &mut icons,
             Instant::now(),
             false,
@@ -359,6 +419,7 @@ mod tests {
         frame.last_card_bottom = frame.layout.card_top(frame.surface) + card_h + 200.0;
 
         let mut text = TextEngine::with_family("Source Han Sans CN".to_string());
+        let mut markdown = MarkdownCache::default();
         let mut icons = idle_icons();
         let mut pixmap = Pixmap::new(1600, 1080).unwrap();
         pixmap.fill(Color::from_rgba8(255, 0, 255, 255));
@@ -367,6 +428,7 @@ mod tests {
             &mut pixmap,
             &frame,
             &mut text,
+            &mut markdown,
             &mut icons,
             Instant::now(),
             false,

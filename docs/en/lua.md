@@ -38,7 +38,9 @@ documents — `title`, `summary`, `on_click`, `icon`, `icon_shape`, `preview` an
 A `preview = { type = "image", path = "/absolute/file.png" }` (or an `https://`
 URL the core caches) opens the split view beside the list for the selected row;
 PNG, SVG, JPEG, WebP, GIF and BMP decode in this version. `preview = { type = "text", text = "…" }` puts a
-wrapped plain-text excerpt in the same column.
+wrapped plain-text excerpt in the same column. Add `format = "markdown"` to that
+table to render headings, emphasis, code, lists and quotes instead; an older
+launcher ignores the field and shows the source as plain text.
 
 A streaming search also receives `emit`: when the core supports streaming it
 passes a function, and each `emit(rows)` shows those rows at once while the
