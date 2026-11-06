@@ -18,6 +18,70 @@
 ---@field key string
 ---@field value string
 
+--- The `type` an action carries; the fields below say which variant uses what.
+---@alias WayrunActionType
+---| "run"
+---| "run_in_terminal"
+---| "launch"
+---| "copy"
+---| "desktop_action"
+---| "reveal"
+---| "terminal"
+---| "open"
+---| "open_with"
+---| "plugin"
+
+---@class WayrunAction
+---@field type WayrunActionType
+---@field cmd string?          run, run_in_terminal
+---@field desktop_id string?   launch, desktop_action, open_with
+---@field action_id string?    desktop_action
+---@field text string?         copy
+---@field uri string?          reveal, terminal, open, open_with
+---@field plugin string?       plugin: the owning plugin id
+---@field action string?       plugin: the command it runs
+---@field payload any?         plugin: whatever the command interprets
+
+--- A panel entry; `children` opens as a further level.
+---@class WayrunActionItem
+---@field title string
+---@field action WayrunAction?
+---@field children WayrunActionItem[]?
+---@field icon string?
+---@field id string?
+---@field plugin string?
+---@field default boolean?
+
+--- The selected row's split-view payload.
+---@class WayrunPreview
+---@field type "image"|"text"
+---@field path string?   image: a file the script ships, or an https:// URL
+---@field text string?   text: at most 64 KiB
+
+--- One result row a `search` or `top` returns.
+---@class WayrunRow
+---@field title string
+---@field summary string?
+---@field on_click WayrunAction?
+---@field icon string?
+---@field icon_shape "square"|"circle"?
+---@field preview WayrunPreview?
+---@field actions WayrunActionItem[]?
+
+--- One plugin table a script returns.
+---@class WayrunPlugin
+---@field id string
+---@field name string?
+---@field icon string?
+---@field description string?
+---@field api integer?
+---@field env string[]?
+---@field exec string[]?
+---@field read string[]?
+---@field search fun(text: string, emit: fun(rows: WayrunRow[])?): WayrunRow[]?
+---@field top fun(): WayrunRow[]?
+---@field command fun(action: string, payload: any): any
+
 ---@class Wayrun
 wayrun = {}
 
@@ -87,6 +151,8 @@ function wayrun.which(name) end
 ---@field code integer
 ---@field stdout string
 ---@field stderr string
+---@field stdout_truncated boolean  the 1 MiB cap cut the stream
+---@field stderr_truncated boolean  the 8 KiB cap cut the stream
 
 ---@param program string
 ---@param args string[]?
