@@ -49,6 +49,7 @@
 # panel_header = 28.0        # action panel header band height
 
 [font]
+# family = "sans-serif"      # primary shaping family; missing glyphs fall back
 # size = 14.0                # interface size; roles scale by their shipped ratio
 
 [motion]

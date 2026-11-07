@@ -69,7 +69,7 @@ pub(super) fn draw_row(
     body: &RowBody<'_>,
 ) {
     let theme = frame.theme;
-    let font = frame.font;
+    let font = &frame.font;
     let rect = body.rect;
     draw_row_chrome(canvas, pixmap, frame, body);
 

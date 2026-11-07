@@ -292,7 +292,7 @@ impl Shell {
             wheel_accum: 0.0,
             pending: Pending::default(),
             icons: IconCache::new(icon_jobs),
-            text: TextEngine::with_family(wayrun_core::config::get().font.family.clone()),
+            text: TextEngine::default(),
             markdown: MarkdownCache::default(),
             app: Launcher::new(),
             resident: env::var_os("WAYRUN_RESIDENT").is_some(),
@@ -348,7 +348,7 @@ impl Shell {
         } else {
             self.app.apply_partial(items, now);
         }
-        let font = self.app.presentation.appearance.font;
+        let font = &self.app.presentation.appearance.font;
         let scale = self.app.scale_factor();
         let icon_size = (font.icon() * scale).round() as u32;
         let fg = self.app.presentation.theme.fg;
@@ -379,19 +379,12 @@ impl Shell {
         self.redraw();
     }
 
-    /// `theme.toml` changed on disk. Radius, alpha and row count can move
-    /// pixels outside the usual card damage, so the next frame is full.
+    /// `theme.toml` changed on disk. Radius, alpha, row count and the font
+    /// family can move pixels outside the usual card damage; the next frame is full.
     pub fn on_appearance(&mut self, config: AppearanceConfig, now: Instant) {
         self.icons.drop_tinted();
+        self.text.set_family(config.font.family.clone());
         self.app.apply_appearance(config, now);
-        self.needs_full = true;
-        self.redraw();
-    }
-
-    /// `config.toml`'s font family changed; every cached line was shaped with
-    /// the old one.
-    pub fn on_font_family(&mut self, family: String) {
-        self.text.set_family(family);
         self.needs_full = true;
         self.redraw();
     }

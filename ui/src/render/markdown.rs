@@ -587,7 +587,7 @@ pub(super) fn draw_markdown(
         max_h,
         scale,
     };
-    let mut layouter = Layouter::new(text, frame.font, palette, viewport);
+    let mut layouter = Layouter::new(text, frame.font.clone(), palette, viewport);
     layouter.blocks(&document.blocks, 0.0, Tone::Text);
     let layout = layouter.finish();
 

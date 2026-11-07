@@ -7,6 +7,8 @@ use cosmic_text::{
 };
 use tiny_skia::Pixmap;
 
+use crate::config::FontConfig;
+
 /// The card's line height as a multiple of the font size.
 pub const LINE_HEIGHT: f32 = 1.2;
 
@@ -83,6 +85,13 @@ pub struct TextEngine {
     /// Bumped on every cache lookup, so `Line::used` orders the entries.
     clock: u64,
     family: String,
+}
+
+impl Default for TextEngine {
+    /// The shipped family, until the theme applies its own.
+    fn default() -> Self {
+        Self::with_family(FontConfig::default().family)
+    }
 }
 
 impl TextEngine {

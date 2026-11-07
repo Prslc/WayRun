@@ -232,13 +232,16 @@ An unknown `align` keeps the default.
 
 ### Font
 
-The `[font]` table sets the interface size in logical pixels. One size drives
-every role; the rest scale with it. The font family is not here; it lives in
-`config.toml` under `[font].family`.
+The `[font]` table sets the text family and the interface size in logical
+pixels. One size drives every role; the rest scale with it. Glyphs the family
+lacks fall back to the system fonts.
 
 | Key | Type | Default | Range | Meaning |
 | --- | --- | --- | --- | --- |
+| `family` | string | `sans-serif` | — | Primary shaping family, or a generic name (`serif`, `sans-serif`, `monospace`). |
 | `size` | float | `14.0` | 1–96 | A result row's title; the other roles scale from it. |
+
+Both apply live; a family change re-shapes every cached line.
 
 ### Motion
 

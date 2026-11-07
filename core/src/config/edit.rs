@@ -236,7 +236,7 @@ mod tests {
     #[test]
     fn the_locale_is_the_only_key_that_needs_a_restart() {
         assert!(restart_needed("ui.locale"));
-        assert!(!restart_needed("font.family"));
+        assert!(!restart_needed("icon.theme"));
         assert!(!restart_needed("files.index"));
     }
 

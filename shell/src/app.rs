@@ -274,7 +274,7 @@ impl State {
             opacity: self.presentation.entrance(now),
             theme: self.presentation.theme,
             surfaces: self.presentation.surfaces,
-            font: self.presentation.appearance.font,
+            font: self.presentation.appearance.font.clone(),
             field,
             body,
             footer,

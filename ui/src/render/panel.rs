@@ -24,7 +24,7 @@ pub(super) fn draw_actions(
     };
     let theme = frame.theme;
     let layout = frame.layout;
-    let font = frame.font;
+    let font = &frame.font;
     let (left, width) = layout.row_band(frame.surface);
 
     if let Some(title) = panel.parent_title {

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The text family moved from `config.toml`'s `[font].family` to
+  `theme.toml`'s `[font].family`, next to the interface size it belongs with.
+  It still applies live. A `[font]` table left in `config.toml` is ignored, so
+  move the key to `theme.toml`.
+
 ## [0.11.0] - 2026-11-07
 
 ### Added

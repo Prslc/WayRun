@@ -205,15 +205,19 @@ impl ColorConfig {
     }
 }
 
-/// One interface size; every text and icon role keeps its shipped ratio to it.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// The text family and one interface size; every role keeps its shipped ratio.
+#[derive(Clone, Debug, PartialEq)]
 pub struct FontConfig {
+    pub family: String,
     pub size: f32,
 }
 
 impl Default for FontConfig {
     fn default() -> Self {
-        Self { size: 14.0 }
+        Self {
+            family: "sans-serif".to_string(),
+            size: 14.0,
+        }
     }
 }
 
@@ -313,6 +317,7 @@ struct LayoutFile {
 
 #[derive(serde::Deserialize, Default)]
 struct FontFile {
+    family: Option<String>,
     size: Option<f32>,
 }
 
@@ -359,6 +364,7 @@ impl AppearanceConfig {
         assign!(self.blur, blur.enabled);
         assign!(self.preview, preview.enabled);
         assign!(self.layout.footer, footer.enabled);
+        assign!(self.font.family, font.family.and_then(non_blank));
         assign!(self.font.size, font.size.and_then(|v| positive(v, 96.0)));
 
         assign!(
@@ -394,6 +400,11 @@ fn parse_align(value: &str) -> Option<Align> {
         "right" => Some(Align::Right),
         _ => None,
     }
+}
+
+/// A blank family keeps the shipped default instead of shaping with nothing.
+fn non_blank(text: String) -> Option<String> {
+    (!text.trim().is_empty()).then_some(text)
 }
 
 /// A finite, positive value clamped into `(0, max]`, else `None`.
@@ -637,6 +648,15 @@ mod tests {
         assert_eq!(Mode::from_wire(Some("dark")), Mode::Dark);
         assert_eq!(Mode::from_wire(None), Mode::Dark);
         assert_eq!(Mode::from_wire(Some("sepia")), Mode::Dark);
+    }
+
+    #[test]
+    fn the_family_is_read_and_a_blank_one_keeps_the_default() {
+        assert_eq!(
+            parse("[font]\nfamily = \"Noto Sans\"").font.family,
+            "Noto Sans"
+        );
+        assert_eq!(parse("[font]\nfamily = \"  \"").font.family, "sans-serif");
     }
 
     #[test]
