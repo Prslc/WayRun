@@ -1,6 +1,6 @@
 # 插件目录
 
-下面的示例都在 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区。它们只是参考材料：只有 `plugins.toml` 指向某个插件时，它才会被注册。Lua 示例是单个脚本；Python 示例是一个目录，自带一份 `wayrun_plugin/`。
+下面的示例都在 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区。它们只是参考材料：只有 `plugins.toml` 指向某个插件时，它才会被注册。多数 Lua 示例是单个脚本；`kde.lua` 还带有 `kde/` 模块。Python 示例是一个目录，自带一份 `wayrun_plugin/`。
 
 ## Lua 示例
 
@@ -13,8 +13,13 @@
 | [笔记](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/documents.lua) | 文本与 Markdown 笔记，带预览 | `documents/` |
 | [GitHub](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/github.lua) | 搜索仓库与用户 | 网络；可选的 `GITHUB_TOKEN` |
 | [壁纸](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/wallpaper_dms.lua) | 切换 DMS 壁纸 | `dms` 在 `PATH` 中；`~/Pictures/Wallpapers` |
+| [网页直达](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/web-open.lua) | 作为默认提供者，打开输入的网址或域名 | — |
+| [Man 手册](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/man.lua) | 搜索 man 手册并在终端打开 | `apropos`（man-db） |
+| [汇率换算](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/currency.lua) | 按每日汇率换算货币 | 网络 |
+| [KDE 设置](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/kde.lua) | 搜索 KDE 系统设置 | KDE Plasma；`systemsettings` 或 `kcmshell6` |
+| [软件包](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/packages.lua) | 搜索 pacman 仓库与 AUR | Arch；`pacman`；可选的 `paru` 或 `yay` |
 
-`firefox.lua` 与 `web.lua` 读取脚本旁的 `assets/` 目录；`documents.lua` 读取 `documents/`。复制脚本时把目录一起带上。
+`firefox.lua` 与 `web.lua` 读取脚本旁的 `assets/` 目录；`documents.lua` 读取 `documents/`，`kde.lua` 读取 `kde/`。复制脚本时把目录一起带上。
 
 ## Python 示例
 

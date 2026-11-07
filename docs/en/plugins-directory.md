@@ -3,8 +3,8 @@
 These examples live in the
 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace. They are
 reference material: nothing is registered until your `plugins.toml` names it.
-A Lua example is one script; a Python example is a directory that carries its
-own `wayrun_plugin/` copy.
+Most Lua examples are one script; `kde.lua` carries its `kde/` modules. A
+Python example is a directory that carries its own `wayrun_plugin/` copy.
 
 ## Lua examples
 
@@ -17,9 +17,15 @@ own `wayrun_plugin/` copy.
 | [Notes](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/documents.lua) | Text and Markdown notes with previews | `documents/` |
 | [GitHub](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/github.lua) | Repository and user search | network; optional `GITHUB_TOKEN` |
 | [Wallpaper](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/wallpaper_dms.lua) | Switch the DMS wallpaper | `dms` on `PATH`; `~/Pictures/Wallpapers` |
+| [Web open](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/web-open.lua) | Open a typed URL or domain as a default provider | — |
+| [Man pages](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/man.lua) | Search man pages and open one in a terminal | `apropos` (man-db) |
+| [Currency](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/currency.lua) | Convert between currencies at daily rates | network |
+| [KDE settings](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/kde.lua) | Search KDE System Settings | KDE Plasma; `systemsettings` or `kcmshell6` |
+| [Packages](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/packages.lua) | Search pacman repositories and the AUR | Arch; `pacman`; `paru` or `yay` optional |
 
 `firefox.lua` and `web.lua` read the `assets/` folder beside the script;
-`documents.lua` reads `documents/`. Copy the folder with the script.
+`documents.lua` reads `documents/`, and `kde.lua` reads `kde/`. Copy the folder
+with the script.
 
 ## Python examples
 
