@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-07
+
+### Added
+
+- A text preview can render Markdown. Add `format = "markdown"` to a text
+  preview to lay out headings, emphasis, inline code, code blocks, lists,
+  quotes, rules and link text in the preview column; `plain` remains the
+  default and the wire field is additive, so `PLUGIN_API` stays at 1.
+  Over-long plain and CJK tokens split on character boundaries instead of
+  being elided.
+- `wayrun.date(seconds?)` answers the UTC civil fields (year, month, day,
+  hour, minute and second) for a Unix timestamp, defaulting to now. The
+  binding is additive: a script can test for it, and `PLUGIN_API` stays at 1.
+- The LuaLS stub types the row, action, preview and plugin tables, and the
+  two new `exec` flags, so a misspelled row field is caught at edit time.
+
+### Changed
+
+- The installation guide and both READMEs now lead with the prebuilt x86_64
+  tarball (built on Ubuntu 24.04); building from source remains the path for
+  other architectures and older distributions.
+- The guides are also published as a VitePress site at
+  <https://prslc.github.io/WayRun/>, in English and Chinese, with the same
+  pages kept in the repository.
+- The guides gain a plugin directory listing the worked Lua and Python
+  examples from the WayRun-Plugins workspace, with what each needs and how
+  to register one.
+
+### Fixed
+
+- A keyword-less external host gets 250ms in the default chain instead of
+  50ms. A cold host such as the KDE settings plugin, which runs
+  `kcmshell6 --list`, took about 140ms and was silently dropped, so a query
+  such as `输入法` returned nothing.
+- The blur region is committed only after the card fades in, so the first
+  entrance frame no longer shows the smeared wallpaper across the card's
+  rect before the card covers it.
+- `wayrun.exec` reports `stdout_truncated` and `stderr_truncated` when a
+  stream exceeds its cap (1 MiB stdout, 8 KiB stderr); a stream that exactly
+  fills its cap stays false.
+
 ## [0.10.0] - 2026-11-04
 
 ### Added
