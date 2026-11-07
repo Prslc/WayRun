@@ -97,6 +97,8 @@ The same pages are published as a site at
 - [Resident mode](docs/en/resident.md) — the systemd unit and the control commands.
 - [Plugins](docs/en/plugins.md) — `plugins.toml`, the built-ins, and external
   JSON-RPC hosts.
+- [Plugin directory](docs/en/plugins-directory.md) — example Lua and Python
+  hosts from the WayRun-Plugins workspace.
 - [Lua plugins](docs/en/lua.md) — one script the launcher hosts itself: the
   `wayrun` API, the sandbox, and registering it.
 - [JSON-RPC 2.0](docs/en/jsonrpc.md) — the wire protocol and the result schema.

@@ -70,6 +70,7 @@ ln -s "$(pwd)/target/release/wayrun" ~/.local/bin/wayrun
 - [主题](theme.md)：系统调色板与 `theme.toml`（配色、模糊、布局、字体、动效）。
 - [常驻模式](resident.md)：systemd 单元与控制命令。
 - [插件](plugins.md)：`plugins.toml`、内置插件与外部 JSON-RPC 宿主。
+- [插件目录](plugins-directory.md)：WayRun-Plugins 工作区里的 Lua 与 Python 示例。
 - [Lua 插件](lua.md)：由启动器自身承载的一个脚本：`wayrun` API、沙箱与注册。
 - [JSON-RPC 2.0](jsonrpc.md)：通信协议与结果项 schema。
 

@@ -200,4 +200,5 @@ Python framework, examples and templates (`template/`, `template.lua`).
 
 A Lua plugin is first-party: the binary hosts the script itself. See
 [lua.md](lua.md). The host protocol is the JSON-RPC subset documented in
-[jsonrpc.md](jsonrpc.md): `search`, `top` and `list_plugins`.
+[jsonrpc.md](jsonrpc.md): `search`, `top` and `list_plugins`. Worked examples
+are in the [Plugin directory](plugins-directory.md).

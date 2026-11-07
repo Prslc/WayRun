@@ -21,6 +21,7 @@ const pages: { slug: string; en: string; zh: string; group: Group }[] = [
   { slug: 'theme', en: 'Theme', zh: '主题', group: 'configure' },
   { slug: 'resident', en: 'Resident mode', zh: '常驻模式', group: 'run' },
   { slug: 'plugins', en: 'Plugins', zh: '插件', group: 'extend' },
+  { slug: 'plugins-directory', en: 'Plugin directory', zh: '插件目录', group: 'extend' },
   { slug: 'lua', en: 'Lua plugins', zh: 'Lua 插件', group: 'extend' },
   { slug: 'jsonrpc', en: 'JSON-RPC 2.0', zh: 'JSON-RPC 2.0', group: 'extend' },
 ]

@@ -126,4 +126,4 @@ Environment=http_proxy=http://127.0.0.1:7890
 
 宿主也可以手写。[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区提供 Python 框架、示例与模板（`template/`、`template.lua`）。
 
-Lua 插件属于第一方：二进制自己承载脚本，见 [lua.md](lua.md)。宿主协议是 [jsonrpc.md](jsonrpc.md) 记录的那部分 JSON-RPC 子集：`search`、`top`、 `list_plugins`。
+Lua 插件属于第一方：二进制自己承载脚本，见 [lua.md](lua.md)。宿主协议是 [jsonrpc.md](jsonrpc.md) 记录的那部分 JSON-RPC 子集：`search`、`top`、`list_plugins`。可用的示例见[插件目录](plugins-directory.md)。
