@@ -2,3 +2,6 @@ target/
 AGENTS.md
 NOTES.md
 scripts/
+docs/node_modules/
+docs/.vitepress/cache/
+docs/.vitepress/dist/

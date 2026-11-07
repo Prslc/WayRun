@@ -124,15 +124,21 @@ wayrun plugin add ~/plugins/firefox.lua --keyword ff
 
 ## Documentation
 
+The same pages are published as a site at
+<https://prslc.github.io/WayRun/>.
+
+- [Installation](docs/en/install.md) — requirements, build, first launch, and
+  feature dependencies.
 - [Usage](docs/en/usage.md) — prefixes, keybindings, and copy/paste.
-- [Resident mode](docs/en/resident.md) — the systemd unit and the control commands.
+- [Config](docs/en/config.md) — `config.toml` (locale, fonts, icons, the file
+  index).
 - [Theme](docs/en/theme.md) — the system palette and `theme.toml` (colors, blur,
   layout, typography, motion).
-- [Config](docs/en/config.md) — `config.toml` (search engine, font family).
+- [Resident mode](docs/en/resident.md) — the systemd unit and the control commands.
 - [Plugins](docs/en/plugins.md) — `plugins.toml`, the built-ins, and external
   JSON-RPC hosts.
 - [Lua plugins](docs/en/lua.md) — one script the launcher hosts itself: the
-  `wayrun` table, the sandbox, and registering it.
+  `wayrun` API, the sandbox, and registering it.
 - [JSON-RPC 2.0](docs/en/jsonrpc.md) — the wire protocol and the result schema.
 
 ## Credit

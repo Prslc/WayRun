@@ -1,0 +1,18 @@
+/* Brand colours follow the launcher's accent: the logo's #8ab4f8 reads well on
+   dark surfaces, while the light theme needs a deeper blue to stay legible. */
+:root {
+  --vp-c-brand-1: #1a73e8;
+  --vp-c-brand-2: #1967d2;
+  --vp-c-brand-3: #1557b0;
+  --vp-c-brand-soft: rgba(26, 115, 232, 0.14);
+}
+
+.dark {
+  --vp-c-brand-1: #8ab4f8;
+  --vp-c-brand-2: #4285f4;
+  --vp-c-brand-3: #1967d2;
+  --vp-c-brand-soft: rgba(138, 180, 248, 0.16);
+  /* VitePress paints a brand button's active state with brand-1, which is the
+     lightest step here and would leave white text on a pale background. */
+  --vp-button-brand-active-bg: #1557b0;
+}
