@@ -1,14 +1,26 @@
 # 安装
 
-WayRun 只有一个 Rust 可执行文件。构建后放进 `PATH`，再绑一个热键即可。
+WayRun 只有一个 Rust 可执行文件。下载发布版或自行构建，放进 `PATH`，再绑一个热键即可。
 
 ## 环境要求
 
 - **Wayland** 合成器，需实现 `wlr-layer-shell`（`zwlr_layer_shell_v1`）。包括 wlroots 系（niri、Hyprland、Sway、river、Wayfire、labwc 等）、KDE Plasma 的 Wayland 会话，以及基于 Mir 的合成器。GNOME/Mutter 未实现该协议，无法显示覆盖层。
-- Rust 工具链与常见系统库（GLib、SQLite、xkbcommon、fontconfig 等）。 `cargo build --release` 会构建全部内容。
+- 它链接的运行时库：GLib、SQLite、xkbcommon、fontconfig 等。
+- 从源码构建时，还需要 Rust 工具链与这些库的开发头文件。
 - 一款包含中日韩（CJK）字形的字体，用于中日韩查询，如 Source Han Sans。
 
-## 构建与安装
+## 下载发布版
+
+发布版提供预编译的 x86_64 二进制，在 Ubuntu 24.04 上构建。从 [GitHub Releases](https://github.com/Prslc/WayRun/releases/latest) 下载最新的 `wayrun-v*-x86_64-unknown-linux-gnu.tar.gz`，然后：
+
+```bash
+tar -xzf wayrun-v*-x86_64-unknown-linux-gnu.tar.gz
+install -Dm755 wayrun ~/.local/bin/wayrun
+```
+
+`~/.local/bin` 需要在 `PATH` 中。压缩包同时带有内置图标的 `NOTICE`。其他架构或更旧的发行版请从源码构建。
+
+## 从源码构建
 
 ```bash
 git clone https://github.com/Prslc/WayRun.git
@@ -16,6 +28,8 @@ cd WayRun
 cargo build --release
 ln -s "$(pwd)/target/release/wayrun" ~/.local/bin/wayrun
 ```
+
+发布版以 fat LTO 和单个 codegen unit 构建；本地构建保留默认设置，编译更快，体积略大。
 
 ## 首次启动
 

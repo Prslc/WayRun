@@ -52,8 +52,10 @@ needs no GPU stack and no GUI toolkit.
   (`zwlr_layer_shell_v1`): the wlroots family (niri, Hyprland, Sway, river,
   Wayfire, labwc, ...), KDE Plasma on Wayland, and Mir-based compositors.
   GNOME/Mutter does not implement it, so the overlay cannot be shown there.
-- A Rust toolchain and the usual system libraries (GLib, SQLite, xkbcommon,
-  fontconfig, ...); `cargo build --release` builds everything.
+- The runtime libraries it links against: GLib, SQLite, xkbcommon, fontconfig
+  and the rest.
+- A Rust toolchain and the development headers for those libraries, if you
+  build from source.
 - A font with CJK coverage for Chinese/Japanese queries (e.g. Source Han Sans).
 
 ## Feature dependencies
@@ -89,6 +91,18 @@ runs it itself, so there is no interpreter to install; see
 [Plugins](docs/en/plugins.md) and [Lua plugins](docs/en/lua.md).
 
 ## Quick Start
+
+Download the latest release from
+[GitHub Releases](https://github.com/Prslc/WayRun/releases/latest), then:
+
+```bash
+tar -xzf wayrun-v*-x86_64-unknown-linux-gnu.tar.gz
+install -Dm755 wayrun ~/.local/bin/wayrun
+```
+
+`~/.local/bin` must be on your `PATH`. The tarball also carries `NOTICE` for
+the bundled icons. The published binary is built on Ubuntu 24.04 for x86_64;
+on another architecture or an older distribution, build from source:
 
 ```bash
 git clone https://github.com/Prslc/WayRun.git
@@ -127,7 +141,7 @@ wayrun plugin add ~/plugins/firefox.lua --keyword ff
 The same pages are published as a site at
 <https://prslc.github.io/WayRun/>.
 
-- [Installation](docs/en/install.md) — requirements, build, first launch, and
+- [Installation](docs/en/install.md) — requirements, install, first launch, and
   feature dependencies.
 - [Usage](docs/en/usage.md) — prefixes, keybindings, and copy/paste.
 - [Config](docs/en/config.md) — `config.toml` (locale, fonts, icons, the file

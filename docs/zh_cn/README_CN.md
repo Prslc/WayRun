@@ -37,7 +37,8 @@
 ## 环境要求
 
 - **Wayland** 合成器，需实现 `wlr-layer-shell`（`zwlr_layer_shell_v1`）。包括 wlroots 系（niri、Hyprland、Sway、river、Wayfire、labwc 等）、KDE Plasma 的 Wayland 会话，以及基于 Mir 的合成器；GNOME/Mutter 未实现该协议，无法显示覆盖层。
-- Rust 工具链与常见系统库（GLib、SQLite、xkbcommon、fontconfig 等）； `cargo build --release` 会构建全部内容。
+- 它链接的运行时库：GLib、SQLite、xkbcommon、fontconfig 等。
+- 从源码构建时，还需要 Rust 工具链与这些库的开发头文件。
 - 覆盖中日韩（CJK）输入的字体（如 Source Han Sans）。
 
 ## 功能依赖
@@ -58,6 +59,15 @@
 上表的内置插件都编在二进制里；除此之外的一切都是“宿主”：一个使用 JSON-RPC 子集的可执行文件，在 `plugins.toml` 注册，每次调用新起进程，或用 `resident = true` 常驻。 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区提供 Python 框架、示例（`firefox.lua`、`web.lua` 等）以及可复制的模板。Lua 插件就是一个脚本文件，由启动器二进制本体运行，无需安装解释器；见[插件](plugins.md)与 [Lua 插件](lua.md)。
 
 ## 快速开始
+
+从 [GitHub Releases](https://github.com/Prslc/WayRun/releases/latest) 下载最新发布版，然后：
+
+```bash
+tar -xzf wayrun-v*-x86_64-unknown-linux-gnu.tar.gz
+install -Dm755 wayrun ~/.local/bin/wayrun
+```
+
+`~/.local/bin` 需要在 `PATH` 中。压缩包同时带有内置图标的 `NOTICE`。发布版是在 Ubuntu 24.04 上构建的 x86_64 二进制；其他架构或更旧的发行版请从源码构建：
 
 ```bash
 git clone https://github.com/Prslc/WayRun.git
@@ -89,7 +99,7 @@ wayrun plugin add ~/plugins/firefox.lua --keyword ff
 
 同样的页面也发布为站点：<https://prslc.github.io/WayRun/zh_cn/>。
 
-- [安装](install.md)：环境要求、构建与首次启动、功能依赖。
+- [安装](install.md)：环境要求、下载或构建、首次启动、功能依赖。
 - [使用说明](usage.md)：前缀、按键与复制粘贴。
 - [配置](config.md)：`config.toml`（界面语言、字体、图标、文件索引）。
 - [主题](theme.md)：系统调色板与 `theme.toml`（配色、模糊、布局、字体、动效）。

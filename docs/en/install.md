@@ -1,6 +1,7 @@
 # Installation
 
-WayRun is one Rust binary. Build it, put it on `PATH`, and bind a hotkey.
+WayRun is one Rust binary. Download a release or build it, put it on `PATH`,
+and bind a hotkey.
 
 ## Requirements
 
@@ -9,12 +10,29 @@ WayRun is one Rust binary. Build it, put it on `PATH`, and bind a hotkey.
   Sway, river, Wayfire, labwc, ...), KDE Plasma on Wayland and Mir-based
   compositors. GNOME/Mutter does not implement the protocol, so the overlay
   cannot be shown there.
-- A Rust toolchain and the usual system libraries (GLib, SQLite, xkbcommon,
-  fontconfig, ...). `cargo build --release` builds everything.
+- The runtime libraries it links against: GLib, SQLite, xkbcommon, fontconfig
+  and the rest.
+- A Rust toolchain and the development headers for those libraries, if you
+  build from source.
 - A font with CJK coverage for Chinese and Japanese queries, such as Source Han
   Sans.
 
-## Build and install
+## Download a release
+
+Releases ship a prebuilt binary for x86_64, built on Ubuntu 24.04. Download the
+latest `wayrun-v*-x86_64-unknown-linux-gnu.tar.gz` from
+[GitHub Releases](https://github.com/Prslc/WayRun/releases/latest), then:
+
+```bash
+tar -xzf wayrun-v*-x86_64-unknown-linux-gnu.tar.gz
+install -Dm755 wayrun ~/.local/bin/wayrun
+```
+
+`~/.local/bin` must be on your `PATH`. The tarball also carries `NOTICE` for
+the bundled icons. On another architecture or an older distribution, build
+from source.
+
+## Build from source
 
 ```bash
 git clone https://github.com/Prslc/WayRun.git
@@ -22,6 +40,9 @@ cd WayRun
 cargo build --release
 ln -s "$(pwd)/target/release/wayrun" ~/.local/bin/wayrun
 ```
+
+Published binaries use fat LTO and one codegen unit; a local build keeps the
+defaults, compiles faster, and comes out slightly larger.
 
 ## First launch
 
