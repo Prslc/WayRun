@@ -44,51 +44,18 @@ needs no GPU stack and no GUI toolkit.
 - **Extensible** — seven built-ins in the binary; everything else is an
   external host over a documented JSON-RPC contract, written in Python (a
   shipped framework) or as one Lua script the launcher runs itself. A
-  `resident` host stays warm at about a millisecond per call.
+  `resident` host stays warm at about a millisecond per call. Examples and
+  templates are in the
+  [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace.
 
 ## Requirements
 
-- A **Wayland** compositor that implements `wlr-layer-shell`
-  (`zwlr_layer_shell_v1`): the wlroots family (niri, Hyprland, Sway, river,
-  Wayfire, labwc, ...), KDE Plasma on Wayland, and Mir-based compositors.
-  GNOME/Mutter does not implement it, so the overlay cannot be shown there.
-- The runtime libraries it links against: GLib, SQLite, xkbcommon, fontconfig
-  and the rest.
-- A Rust toolchain and the development headers for those libraries, if you
-  build from source.
-- A font with CJK coverage for Chinese/Japanese queries (e.g. Source Han Sans).
+WayRun needs a Wayland compositor that implements `wlr-layer-shell`: the wlroots
+family (niri, Hyprland, Sway, river, Wayfire, labwc, ...), KDE Plasma on
+Wayland, or a Mir-based compositor. GNOME/Mutter is not supported.
 
-## Feature dependencies
-
-The overlay, and the built-in app, file and calculator search, need
-nothing beyond the compositor above. Every other feature depends on an optional
-component; when one is missing, the keyword returns no rows rather than an
-error. Extra plugins (Firefox bookmarks and history, web suggestions, clipboard
-history, and more) install from the
-[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace:
-
-| Feature | Needs |
-| --- | --- |
-| copy / paste and the "Copy …" actions | `wl-clipboard` (`wl-copy` / `wl-paste`) |
-| a terminal-only `$PATH` hit (`r`) | a terminal emulator (`$TERMINAL`, else one on `PATH`) |
-| a blurred card | `ext-background-effect-v1` (niri, KWin) or the compositor's own blur by namespace |
-| per-row icons | a desktop **icon theme** (optional); without one, rows fall back to a bundled placeholder |
-
-The action panel and built-in plugin glyphs are compiled into the binary,
-so the launcher is fully usable with no icon theme at all. App and file rows
-follow the desktop's icon theme; see [config.md](docs/en/config.md) for the
-`[icon]` override.
-
-## Plugins
-
-The built-ins in the table above ship inside the binary. Anything more is a
-host: an executable that speaks the documented JSON-RPC subset, registered from
-`plugins.toml`, forked per call or kept warm with `resident = true`. The
-[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace supplies a
-Python framework, Lua and Python examples (`firefox.lua`, `web.lua`, …) and
-templates to copy from. A Lua plugin is one script file — the launcher binary
-runs it itself, so there is no interpreter to install; see
-[Plugins](docs/en/plugins.md) and [Lua plugins](docs/en/lua.md).
+Everything else, including the runtime libraries and the optional components
+some features need, is covered in [Installation](docs/en/install.md).
 
 ## Quick Start
 
@@ -111,30 +78,9 @@ cargo build --release
 ln -s "$(pwd)/target/release/wayrun" ~/.local/bin/wayrun
 ```
 
-The published binaries are built with fat LTO and one codegen unit; a local
-build uses thin LTO and parallel codegen, so it compiles faster and comes out
-slightly larger.
-
-Bind a hotkey (e.g. Alt+Space) to launch the shell — the syntax is
-compositor-specific (niri and Hyprland examples are in
-[resident mode](docs/en/resident.md)):
-
-```bash
-wayrun run
-```
-
-The launcher is a full-screen overlay with a dimmed backdrop and a centered card.
-In the default spawn-per-hotkey flow, `Esc` / clicking outside quits it; in
-resident mode the hotkey toggles the surface and dismiss hides it.
-
-The same binary carries its own controls:
-
-```bash
-wayrun                                  # list the commands in a terminal
-wayrun toggle                           # resident mode: show or hide over the socket
-wayrun config set font.family "Noto Sans"
-wayrun plugin add ~/plugins/firefox.lua --keyword ff
-```
+Bind a hotkey to `wayrun run`. The launcher opens as a floating overlay; see
+[Usage](docs/en/usage.md) for the keys and
+[Resident mode](docs/en/resident.md) for the systemd unit.
 
 ## Documentation
 
