@@ -758,6 +758,22 @@ mod tests {
     }
 
     #[test]
+    fn exec_reports_a_truncated_stream() {
+        let host = host(
+            r#"
+            return { { id = "demo", exec = { "sh" }, search = function()
+                local out = wayrun.exec("sh", { "-c", "head -c 1100000 /dev/zero | tr '\\000' a" })
+                return { { title = tostring(out.stdout_truncated),
+                    summary = #out.stdout .. " " .. tostring(out.stderr_truncated) } }
+            end } }
+            "#,
+        );
+        let rows = search(&host, "demo", "x");
+        assert_eq!(rows[0]["title"], "true", "the cap cut the stream");
+        assert_eq!(rows[0]["summary"], "1048576 false");
+    }
+
+    #[test]
     fn exec_refuses_an_undeclared_program() {
         let host = host(
             r#"

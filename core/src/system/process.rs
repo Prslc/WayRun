@@ -11,10 +11,17 @@ pub const DEADLINE: Duration = Duration::from_secs(2);
 const POLL: Duration = Duration::from_millis(10);
 const GRACE: Duration = Duration::from_millis(200);
 
+/// A capped run's output, with whether either stream lost bytes to its cap.
+pub struct CappedOutput {
+    pub output: Output,
+    pub stdout_truncated: bool,
+    pub stderr_truncated: bool,
+}
+
 /// Run `command` with piped output and a deadline; `None` on spawn failure or
 /// timeout (the child is killed and reaped).
 pub fn output_within(command: Command, limit: Duration) -> Option<Output> {
-    output_within_capped(command, limit, usize::MAX, usize::MAX)
+    output_within_capped(command, limit, usize::MAX, usize::MAX).map(|capped| capped.output)
 }
 
 /// [`output_within`] retaining at most `stdout_cap`/`stderr_cap` bytes per
@@ -24,7 +31,7 @@ pub fn output_within_capped(
     limit: Duration,
     stdout_cap: usize,
     stderr_cap: usize,
-) -> Option<Output> {
+) -> Option<CappedOutput> {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -53,25 +60,33 @@ pub fn output_within_capped(
     }
 
     let status = wait_status(&mut child, limit)?;
-    Some(Output {
-        status,
-        stdout: out_rx.recv_timeout(GRACE).unwrap_or_default(),
-        stderr: err_rx.recv_timeout(GRACE).unwrap_or_default(),
+    let (stdout, stdout_truncated) = out_rx.recv_timeout(GRACE).unwrap_or_default();
+    let (stderr, stderr_truncated) = err_rx.recv_timeout(GRACE).unwrap_or_default();
+    Some(CappedOutput {
+        output: Output {
+            status,
+            stdout,
+            stderr,
+        },
+        stdout_truncated,
+        stderr_truncated,
     })
 }
 
-/// Read to EOF, keeping only the first `cap` bytes.
-fn read_capped(pipe: &mut impl Read, cap: usize) -> Vec<u8> {
+/// Read to EOF, keeping only the first `cap` bytes and saying whether more came.
+fn read_capped(pipe: &mut impl Read, cap: usize) -> (Vec<u8>, bool) {
     let mut kept = Vec::new();
+    let mut truncated = false;
     let mut chunk = [0u8; 8192];
     loop {
         match pipe.read(&mut chunk) {
-            Ok(0) => return kept,
+            Ok(0) => return (kept, truncated),
             Ok(read) => {
                 let room = cap.saturating_sub(kept.len());
+                truncated |= read > room;
                 kept.extend_from_slice(&chunk[..read.min(room)]);
             }
-            Err(_) => return kept,
+            Err(_) => return (kept, truncated),
         }
     }
 }
@@ -124,9 +139,20 @@ mod tests {
     fn a_capped_stream_is_drained_but_truncated() {
         let mut command = Command::new("sh");
         command.args(["-c", "printf 'abcdefghij'"]);
-        let output = output_within_capped(command, DEADLINE, 4, 8).unwrap();
-        assert_eq!(output.stdout, b"abcd");
-        assert!(output.status.success());
+        let capped = output_within_capped(command, DEADLINE, 4, 8).unwrap();
+        assert_eq!(capped.output.stdout, b"abcd");
+        assert!(capped.stdout_truncated);
+        assert!(!capped.stderr_truncated, "an empty stream lost nothing");
+        assert!(capped.output.status.success());
+    }
+
+    #[test]
+    fn a_stream_that_fits_its_cap_is_not_truncated() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "printf 'abcd'"]);
+        let capped = output_within_capped(command, DEADLINE, 4, 8).unwrap();
+        assert_eq!(capped.output.stdout, b"abcd");
+        assert!(!capped.stdout_truncated);
     }
 
     #[test]

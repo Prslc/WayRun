@@ -5,7 +5,7 @@ use mlua::{Lua, Table, Value};
 
 use super::options::{parse_options, with_params};
 use super::{Client, Response, reply};
-use crate::lua::sdk::now_seconds;
+use crate::lua::time::now_seconds;
 use crate::lua::{kv, warn};
 
 #[derive(serde::Serialize, serde::Deserialize)]

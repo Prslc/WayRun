@@ -87,12 +87,31 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+/// How the launcher renders a text preview; absent reads as `Plain`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TextFormat {
+    #[default]
+    Plain,
+    Markdown,
+}
+
+fn is_plain(format: &TextFormat) -> bool {
+    *format == TextFormat::Plain
+}
+
 /// What the selected row shows beside the list, tagged by `type` like `Action`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Preview {
-    Image { path: String },
-    Text { text: String },
+    Image {
+        path: String,
+    },
+    Text {
+        text: String,
+        #[serde(default, skip_serializing_if = "is_plain")]
+        format: TextFormat,
+    },
 }
 
 /// The shape an icon box is clipped to; absent draws the icon as it is.
@@ -227,5 +246,51 @@ mod tests {
         assert_eq!(row.icon_shape, Some(IconShape::Circle));
         let value = serde_json::to_value(&row).unwrap();
         assert_eq!(value["icon_shape"], "circle");
+    }
+
+    #[test]
+    fn a_text_preview_defaults_to_plain_and_omits_the_key() {
+        let preview: Preview = serde_json::from_value(json!({
+            "type": "text",
+            "text": "body",
+        }))
+        .unwrap();
+        assert_eq!(
+            preview,
+            Preview::Text {
+                text: "body".into(),
+                format: TextFormat::Plain,
+            }
+        );
+        assert_eq!(
+            serde_json::to_value(&preview).unwrap(),
+            json!({ "type": "text", "text": "body" })
+        );
+    }
+
+    #[test]
+    fn a_markdown_text_preview_round_trips() {
+        let preview = Preview::Text {
+            text: "# title".into(),
+            format: TextFormat::Markdown,
+        };
+        let value = serde_json::to_value(&preview).unwrap();
+        assert_eq!(
+            value,
+            json!({ "type": "text", "text": "# title", "format": "markdown" })
+        );
+        assert_eq!(serde_json::from_value::<Preview>(value).unwrap(), preview);
+    }
+
+    #[test]
+    fn an_unknown_text_format_fails_the_row() {
+        let parsed = serde_json::from_value::<ResultItem>(json!({
+            "title": "x",
+            "summary": null,
+            "on_click": null,
+            "icon": null,
+            "preview": { "type": "text", "text": "x", "format": "html" },
+        }));
+        assert!(parsed.is_err());
     }
 }

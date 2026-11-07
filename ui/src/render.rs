@@ -9,6 +9,7 @@ mod field;
 mod footer;
 mod frame;
 mod list;
+mod markdown;
 mod panel;
 mod preview;
 mod row;

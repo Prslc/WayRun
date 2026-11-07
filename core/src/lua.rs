@@ -11,6 +11,7 @@ mod module;
 mod sandbox;
 mod sdk;
 mod sqlite;
+mod time;
 
 pub use check::plugin_ids;
 pub use check::run as check;

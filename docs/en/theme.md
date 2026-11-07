@@ -1,24 +1,23 @@
 # Theme
 
-How WayRun is coloured, and what `$XDG_CONFIG_HOME/wayrun/theme.toml` (default
-`~/.config/wayrun/theme.toml`) controls.
-
-There are two layers: the system palette, which comes from the desktop, and
-the overrides in `theme.toml`. Both are watched, so an edit applies live.
+WayRun has two colour layers: the system palette from the desktop, and the
+overrides in `$XDG_CONFIG_HOME/wayrun/theme.toml` (default
+`~/.config/wayrun/theme.toml`). The launcher watches both, so an edit applies
+live.
 
 ## System palette
 
-The palette follows the session. On KDE Plasma it is the active colour scheme
-from:
+The palette follows the session.
 
-```
-~/.config/kdeglobals
-```
+### KDE Plasma
 
-KDE merges the applied scheme's roles there, and writes an explicit or
-wallpaper-derived accent back to `[General] AccentColor`. There is no mode
-key: the window background's luminance says which mode is active, so a
-light/dark switch is picked up live.
+On KDE Plasma the palette is the active colour scheme in
+`~/.config/kdeglobals`. KDE merges the applied scheme's roles into that file,
+and writes an explicit or wallpaper-derived accent back to
+`[General] AccentColor`.
+
+There is no mode key. The luminance of the window background decides the mode,
+so a light/dark switch is picked up live.
 
 | WayRun | KDE, from `kdeglobals` |
 | --- | --- |
@@ -28,15 +27,12 @@ light/dark switch is picked up live.
 | `container` | `[Colors:Button] BackgroundNormal` |
 | `bg` | `[Colors:Window] BackgroundNormal` |
 
-On a DankMaterialShell desktop the Material You palette is the one DMS generated
-with matugen:
+### DankMaterialShell
 
-```
-~/.cache/DankMaterialShell/dms-colors.json
-```
-
-It holds the light and dark palettes and the active `mode`, so switching
-light/dark or changing the wallpaper is picked up live.
+On a DankMaterialShell desktop the palette is the Material You palette DMS
+generates with matugen, in `~/.cache/DankMaterialShell/dms-colors.json`. The
+file holds the light and dark palettes and the active mode. Switching
+light/dark, or changing the wallpaper, is picked up live.
 
 | WayRun | DMS, from `colors[mode]` |
 | --- | --- |
@@ -44,22 +40,25 @@ light/dark or changing the wallpaper is picked up live.
 | `fg` | `on_surface` |
 | `container` | `surface_container_high` |
 
-On a KDE session `kdeglobals` is the file read, even if a DMS file is left over
-from another desktop. With neither source the built-in dark palette is used,
-with `mode = "dark"`.
+### Precedence and fallback
 
-## `$XDG_CONFIG_HOME/wayrun/theme.toml`
+On a KDE session the launcher reads `kdeglobals`, even if a DMS file is left
+over from another desktop. With neither source it uses the built-in dark
+palette, with `mode = "dark"`.
 
-Every section and every key is optional. An absent key keeps the default, an
-unparseable file is ignored, and out-of-range values are clamped. The file is
-written on first run as a commented template, so the options are listed without
-pinning their current defaults; uncomment only what you want to change.
+## Theme overrides
 
-### `[colors]`
+Every section and key is optional. An absent key keeps its default, an
+unparseable file is ignored, and out-of-range values are clamped. The first run
+writes a commented template, so the options are listed without pinning their
+current defaults. Uncomment only what you want to change.
 
-Three base roles plus the backdrop dim. A role is `#rrggbb` or `#rgb`; `dim`
-takes any of those plus `#rrggbbaa`/`#rgba`, the trailing pair being its alpha.
-An unparseable value is skipped and the default stays.
+### Colors
+
+The `[colors]` table sets three base roles plus the backdrop dim. A role is
+`#rrggbb` or `#rgb`. `dim` also accepts `#rrggbbaa` and `#rgba`, where the
+trailing pair is its alpha. An unparseable value is skipped and the default
+stays.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -68,26 +67,24 @@ An unparseable value is skipped and the default stays.
 | `container` | system palette | Card fill. |
 | `dim` | `#0000004d` | Backdrop dim; its alpha is inline. |
 
-`[colors]` is the shared set; `[colors.dark]` and `[colors.light]` override it
-per mode (see below).
+`[colors]` is the shared set. `[colors.dark]` and `[colors.light]` override it
+per mode; see below.
 
-Every other surface derives from a role at a shipped alpha: the card fill is
-`container` at 0.72 (0.85 in dark mode) and the hairline is black at 0.10 in
-light mode (white at 0.12 in dark mode), the selected row's tint `primary` at
-0.15, the placeholder and hints `fg` at 0.55, and so on. An unset key keeps following the system
-palette, so a matugen/DMS change still recolours the rest live; setting a key
-pins that one value. Any derived surface can also be pinned on its own in
-`[surfaces]`, below.
+Every other surface derives from a role at a fixed alpha. For example, the card
+fill is `container` at 0.72 (0.85 in dark mode), and the selected row's tint is
+`primary` at 0.15. The `[surfaces]` table lists the full set.
 
-A role you set stops following the system palette, while an unset role keeps
-tracking it. Omitting the section is the same as a pure dynamic theme.
+An unset key keeps following the system palette, so a matugen or DMS change
+still recolours it. Setting a key pins that value. A role you set stops
+following the palette; an unset role keeps tracking it. Omitting the section is
+the same as a pure dynamic theme.
 
 #### Per-mode overrides
 
 A hand-picked colour is static, but the system palette switches between light
 and dark. `[colors.dark]` and `[colors.light]` accept the same keys as
-`[colors]` and layer on top of it while that mode is active, so a colour that
-only works in one mode can differ while everything else stays shared:
+`[colors]` and layer on top of it while that mode is active. A colour that only
+works in one mode can therefore differ while everything else stays shared:
 
 ```toml
 [colors]
@@ -101,15 +98,14 @@ fg = "#1f2430"
 ```
 
 The active mode follows the system palette (`dark` when there is none), so the
-tables follow a live light/dark switch with no restart. A key the active table
-does not set keeps the `[colors]` value.
+tables follow a live switch with no restart. A key the active table does not set
+keeps the `[colors]` value.
 
-### `[surfaces]`
+### Surfaces
 
-The surfaces the renderer draws are derived from the base roles, and each one
-can be pinned directly. An entry sets `color`, `alpha`, or both; an omitted
-field keeps deriving, so a `[colors]` change or a live palette change still
-reaches it.
+The `[surfaces]` table pins individual surfaces the renderer derives from the
+base roles. An entry sets `color`, `alpha`, or both. An omitted field keeps
+deriving, so a `[colors]` change or a live palette change still reaches it.
 
 ```toml
 [surfaces]
@@ -121,8 +117,8 @@ hairline = { color = "#ffffff" }        # keep the mode's shipped alpha
 `color` is `#rrggbb` or `#rgb`; `alpha` is 0–1 and is clamped. An unparseable
 colour is ignored. The `hairline` entry also takes `width` in logical pixels
 (0–16, default 1.0; `0` hides the edge), which layers like `color` and `alpha`.
-`dim` is here as well: it layers over `[colors].dim`, which
-keeps the plain-string spelling.
+`dim` is here as well: it layers over `[colors].dim`, which keeps the
+plain-string spelling.
 
 | Key | Derived from | Shipped alpha |
 | --- | --- | --- |
@@ -137,10 +133,10 @@ keeps the plain-string spelling.
 | `accent` | `primary` | 1.00 |
 | `dim` | `#000000` | 0.30 |
 
-`[surfaces]` is the shared table; `[surfaces.dark]` and `[surfaces.light]`
-take the same keys and layer on it surface by surface and field by field while
-that mode is active. A mode can change only the colour, only the alpha, or only
-the width:
+`[surfaces]` is the shared table. `[surfaces.dark]` and `[surfaces.light]` take
+the same keys and layer on it surface by surface and field by field while that
+mode is active. A mode can change only the colour, only the alpha, or only the
+width:
 
 ```toml
 [surfaces]
@@ -153,17 +149,19 @@ hairline = { color = "#ffffff", width = 1.5 }
 hairline = { color = "#000000" }
 ```
 
-### `[blur]`
+### Blur
 
-The card is translucent; on a compositor that offers
-`ext-background-effect-v1`, the region behind it is blurred by the compositor,
-which is where the frosted look comes from. A compositor without the protocol
-ignores the region, so this setting then has no visible effect.
+The `[blur]` table declares the blur region. The card is translucent. On a
+compositor that offers `ext-background-effect-v1`, the compositor blurs the
+region behind it, which gives the frosted look. A compositor without the
+protocol ignores the region, so the setting has no visible effect there.
 
-On niri the effect needs one more thing: niri auto-enables **xray** for a
-client's `ext-background-effect` request, which blurs the wallpaper and ignores
-the windows below. For the card to blur the content actually behind it, add a
-layer rule that turns xray off:
+#### niri
+
+On niri the effect needs one more step. niri auto-enables **xray** for a
+client's `ext-background-effect` request; xray blurs the wallpaper and ignores
+the windows below. To blur the content actually behind the card, add a layer
+rule that turns xray off:
 
 ```kdl
 layer-rule {
@@ -177,8 +175,10 @@ layer-rule {
 The namespace is `WayRun`. Non-xray blur is recomputed whenever the content
 underneath changes, so it costs more than the default.
 
+#### Hyprland
+
 Hyprland does not implement `ext-background-effect-v1`, so it ignores the
-region; turn on its own blur and blur the layer by namespace instead:
+region. Turn on its own blur and blur the layer by namespace:
 
 ```ini
 decoration {
@@ -189,27 +189,35 @@ decoration {
 layerrule = blur, WayRun
 ```
 
+#### KWin
+
 KWin implements `ext-background-effect-v1`, so Plasma blurs the card once the
-Blur desktop effect is enabled; no layer rule is needed. The launcher maps to
-the `utility` namespace, which KWin's open/close effects skip.
+Blur desktop effect is enabled. No layer rule is needed. The launcher maps to
+the `utility` namespace, which KWin's open and close effects skip.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `enabled` | bool | `true` | Declare the blur region. `false` declares nothing, so the backdrop stays sharp; the card's translucent fill is unchanged. |
 
-### `[preview]`
+### Preview
+
+The `[preview]` table has one key.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `enabled` | bool | `true` | Show the split preview column for the selected row. `false` keeps the list full width; plugin previews are ignored. |
 
-### `[footer]`
+### Footer
+
+The `[footer]` table has one key.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `enabled` | bool | `true` | Show the hint bar under the results: keys, result count and search status. `false` hides it and gives its band back to the card. |
 
-### `[layout]`
+### Layout
+
+The `[layout]` table sets the card geometry.
 
 | Key | Type | Default | Range | Meaning |
 | --- | --- | --- | --- | --- |
@@ -222,17 +230,19 @@ the `utility` namespace, which KWin's open/close effects skip.
 
 An unknown `align` keeps the default.
 
-### `[font]`
+### Font
 
-The interface size, in logical pixels. One size drives every role; the rest
-scale with it. The font family is not here — it lives in `config.toml`'s
-`[font].family`.
+The `[font]` table sets the interface size in logical pixels. One size drives
+every role; the rest scale with it. The font family is not here; it lives in
+`config.toml` under `[font].family`.
 
 | Key | Type | Default | Range | Meaning |
 | --- | --- | --- | --- | --- |
 | `size` | float | `14.0` | 1–96 | A result row's title; the other roles scale from it. |
 
-### `[motion]`
+### Motion
+
+The `[motion]` table has one key.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |

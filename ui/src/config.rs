@@ -237,6 +237,16 @@ impl FontConfig {
     pub fn icon(&self) -> f32 {
         self.size * 30.0 / 14.0
     }
+
+    /// H1 1.45, H2 1.25, H3 1.1, H4-H6 1.0, relative to `title()`.
+    pub fn heading(&self, level: u8) -> f32 {
+        match level {
+            1 => self.size * 145.0 / 100.0,
+            2 => self.size * 125.0 / 100.0,
+            3 => self.size * 110.0 / 100.0,
+            _ => self.size,
+        }
+    }
 }
 
 /// The shell's appearance, loaded from `theme.toml`. Every default equals the
@@ -641,6 +651,16 @@ mod tests {
         // zero and negative keep the default
         assert_eq!(parse("[font]\nsize = -3.0").font.size, 14.0);
         assert_eq!(parse("[font]\nsize = 0.0").font.size, 14.0);
+    }
+
+    #[test]
+    fn headings_scale_from_the_one_size() {
+        let config = parse("[font]\nsize = 20.0");
+        assert_eq!(config.font.heading(1), 29.0);
+        assert_eq!(config.font.heading(2), 25.0);
+        assert_eq!(config.font.heading(3), 22.0);
+        assert_eq!(config.font.heading(4), 20.0);
+        assert_eq!(config.font.heading(6), 20.0);
     }
 
     #[test]

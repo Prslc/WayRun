@@ -14,14 +14,11 @@
 
 </div>
 
-一款 Wayland 原生的 Linux 应用启动器与快速搜索工具。在悬浮窗口中输入关键词，即可
-搜索已安装应用与文件，并进行即时数学计算。
+一款 Wayland 原生的 Linux 应用启动器与快速搜索工具。在悬浮窗口中输入关键词，即可搜索已安装应用与文件，并进行即时数学计算。
 
 ## 概述
 
-整个项目只产出一个 Rust 可执行文件 `wayrun`：启动器本体，以及它通过 `--core` 使用的
-后端。覆盖层完全用软件光栅化进共享内存缓冲，因此不涉及 GPU 栈，也不依赖任何 GUI
-工具包。
+整个项目只产出一个 Rust 可执行文件 `wayrun`：启动器本体，以及它通过 `--core` 使用的后端。覆盖层完全用软件光栅化进共享内存缓冲，因此不涉及 GPU 栈，也不依赖任何 GUI 工具包。
 
 ## 演示
 
@@ -31,52 +28,28 @@
 
 ## 功能特性
 
-- **应用启动**：模糊搜索已安装应用，按桌面自身的方式启动，并逐行显示 Flatpak 应用与
-  主题图标。
+- **应用启动**：模糊搜索已安装应用，按桌面自身的方式启动，并逐行显示 Flatpak 应用与主题图标。
 - **快速搜索**：文件与路径、`$PATH` 命令、系统命令，以及即时计算。
-- **动作面板**：`Shift+Enter` 打开按类型区分的动作面板（定位文件、运行 Desktop
-  Action、复制链接）。
-- **可主题化**：跟随桌面的配色（KDE 配色方案或 DankMaterialShell 的 Material You
-  调色板），并可用 `theme.toml` 覆盖配色、模糊、布局、字体与动效。
-- **可扩展**：二进制内置 7 个插件，其余都通过有文档的 JSON-RPC 契约作为外部主机接入。
-  可以用 Python（自带框架）写，也可以就是一个由启动器本体运行的 Lua 脚本。`resident`
-  主机会跨调用保留进程，每次调用约 1 毫秒。
+- **动作面板**：`Shift+Enter` 打开按类型区分的动作面板（定位文件、运行 Desktop Action、复制链接）。
+- **可主题化**：跟随桌面的配色（KDE 配色方案或 DankMaterialShell 的 Material You 调色板），并可用 `theme.toml` 覆盖配色、模糊、布局、字体与动效。
+- **可扩展**：二进制内置 7 个插件，其余都通过有文档的 JSON-RPC 契约作为外部宿主接入。可以用 Python（自带框架）写，也可以就是一个由启动器本体运行的 Lua 脚本。`resident` 宿主会跨调用保留进程，每次调用约 1 毫秒。示例与模板见 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区。
 
 ## 环境要求
 
-- **Wayland** 合成器，需实现 `wlr-layer-shell`（`zwlr_layer_shell_v1`）。包括
-  wlroots 系（niri、Hyprland、Sway、river、Wayfire、labwc 等）、KDE Plasma 的
-  Wayland 会话，以及基于 Mir 的合成器；GNOME/Mutter 未实现该协议，无法显示覆盖层。
-- Rust 工具链与常见系统库（GLib、SQLite、xkbcommon、fontconfig 等）；
-  `cargo build --release` 会构建全部内容。
-- 覆盖中日韩（CJK）输入的字体（如 Source Han Sans）。
+WayRun 需要支持 `wlr-layer-shell` 的 Wayland 合成器：wlroots 系（niri、Hyprland、Sway、river、Wayfire、labwc 等）、KDE Plasma 的 Wayland 会话，或基于 Mir 的合成器。GNOME/Mutter 不支持该协议。
 
-## 功能依赖
-
-覆盖层本身，以及内置的应用、文件与计算搜索，只需要一个支持上述协议的合成器。其余
-功能各自还依赖一个可选组件；缺少时，对应前缀只返回空结果，不会报错。更多插件
-（Firefox 书签与历史、网页建议、剪贴板历史等）从
-[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区安装：
-
-| 功能 | 依赖 |
-| --- | --- |
-| 复制/粘贴与“复制…”动作 | `wl-clipboard`（`wl-copy` / `wl-paste`） |
-| 仅能在终端中运行的 `$PATH` 结果（`r`） | 终端模拟器（`$TERMINAL`，否则取 `PATH` 上的一个） |
-| 卡片模糊 | `ext-background-effect-v1`（niri、KWin），或由合成器按 namespace 自行模糊 |
-| 结果行图标 | 桌面**图标主题**（可选）；没有时回退到内置占位图 |
-
-面板与内置插件的图形都已编入二进制，因此完全不装图标主题也能正常使用。应用与文件
-结果行图标跟随桌面自身的图标主题；可用 `[icon]` 覆盖，见 [config.md](config.md)。
-
-## 插件
-
-上表的内置插件都编在二进制里；除此之外的一切都是“主机”：一个使用 JSON-RPC 子集的
-可执行文件，在 `plugins.toml` 注册，每次调用新起进程，或用 `resident = true` 常驻。
-[WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区提供 Python 框架、
-示例（`firefox.lua`、`web.lua` 等）以及可复制的模板。Lua 插件就是一个脚本文件，由
-启动器二进制本体运行，无需安装解释器；见 [插件](plugins.md) 与 [Lua 插件](lua.md)。
+其余内容，包括运行时库和部分功能所需的可选组件，见[安装](install.md)。
 
 ## 快速开始
+
+从 [GitHub Releases](https://github.com/Prslc/WayRun/releases/latest) 下载最新发布版，然后：
+
+```bash
+tar -xzf wayrun-v*-x86_64-unknown-linux-gnu.tar.gz
+install -Dm755 wayrun ~/.local/bin/wayrun
+```
+
+`~/.local/bin` 需要在 `PATH` 中。压缩包同时带有内置图标的 `NOTICE`。发布版是在 Ubuntu 24.04 上构建的 x86_64 二进制；其他架构或更旧的发行版请从源码构建：
 
 ```bash
 git clone https://github.com/Prslc/WayRun.git
@@ -85,36 +58,20 @@ cargo build --release
 ln -s "$(pwd)/target/release/wayrun" ~/.local/bin/wayrun
 ```
 
-正式发布的二进制以 fat LTO 和单个 codegen unit 构建；本地构建使用 thin LTO 与并行
-codegen，编译更快、体积略大。
-
-在合成器配置中绑定一个快捷键（如 `Alt+Space`）来启动即可；绑定写法因合成器而异，
-niri 与 Hyprland 的示例见[常驻模式](resident.md)：
-
-```bash
-wayrun run
-```
-
-启动器以全屏覆盖打开，带调暗背景与居中卡片。默认的热键拉起方式下，`Esc` 或点击卡片
-外会退出；常驻模式下热键切换窗口，关闭改为隐藏。
-
-同一个二进制也自带控制命令：
-
-```bash
-wayrun                                  # 在终端里列出全部命令
-wayrun toggle                           # 常驻模式：经 socket 显示或隐藏
-wayrun config set font.family "Noto Sans"
-wayrun plugin add ~/plugins/firefox.lua --keyword ff
-```
+在合成器配置中给 `wayrun run` 绑定一个快捷键。启动器以浮动覆盖层打开；按键见[使用说明](usage.md)，systemd 单元见[常驻模式](resident.md)。
 
 ## 文档
 
+同样的页面也发布为站点：<https://prslc.github.io/WayRun/zh_cn/>。
+
+- [安装](install.md)：环境要求、下载或构建、首次启动、功能依赖。
 - [使用说明](usage.md)：前缀、按键与复制粘贴。
-- [常驻模式](resident.md)：systemd 单元与控制命令。
+- [配置](config.md)：`config.toml`（界面语言、字体、图标、文件索引）。
 - [主题](theme.md)：系统调色板与 `theme.toml`（配色、模糊、布局、字体、动效）。
-- [配置](config.md)：`config.toml`（界面语言、字体族）。
-- [插件](plugins.md)：`plugins.toml`、内置插件与外部 JSON-RPC 主机。
-- [Lua 插件](lua.md)：由启动器自身承载的一个脚本：`wayrun` 表、沙箱与注册。
+- [常驻模式](resident.md)：systemd 单元与控制命令。
+- [插件](plugins.md)：`plugins.toml`、内置插件与外部 JSON-RPC 宿主。
+- [插件目录](plugins-directory.md)：WayRun-Plugins 工作区里的 Lua 与 Python 示例。
+- [Lua 插件](lua.md)：由启动器自身承载的一个脚本：`wayrun` API、沙箱与注册。
 - [JSON-RPC 2.0](jsonrpc.md)：通信协议与结果项 schema。
 
 ## 致谢
@@ -131,5 +88,4 @@ WayRun 采用双许可证，可任选其一：
 - **MIT**：[LICENSE-MIT](../../LICENSE-MIT)
 - **Apache-2.0**：[LICENSE-APACHE](../../LICENSE-APACHE)
 
-内置 UI 字形为 Google Material Symbols，采用 Apache License 2.0；署名与许可证全文见
-[ui/assets/icons/NOTICE](../../ui/assets/icons/NOTICE)。
+内置 UI 字形为 Google Material Symbols，采用 Apache License 2.0；署名与许可证全文见 [ui/assets/icons/NOTICE](../../ui/assets/icons/NOTICE)。

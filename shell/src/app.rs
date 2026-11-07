@@ -11,7 +11,7 @@ mod test_support;
 use std::env;
 use std::time::{Duration, Instant};
 
-use wayrun_core::wire::{Action, Preview, ResultItem};
+use wayrun_core::wire::{Action, Preview, ResultItem, TextFormat};
 use wayrun_ui::geom::{Layout, PreviewKind};
 use wayrun_ui::present::{Presentation, RowMotion};
 use wayrun_ui::view::{Body, FieldView, FooterView, Frame, ListView, PanelView, PreviewView};
@@ -209,7 +209,10 @@ impl State {
         let preview = if self.split() {
             self.selected_preview().map(|preview| match preview {
                 Preview::Image { path } => PreviewView::Image { path },
-                Preview::Text { text } => PreviewView::Text { text },
+                Preview::Text { text, format } => match format {
+                    TextFormat::Plain => PreviewView::Text { text },
+                    TextFormat::Markdown => PreviewView::Markdown { text },
+                },
             })
         } else {
             None
@@ -374,7 +377,9 @@ mod tests {
             match &frame.body {
                 Body::List(list) => match &list.preview {
                     Some(PreviewView::Image { path }) => assert_eq!(*path, "/tmp/p.png"),
-                    Some(PreviewView::Text { .. }) => panic!("expected an image preview"),
+                    Some(PreviewView::Text { .. } | PreviewView::Markdown { .. }) => {
+                        panic!("expected an image preview")
+                    }
                     None => panic!("the selected row has a preview"),
                 },
                 Body::Panel(_) => panic!("the list owns the card"),
@@ -396,6 +401,7 @@ mod tests {
         let mut row = item("note", None, None, None);
         row.preview = Some(Preview::Text {
             text: "first line\nsecond line".to_string(),
+            format: TextFormat::Plain,
         });
         state.apply_results(vec![row], now);
 
@@ -406,6 +412,36 @@ mod tests {
                     assert_eq!(*text, "first line\nsecond line")
                 }
                 _ => panic!("the selected row has a text preview"),
+            },
+            Body::Panel(_) => panic!("the list owns the card"),
+        }
+        assert_eq!(
+            state.content_height(),
+            state
+                .layout()
+                .content_h_for(state.layout().split_h(1, PreviewKind::Text))
+        );
+    }
+
+    #[test]
+    fn a_markdown_preview_uses_the_text_column() {
+        use crate::app::test_support::{item, state};
+        use wayrun_core::wire::Preview;
+
+        let mut state = state();
+        let now = Instant::now();
+        let mut row = item("note", None, None, None);
+        row.preview = Some(Preview::Text {
+            text: "# title".to_string(),
+            format: TextFormat::Markdown,
+        });
+        state.apply_results(vec![row], now);
+
+        assert_eq!(state.preview_kind(), Some(PreviewKind::Text));
+        match &state.frame(now).body {
+            Body::List(list) => match &list.preview {
+                Some(PreviewView::Markdown { text }) => assert_eq!(*text, "# title"),
+                _ => panic!("the selected row has a markdown preview"),
             },
             Body::Panel(_) => panic!("the list owns the card"),
         }

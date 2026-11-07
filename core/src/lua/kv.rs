@@ -37,7 +37,7 @@ pub(super) fn lib(lua: &Lua, stores: Handle, active: Active, paths: Paths) -> ml
                 .map_err(|problem| mlua::Error::RuntimeError(format!("kv.get: {problem}")))?;
             let value = get_stores
                 .borrow_mut()
-                .get(&id, &path, &key, super::sdk::now_seconds())
+                .get(&id, &path, &key, super::time::now_seconds())
                 .map_err(|error| mlua::Error::RuntimeError(format!("kv.get: {error:#}")))?;
             match value {
                 Some(text) => Ok(Value::String(lua.create_string(text)?)),
@@ -54,7 +54,7 @@ pub(super) fn lib(lua: &Lua, stores: Handle, active: Active, paths: Paths) -> ml
         lua.create_function(move |_, (key, value, ttl): (String, String, Option<u64>)| {
             let (id, path) = database(&set_active, &set_paths)
                 .map_err(|problem| mlua::Error::RuntimeError(format!("kv.set: {problem}")))?;
-            let expires_at = ttl.map(|secs| super::sdk::now_seconds() + secs as i64);
+            let expires_at = ttl.map(|secs| super::time::now_seconds() + secs as i64);
             set_stores
                 .borrow_mut()
                 .set(&id, &path, &key, &value, expires_at)
@@ -136,7 +136,7 @@ fn enumerate(
             &id,
             &path,
             prefix.as_deref().unwrap_or(""),
-            super::sdk::now_seconds(),
+            super::time::now_seconds(),
         )
         .map_err(|error| mlua::Error::RuntimeError(format!("{method}: {error:#}")))
 }

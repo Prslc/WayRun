@@ -6,35 +6,58 @@ use wayrun_core::wire::IconShape;
 
 use crate::geom::PreviewKind;
 use crate::icons::{IconCache, IconDraw};
-use crate::text::{LINE_HEIGHT, Shaped, TextEngine};
+use crate::markdown::MarkdownCache;
+use crate::text::{LINE_HEIGHT, Shaped, TextEngine, TextStyle};
 use crate::view::{Frame, PreviewView};
 
 use super::canvas::{Canvas, Rect};
 
 /// The pane sits inside the body, leaving a small card margin around it.
 const PANE_INSET: f32 = 4.0;
-const PANE_PAD: f32 = 10.0;
+pub(super) const PANE_PAD: f32 = 10.0;
 
-/// The split view's right column: a tonal pane holding an image or a wrapped
-/// plain-text excerpt.
+/// The caches a preview draw borrows; bundled so the draw keeps a small signature.
+pub(super) struct PreviewCaches<'a> {
+    pub text: &'a mut TextEngine,
+    pub markdown: &'a mut MarkdownCache,
+    pub icons: &'a mut IconCache,
+}
+
+/// The split view's right column: a tonal pane holding an image, plain text or
+/// rendered Markdown.
 pub(super) fn draw_preview(
     canvas: &Canvas,
     pixmap: &mut Pixmap,
     frame: &Frame<'_>,
     rows: usize,
     preview: &PreviewView<'_>,
-    text: &mut TextEngine,
-    icons: &mut IconCache,
+    caches: PreviewCaches<'_>,
 ) {
     match preview {
-        PreviewView::Image { path } => draw_image(canvas, pixmap, frame, rows, path, icons),
+        PreviewView::Image { path } => draw_image(canvas, pixmap, frame, rows, path, caches.icons),
         PreviewView::Text { text: body } => {
             let pane = text_pane(frame, rows);
             if pane.w <= 0.0 || pane.h <= 0.0 {
                 return;
             }
             fill_pane(canvas, pixmap, frame, pane);
-            draw_text(canvas, pixmap, frame, pane, body, text);
+            draw_text(canvas, pixmap, frame, pane, body, caches.text);
+        }
+        PreviewView::Markdown { text: body } => {
+            let pane = text_pane(frame, rows);
+            if pane.w <= 0.0 || pane.h <= 0.0 {
+                return;
+            }
+            fill_pane(canvas, pixmap, frame, pane);
+            super::markdown::draw_markdown(
+                canvas,
+                pixmap,
+                frame,
+                pane,
+                body,
+                caches.text,
+                caches.markdown,
+            );
         }
     }
 }
@@ -157,8 +180,8 @@ fn draw_text(
     }
 }
 
-/// Greedy word wrap into at most `max_lines` shaped lines. Whitespace is
-/// collapsed; a line wider than the pane is elided by `fit`.
+/// Greedy word wrap into `max_lines` shaped lines; a token with no break
+/// opportunity (CJK, a long URL) is split by character, not elided.
 fn wrap(
     engine: &mut TextEngine,
     body: &str,
@@ -166,6 +189,7 @@ fn wrap(
     max_w: f32,
     max_lines: usize,
 ) -> Vec<Rc<Shaped>> {
+    let style = TextStyle::normal(Weight::NORMAL);
     let mut lines = Vec::new();
     for paragraph in body.split('\n') {
         if lines.len() >= max_lines {
@@ -173,21 +197,35 @@ fn wrap(
         }
         let mut current = String::new();
         for word in paragraph.split_whitespace() {
-            let candidate = if current.is_empty() {
-                word.to_string()
-            } else {
-                format!("{current} {word}")
-            };
-            let too_wide = engine.shape(&candidate, size, Weight::NORMAL).width > max_w;
-            if too_wide && !current.is_empty() {
+            if !current.is_empty() {
+                let candidate = format!("{current} {word}");
+                if engine.shape(&candidate, size, Weight::NORMAL).width <= max_w {
+                    current = candidate;
+                    continue;
+                }
                 lines.push(engine.fit(&current, size, Weight::NORMAL, max_w));
                 if lines.len() >= max_lines {
                     return lines;
                 }
-                current = word.to_string();
-            } else {
-                current = candidate;
+                current.clear();
             }
+
+            let chunks = if engine.shape(word, size, Weight::NORMAL).width > max_w {
+                split_wide(engine, word, size, style, max_w, max_lines - lines.len())
+            } else {
+                vec![word.to_string()]
+            };
+            if chunks.is_empty() {
+                break;
+            }
+            let last = chunks.len() - 1;
+            for chunk in &chunks[..last] {
+                lines.push(engine.shape(chunk, size, Weight::NORMAL));
+                if lines.len() >= max_lines {
+                    return lines;
+                }
+            }
+            current = chunks[last].clone();
         }
         if lines.len() >= max_lines {
             break;
@@ -199,6 +237,69 @@ fn wrap(
         });
     }
     lines
+}
+
+/// Split one over-long token into chunks that each fit `max_w`, on char
+/// boundaries; a single character wider than the column is kept alone.
+pub(super) fn split_wide(
+    engine: &mut TextEngine,
+    text: &str,
+    size: f32,
+    style: TextStyle,
+    max_w: f32,
+    budget: usize,
+) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() && chunks.len() < budget {
+        let end = longest_prefix(engine, rest, size, style, max_w);
+        chunks.push(rest[..end].to_string());
+        rest = &rest[end..];
+    }
+    chunks
+}
+
+/// The byte end of the longest prefix that fits `max_w`; probing doubles from
+/// a few chars and then binary-searches, so only the cut chunk is shaped.
+fn longest_prefix(
+    engine: &mut TextEngine,
+    text: &str,
+    size: f32,
+    style: TextStyle,
+    max_w: f32,
+) -> usize {
+    let mut low = 0usize;
+    let mut high;
+    let mut probe = 8usize;
+    loop {
+        let end = char_end(text, probe);
+        if engine.shape_styled(&text[..end], size, style).width <= max_w {
+            if end == text.len() {
+                return end;
+            }
+            low = probe;
+            probe *= 2;
+        } else {
+            high = probe;
+            break;
+        }
+    }
+    while high - low > 1 {
+        let mid = low + (high - low) / 2;
+        let end = char_end(text, mid);
+        if engine.shape_styled(&text[..end], size, style).width <= max_w {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    char_end(text, low.max(1))
+}
+
+fn char_end(text: &str, chars: usize) -> usize {
+    text.char_indices()
+        .nth(chars)
+        .map_or(text.len(), |(index, _)| index)
 }
 
 #[cfg(test)]
@@ -224,6 +325,35 @@ mod tests {
     fn a_blank_line_keeps_its_line() {
         let mut text = engine();
         assert_eq!(wrap(&mut text, "a\n\nb", 14.0, 100.0, 10).len(), 3);
+    }
+
+    #[test]
+    fn a_long_cjk_run_is_split_instead_of_elided() {
+        let mut text = engine();
+        let lines = wrap(
+            &mut text,
+            "中文中文中文中文中文中文中文中文",
+            14.0,
+            40.0,
+            10,
+        );
+        assert!(lines.len() > 1);
+        assert!(lines.iter().all(|line| line.width <= 40.5));
+    }
+
+    #[test]
+    fn a_wide_run_is_chunked_within_the_line_budget() {
+        let mut text = engine();
+        let chunks = split_wide(
+            &mut text,
+            &"中".repeat(200),
+            14.0,
+            TextStyle::normal(Weight::NORMAL),
+            40.0,
+            5,
+        );
+        assert_eq!(chunks.len(), 5);
+        assert!(chunks.iter().all(|chunk| !chunk.is_empty()));
     }
 
     #[test]

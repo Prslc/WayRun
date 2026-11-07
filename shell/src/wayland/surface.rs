@@ -25,6 +25,8 @@ const NAMESPACE: &str = "WayRun";
 
 /// How soon to retry a present when no buffer is free yet.
 const RETRY_DELAY: Duration = Duration::from_millis(4);
+/// The entrance opacity the blur region waits for, so the card covers its backdrop.
+const BLUR_REVEAL: f32 = 0.9;
 
 impl Shell {
     pub fn open(&mut self, now: Instant) {
@@ -145,6 +147,7 @@ impl Shell {
         // and these grow with every distinct payload.
         self.icons.clear();
         self.text.clear_cache();
+        self.markdown.clear();
         // The dismissal cancels the core's pending search and reaps the warm hosts.
         backend::dismiss();
         self.app.hidden();
@@ -194,7 +197,15 @@ impl Shell {
             let Some(pixmap) = self.pixmap.as_mut() else {
                 return;
             };
-            render::draw(pixmap, &frame, &mut self.text, &mut self.icons, now, full);
+            render::draw(
+                pixmap,
+                &frame,
+                &mut self.text,
+                &mut self.markdown,
+                &mut self.icons,
+                now,
+                full,
+            );
         }
 
         // What the frame just changed, in physical pixels: a settled repaint is
@@ -231,7 +242,7 @@ impl Shell {
 
         // The blur region is double-buffered state: it must be set before the
         // commit that should carry it, or the first frame goes unblurred.
-        self.sync_blur();
+        self.sync_blur(now);
 
         if !self.blit() {
             self.needs_present = true;
@@ -278,7 +289,7 @@ impl Shell {
 
     /// The blur region covers the card's rounded rect, deduped on the middle
     /// band: a present must not re-apply the stored region.
-    fn sync_blur(&mut self) {
+    fn sync_blur(&mut self, now: Instant) {
         let (Some(layer), Some(effect)) = (self.layer.as_ref(), self.effect.as_ref()) else {
             return;
         };
@@ -292,7 +303,12 @@ impl Shell {
             return;
         }
 
-        let now = Instant::now();
+        // The region blurs the backdrop even through a transparent surface, so
+        // it is held back until the card covers most of what it would reveal.
+        if self.app.presentation.entrance(now) < BLUR_REVEAL {
+            return;
+        }
+
         let height = self.app.card_height();
         // A reflow in flight would commit a region per frame, so it stays
         // quantised while the card moves; at rest it takes the card's exact

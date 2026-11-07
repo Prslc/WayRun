@@ -41,6 +41,7 @@ use crate::wayland::ime::Pending;
 use wayrun_core::wire::{IconShape, ResultItem};
 use wayrun_ui::config::{AppearanceConfig, Mode};
 use wayrun_ui::icons::{IconCache, IconKey};
+use wayrun_ui::markdown::MarkdownCache;
 use wayrun_ui::text::TextEngine;
 use wayrun_ui::theme;
 
@@ -204,6 +205,7 @@ pub struct Shell {
     pending: Pending,
     icons: IconCache,
     text: TextEngine,
+    markdown: MarkdownCache,
     app: Launcher,
     resident: bool,
     /// `WAYRUN_IME_LOG=1`: every text-input event and the state `done` left; the
@@ -291,6 +293,7 @@ impl Shell {
             pending: Pending::default(),
             icons: IconCache::new(icon_jobs),
             text: TextEngine::with_family(wayrun_core::config::get().font.family.clone()),
+            markdown: MarkdownCache::default(),
             app: Launcher::new(),
             resident: env::var_os("WAYRUN_RESIDENT").is_some(),
             ime_log: env::var_os("WAYRUN_IME_LOG").is_some(),
