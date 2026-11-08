@@ -65,6 +65,8 @@ pub struct FooterView<'a> {
     pub action_count: usize,
     pub query_empty: bool,
     pub panel: bool,
+    /// A search is in flight; the footer holds its no-match note.
+    pub searching: bool,
     /// A search has been in flight past the delay; the footer says so.
     pub loading: bool,
     pub has_actions: bool,

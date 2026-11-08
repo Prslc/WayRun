@@ -251,6 +251,7 @@ impl State {
             action_count: self.menu.as_ref().map_or(0, |menu| menu.actions().len()),
             query_empty: self.query.is_empty(),
             panel,
+            searching: self.search_started.is_some(),
             loading,
             has_actions: selected_row.is_some_and(|row| !row.actions.is_empty()),
             can_default: self.selected_default().is_some(),

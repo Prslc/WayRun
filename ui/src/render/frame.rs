@@ -130,7 +130,7 @@ pub fn draw(
     }
     mark("list");
 
-    if layout.footer {
+    if layout.footer && layout.footer_fits(frame.card_h) {
         footer::draw_footer(&canvas, pixmap, frame, text);
         mark("footer");
     }
@@ -259,6 +259,33 @@ mod tests {
             (shown.red(), shown.green(), shown.blue()),
             (hidden.red(), hidden.green(), hidden.blue()),
             "the footer's keycap chip goes with it"
+        );
+    }
+
+    #[test]
+    fn a_compact_card_draws_no_footer() {
+        use crate::geom::{FOOTER_H, PAD};
+
+        let mut frame = test_frame((1600, 1080));
+        frame.card_h = frame.layout.empty_h();
+        frame.content_h = frame.card_h;
+        frame.footer.rows = 3;
+        frame.footer.query_empty = false;
+
+        // Where the footer would land on the still-compact card.
+        let layout = frame.layout;
+        let x = (layout.card_x(frame.surface) + PAD + 3.0) as u32;
+        let top = layout.card_top(frame.surface) + frame.card_h - PAD - FOOTER_H;
+        let y = (top + FOOTER_H / 2.0) as u32;
+
+        let with_hints = render(&frame).pixel(x, y).unwrap();
+        frame.footer.rows = 0;
+        frame.footer.query_empty = true;
+        let bare = render(&frame).pixel(x, y).unwrap();
+        assert_eq!(
+            (with_hints.red(), with_hints.green(), with_hints.blue()),
+            (bare.red(), bare.green(), bare.blue()),
+            "the footer waits for the card to grow"
         );
     }
 

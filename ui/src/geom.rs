@@ -179,6 +179,12 @@ impl Layout {
         (card_h - self.base_h() - GAP).max(0.0)
     }
 
+    /// Whether a card of `card_h` has grown enough to hold the footer band
+    /// below the field, so its hints never paint over the query.
+    pub fn footer_fits(&self, card_h: f32) -> bool {
+        card_h >= self.base_h()
+    }
+
     /// The split body's height: an image needs room for a thumbnail, text a
     /// readable minimum; a short list grows the card down either way.
     pub fn split_h(&self, rows: usize, kind: PreviewKind) -> f32 {
@@ -485,6 +491,9 @@ mod tests {
         assert_eq!(l.empty_h(), 80.0);
         assert_eq!(l.row_radius(), 8.0);
         assert_eq!(l.hairline_radius(HAIRLINE_W), 15.5);
+        // the footer band needs the card to grow past the field and the gap
+        assert!(l.footer_fits(l.content_h(0)));
+        assert!(!l.footer_fits(l.empty_h()));
         // a narrower output shrinks the card to fit its padding
         assert_eq!(l.card_w((1920, 1080)), 730.0);
         assert_eq!(l.card_w((720, 1080)), 692.0);

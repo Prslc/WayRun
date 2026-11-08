@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   It still applies live. A `[font]` table left in `config.toml` is ignored, so
   move the key to `theme.toml`.
 
+### Fixed
+
+- The footer no longer paints hints or the no-match note over the search field
+  while the card is still compact. "No results" waits for the search to land
+  and uses the count pill's chip style instead of the accent colour.
+
 ## [0.11.0] - 2026-11-07
 
 ### Added

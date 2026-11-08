@@ -5,7 +5,7 @@ use rust_i18n::t;
 use tiny_skia::Pixmap;
 
 use crate::geom;
-use crate::text::TextEngine;
+use crate::text::{Shaped, TextEngine};
 use crate::view::Frame;
 
 use super::canvas::{Canvas, Rect};
@@ -72,7 +72,7 @@ pub(super) fn footer_hints(
     has_actions: bool,
     can_default: bool,
     is_default: bool,
-    loading: bool,
+    searching: bool,
 ) -> &'static [Hint] {
     let hints = hints();
     if panel {
@@ -89,7 +89,7 @@ pub(super) fn footer_hints(
         } else {
             &hints.launch
         }
-    } else if query_empty || loading {
+    } else if query_empty || searching {
         &[]
     } else {
         &hints.no_match
@@ -109,6 +109,44 @@ fn count_label(n: usize, one: &'static str, many: &'static str) -> String {
     if n == 1 { t!(one) } else { t!(many, count = n) }
 }
 
+fn label_chip_w(shaped: &Shaped, scale: f32) -> f32 {
+    shaped.width / scale + 2.0 * KEYCAP_PAD_X
+}
+
+/// A label-only chip: the count pill and the no-match note share its style.
+fn draw_label_chip(
+    canvas: &Canvas,
+    pixmap: &mut Pixmap,
+    frame: &Frame<'_>,
+    text: &mut TextEngine,
+    shaped: &Shaped,
+    x: f32,
+    center_y: f32,
+) {
+    let width = label_chip_w(shaped, canvas.scale);
+    let height = shaped.height / canvas.scale;
+    let cap_h = (height + 6.0).min(geom::FOOTER_H);
+    canvas.fill_round(
+        pixmap,
+        Rect {
+            x,
+            y: center_y - cap_h / 2.0,
+            w: width,
+            h: cap_h,
+        },
+        KEYCAP_RADIUS,
+        frame.fade(frame.theme.fg, 0.06),
+    );
+    text.draw(
+        pixmap,
+        shaped,
+        frame.fade_rgba(frame.surfaces.muted),
+        canvas.px(x + KEYCAP_PAD_X),
+        canvas.px(center_y - height / 2.0),
+        None,
+    );
+}
+
 pub(super) fn draw_footer(
     canvas: &Canvas,
     pixmap: &mut Pixmap,
@@ -125,7 +163,7 @@ pub(super) fn draw_footer(
         footer.has_actions,
         footer.can_default,
         footer.is_default,
-        footer.loading,
+        footer.searching,
     );
 
     let count = if panel {
@@ -174,15 +212,7 @@ pub(super) fn draw_footer(
     for hint in hints {
         if hint.key.is_empty() {
             let shaped = text.shape(&hint.label, label_size, Weight::NORMAL);
-            let height = shaped.height / canvas.scale;
-            text.draw(
-                pixmap,
-                &shaped,
-                frame.fade(frame.theme.primary, 0.7),
-                canvas.px(x),
-                canvas.px(center_y - height / 2.0),
-                None,
-            );
+            draw_label_chip(canvas, pixmap, frame, text, &shaped, x, center_y);
             break;
         }
 
@@ -259,30 +289,8 @@ pub(super) fn draw_footer(
     }
 
     if let Some(shaped) = &count_shaped {
-        let width = shaped.width / canvas.scale;
-        let height = shaped.height / canvas.scale;
-        let cap_w = width + 2.0 * KEYCAP_PAD_X;
-        let cap_h = (height + 6.0).min(geom::FOOTER_H);
-        let x = right - cap_w;
-        canvas.fill_round(
-            pixmap,
-            Rect {
-                x,
-                y: center_y - cap_h / 2.0,
-                w: cap_w,
-                h: cap_h,
-            },
-            KEYCAP_RADIUS,
-            frame.fade(frame.theme.fg, 0.06),
-        );
-        text.draw(
-            pixmap,
-            shaped,
-            frame.fade_rgba(frame.surfaces.muted),
-            canvas.px(x + KEYCAP_PAD_X),
-            canvas.px(center_y - height / 2.0),
-            None,
-        );
+        let x = right - label_chip_w(shaped, canvas.scale);
+        draw_label_chip(canvas, pixmap, frame, text, shaped, x, center_y);
     }
 }
 
