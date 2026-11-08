@@ -54,3 +54,4 @@
 
 [motion]
 # reduced = false            # start both animations at their end state
+# entrance_ms = 240          # entrance fade-and-rise duration; 0 skips it

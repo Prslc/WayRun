@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `theme.toml`'s `[motion].entrance_ms` sets how long the launcher's entrance
+  fade and rise take, in milliseconds (0–2000, default 240). `0` skips the
+  entrance while the card height spring and result-row motion still run;
+  `reduced = true` still disables all motion. It applies live.
+
 ### Changed
 
 - The text family moved from `config.toml`'s `[font].family` to

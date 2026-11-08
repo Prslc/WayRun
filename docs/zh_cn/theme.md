@@ -195,8 +195,11 @@ KWin 实现了 `ext-background-effect-v1`。打开 Blur 桌面效果后，Plasma
 
 ### 动效
 
-`[motion]` 表只有一个键。
+`[motion]` 表有以下键。
 
-| 键 | 类型 | 默认 | 含义 |
-| --- | --- | --- | --- |
-| `reduced` | bool | `false` | 等同于 `WAYRUN_REDUCED_MOTION=1`：两个动画都直接从结束状态开始。 |
+| 键 | 类型 | 默认 | 范围 | 含义 |
+| --- | --- | --- | --- | --- |
+| `reduced` | bool | `false` | — | 等同于 `WAYRUN_REDUCED_MOTION=1`：两个动画都直接从结束状态开始。 |
+| `entrance_ms` | integer | `240` | 0–2000 | 入场淡入与上滑的时长（毫秒）。设为 `0` 跳过入场，卡片高度弹簧和结果行动画照常；`reduced = true` 仍然优先。 |
+
+两者都即时生效。入场进行中调小会立即收敛，调大则从本次显示开始时继续计时。

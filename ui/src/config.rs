@@ -1,4 +1,5 @@
 use crate::geom::{Align, Layout};
+use crate::present::ENTRANCE_MS;
 use crate::theme;
 
 /// Assign the parsed key when present; an absent key keeps the current value.
@@ -264,6 +265,7 @@ pub struct AppearanceConfig {
     pub layout: Layout,
     pub preview: bool,
     pub reduced: bool,
+    pub entrance_ms: u64,
 }
 
 impl Default for AppearanceConfig {
@@ -276,6 +278,7 @@ impl Default for AppearanceConfig {
             layout: Layout::default(),
             preview: true,
             reduced: false,
+            entrance_ms: ENTRANCE_MS,
         }
     }
 }
@@ -324,7 +327,11 @@ struct FontFile {
 #[derive(serde::Deserialize, Default)]
 struct MotionFile {
     reduced: Option<bool>,
+    entrance_ms: Option<u64>,
 }
+
+/// A longer entrance is a stall, not an animation.
+const MAX_ENTRANCE_MS: u64 = 2_000;
 
 #[derive(serde::Deserialize, Default)]
 struct PreviewFile {
@@ -390,6 +397,10 @@ impl AppearanceConfig {
         );
 
         assign!(self.reduced, motion.reduced);
+        assign!(
+            self.entrance_ms,
+            motion.entrance_ms.map(|v| v.min(MAX_ENTRANCE_MS))
+        );
     }
 }
 
@@ -459,6 +470,7 @@ mod tests {
 
             [motion]
             reduced = true
+            entrance_ms = 400
             "##,
         );
         assert_eq!(config.colors.shared.primary, Some([0x7a, 0xa2, 0xf7]));
@@ -472,6 +484,7 @@ mod tests {
         assert_eq!(config.layout.max_rows, 3);
         assert_eq!(config.layout.panel_header_h, 34.0);
         assert!(config.reduced);
+        assert_eq!(config.entrance_ms, 400);
         // untouched defaults survive
         assert_eq!(config.font.size, 14.0);
         assert_eq!(config.layout.top_ratio, 0.20);
@@ -599,10 +612,22 @@ mod tests {
             width_ratio = 0.5
 
             [motion]
-            entrance_ms = 100
+            stagger_ms = 100
             "##,
         );
         assert_eq!(config, AppearanceConfig::default());
+    }
+
+    #[test]
+    fn entrance_ms_is_clamped_and_zero_is_kept() {
+        assert_eq!(parse("[motion]\nentrance_ms = 0").entrance_ms, 0);
+        assert_eq!(parse("[motion]\nentrance_ms = 900").entrance_ms, 900);
+        assert_eq!(
+            parse("[motion]\nentrance_ms = 9999").entrance_ms,
+            MAX_ENTRANCE_MS
+        );
+        assert_eq!(AppearanceConfig::default().entrance_ms, ENTRANCE_MS);
+        assert!(AppearanceConfig::parse("[motion]\nentrance_ms = -1").is_none());
     }
 
     #[test]
