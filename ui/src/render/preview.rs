@@ -4,7 +4,6 @@ use cosmic_text::Weight;
 use tiny_skia::Pixmap;
 use wayrun_core::wire::IconShape;
 
-use crate::geom::PreviewKind;
 use crate::icons::{IconCache, IconDraw};
 use crate::markdown::MarkdownCache;
 use crate::text::{LINE_HEIGHT, Shaped, TextEngine, TextStyle};
@@ -29,14 +28,13 @@ pub(super) fn draw_preview(
     canvas: &Canvas,
     pixmap: &mut Pixmap,
     frame: &Frame<'_>,
-    rows: usize,
     preview: &PreviewView<'_>,
     caches: PreviewCaches<'_>,
 ) {
     match preview {
-        PreviewView::Image { path } => draw_image(canvas, pixmap, frame, rows, path, caches.icons),
+        PreviewView::Image { path } => draw_image(canvas, pixmap, frame, path, caches.icons),
         PreviewView::Text { text: body } => {
-            let pane = text_pane(frame, rows);
+            let pane = text_pane(frame);
             if pane.w <= 0.0 || pane.h <= 0.0 {
                 return;
             }
@@ -44,7 +42,7 @@ pub(super) fn draw_preview(
             draw_text(canvas, pixmap, frame, pane, body, caches.text);
         }
         PreviewView::Markdown { text: body } => {
-            let pane = text_pane(frame, rows);
+            let pane = text_pane(frame);
             if pane.w <= 0.0 || pane.h <= 0.0 {
                 return;
             }
@@ -71,14 +69,14 @@ fn fill_pane(canvas: &Canvas, pixmap: &mut Pixmap, frame: &Frame<'_>, pane: Rect
     );
 }
 
-fn text_pane(frame: &Frame<'_>, rows: usize) -> Rect {
+fn text_pane(frame: &Frame<'_>) -> Rect {
     let layout = frame.layout;
     let (left, width) = layout.preview_band(frame.surface);
     Rect {
         x: left,
         y: layout.rows_top(frame.surface) + PANE_INSET,
         w: width,
-        h: (layout.split_h(rows, PreviewKind::Text) - PANE_INSET * 2.0).max(0.0),
+        h: (layout.body_h(frame.content_h) - PANE_INSET * 2.0).max(0.0),
     }
 }
 
@@ -88,7 +86,6 @@ fn draw_image(
     canvas: &Canvas,
     pixmap: &mut Pixmap,
     frame: &Frame<'_>,
-    rows: usize,
     path: &str,
     icons: &mut IconCache,
 ) {
@@ -98,7 +95,7 @@ fn draw_image(
     let layout = frame.layout;
     let (band_left, band_w) = layout.preview_band(frame.surface);
     let body_top = layout.rows_top(frame.surface);
-    let body_h = layout.split_h(rows, PreviewKind::Image);
+    let body_h = layout.body_h(frame.content_h);
     let max_w = (band_w - PANE_PAD * 2.0).max(1.0);
     let max_h = (body_h - PANE_INSET * 2.0 - PANE_PAD * 2.0).max(1.0);
     let (image_w, image_h) = match icons.aspect(path) {

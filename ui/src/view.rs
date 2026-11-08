@@ -45,7 +45,6 @@ impl PreviewView<'_> {
 
 /// The action panel that replaces the list.
 pub struct PanelView<'a> {
-    pub parent_title: Option<&'a str>,
     pub actions: &'a [ActionItem],
     pub first: usize,
     pub selected: usize,
@@ -72,6 +71,8 @@ pub struct FooterView<'a> {
     pub can_default: bool,
     pub is_default: bool,
     pub effective_label: Option<&'a str>,
+    /// The open panel's row or group title; the footer draws it at the right.
+    pub panel_title: Option<&'a str>,
 }
 
 /// One frame, fully resolved: the renderer reads nothing else.

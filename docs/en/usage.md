@@ -67,6 +67,10 @@ If no provider matches a plain query, the launcher lists the first level of
 `Shift+Enter` opens a Wox-style second level for the highlighted row: the
 commands that result type offers.
 
+The footer names the row, or the group you entered, at its right edge, just
+left of the action count; a long name is elided. With the footer disabled, the
+panel shows no title.
+
 The panel starts with the row's own command (**Open**). Next come the actions
 its plugin adds for that type. A file row adds "Open in terminal", "Reveal in
 file manager" and "Copy path", then an **Open with** group for the system's

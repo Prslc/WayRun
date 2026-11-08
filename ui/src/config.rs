@@ -315,7 +315,7 @@ struct LayoutFile {
     top_ratio: Option<f32>,
     align: Option<String>,
     max_rows: Option<usize>,
-    panel_header: Option<f32>,
+    fixed_height: Option<bool>,
 }
 
 #[derive(serde::Deserialize, Default)]
@@ -388,13 +388,7 @@ impl AppearanceConfig {
             layout.align.as_deref().and_then(parse_align)
         );
         assign!(self.layout.max_rows, layout.max_rows.map(|v| v.clamp(1, 8)));
-        assign!(
-            self.layout.panel_header_h,
-            layout
-                .panel_header
-                .filter(|v| v.is_finite())
-                .map(|v| v.max(0.0))
-        );
+        assign!(self.layout.fixed_height, layout.fixed_height);
 
         assign!(self.reduced, motion.reduced);
         assign!(
@@ -440,6 +434,7 @@ mod tests {
     #[test]
     fn absent_keys_keep_the_defaults() {
         assert_eq!(parse(""), AppearanceConfig::default());
+        assert!(!AppearanceConfig::default().layout.fixed_height);
     }
 
     #[test]
@@ -463,7 +458,7 @@ mod tests {
             radius = 20.0
             width = 800.0
             max_rows = 3
-            panel_header = 34.0
+            fixed_height = true
 
             [surfaces]
             hairline = { width = 2.0 }
@@ -482,7 +477,7 @@ mod tests {
         assert_eq!(config.surfaces.shared.hairline.unwrap().width, Some(2.0));
         assert_eq!(config.layout.width, 800.0);
         assert_eq!(config.layout.max_rows, 3);
-        assert_eq!(config.layout.panel_header_h, 34.0);
+        assert!(config.layout.fixed_height);
         assert!(config.reduced);
         assert_eq!(config.entrance_ms, 400);
         // untouched defaults survive
@@ -506,7 +501,7 @@ mod tests {
 
             [layout]
             max_rows = 99
-            panel_header = -5.0
+            radius = -4.0
 
             [surfaces]
             hairline = { width = 40.0 }
@@ -514,7 +509,7 @@ mod tests {
         );
         assert_eq!(config.font.size, 96.0);
         assert_eq!(config.layout.max_rows, 8);
-        assert_eq!(config.layout.panel_header_h, 0.0);
+        assert_eq!(config.layout.radius, 0.0);
         assert_eq!(config.surfaces.shared.hairline.unwrap().width, Some(16.0));
     }
 
@@ -610,6 +605,7 @@ mod tests {
             offset_x = 12.0
             row_radius = 3.0
             width_ratio = 0.5
+            panel_header = 28.0
 
             [motion]
             stagger_ms = 100

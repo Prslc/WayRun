@@ -1,7 +1,7 @@
 # ~/.config/wayrun/theme.toml — every key is optional; commented keys keep the default.
 
 [colors]
-# primary = "#7aa2f7"        # accent: selection tint, accent bar, panel header
+# primary = "#7aa2f7"        # accent: selection tint, accent bar, panel title
 # fg = "#c0caf5"             # text, icons and hint tints
 # container = "#24283b"      # card fill
 # dim = "#0000004d"          # backdrop dim (this surface takes #RRGGBBAA)
@@ -46,7 +46,7 @@
 # top_ratio = 0.20           # the card's top edge, as a fraction of the output height
 # align = "center"           # horizontal anchor: left / center / right
 # max_rows = 5               # visible result rows
-# panel_header = 28.0        # action panel header band height
+# fixed_height = false       # hold the card at the max_rows height in every state
 
 [font]
 # family = "sans-serif"      # primary shaping family; missing glyphs fall back

@@ -101,6 +101,9 @@ const KEYCAP_RADIUS: f32 = 4.0;
 const KEY_LABEL_GAP: f32 = 6.0;
 const ITEM_GAP: f32 = 16.0;
 const COUNT_GAP: f32 = 14.0;
+/// The panel title is a label, not a hint: below this width it would paint a
+/// lone ellipsis, so it is dropped rather than drawn that way.
+const TITLE_MIN_W: f32 = 40.0;
 
 fn count_label(n: usize, one: &'static str, many: &'static str) -> String {
     if n == 1 { t!(one) } else { t!(many, count = n) }
@@ -194,7 +197,7 @@ pub(super) fn draw_footer(
                 effective.unwrap_or(&hint.label),
                 label_size,
                 Weight::NORMAL,
-                room,
+                room * canvas.scale,
             )
         } else {
             text.shape(&hint.label, label_size, Weight::NORMAL)
@@ -234,6 +237,25 @@ pub(super) fn draw_footer(
             None,
         );
         x += cap_w + KEY_LABEL_GAP + label_w + ITEM_GAP;
+    }
+
+    if let Some(title) = footer.panel_title.filter(|title| !title.trim().is_empty()) {
+        // `x` already carries the ITEM_GAP after the last drawn hint; `limit`
+        // sits COUNT_GAP left of the count pill.
+        let room = limit - x;
+        if room >= TITLE_MIN_W {
+            let shaped = text.fit(title, label_size, Weight::BOLD, room * canvas.scale);
+            let width = shaped.width / canvas.scale;
+            let height = shaped.height / canvas.scale;
+            text.draw(
+                pixmap,
+                &shaped,
+                frame.fade(frame.theme.primary, 0.9),
+                canvas.px(limit - width),
+                canvas.px(center_y - height / 2.0),
+                None,
+            );
+        }
     }
 
     if let Some(shaped) = &count_shaped {

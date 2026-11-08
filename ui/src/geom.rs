@@ -43,7 +43,8 @@ pub struct Layout {
     pub align: Align,
     pub radius: f32,
     pub max_rows: usize,
-    pub panel_header_h: f32,
+    /// Hold the card at a full `max_rows` height in every state.
+    pub fixed_height: bool,
     /// Whether the hint bar is drawn; hiding it gives its band back to the card.
     pub footer: bool,
     /// The entrance's remaining rise, in logical pixels: a frame draws with a
@@ -59,7 +60,7 @@ impl Default for Layout {
             align: Align::Center,
             radius: 16.0,
             max_rows: 5,
-            panel_header_h: 28.0,
+            fixed_height: false,
             footer: true,
             offset_y: 0.0,
         }
@@ -172,6 +173,12 @@ impl Layout {
         self.base_h() + GAP + body_h
     }
 
+    /// The list/preview body under a card of `card_h`; at rest it is the split
+    /// body outside fixed mode, `max_rows * ROW_H` with it.
+    pub fn body_h(&self, card_h: f32) -> f32 {
+        (card_h - self.base_h() - GAP).max(0.0)
+    }
+
     /// The split body's height: an image needs room for a thumbnail, text a
     /// readable minimum; a short list grows the card down either way.
     pub fn split_h(&self, rows: usize, kind: PreviewKind) -> f32 {
@@ -187,16 +194,16 @@ impl Layout {
         PAD + SEARCH_H + PAD
     }
 
-    /// The card height with the action panel open: like `content_h`, but the
-    /// list band holds the actions under a header instead of the results.
+    /// The card height with the action panel open: the same list band, holding
+    /// the actions instead of the results.
     pub fn panel_h(&self, actions: usize) -> f32 {
-        self.base_h() + GAP + self.panel_header_h + self.list_h(actions)
+        self.content_h(actions)
     }
 
-    /// The y of the first action row: the panel header sits where the first
-    /// result row would.
-    pub fn actions_top(&self, surface: (u32, u32)) -> f32 {
-        self.rows_top(surface) + self.panel_header_h
+    /// The card's one height while `fixed_height` is set: a full `max_rows`
+    /// window (448 logical pixels at the defaults).
+    pub fn fixed_h(&self) -> f32 {
+        self.content_h(self.max_rows)
     }
 
     /// The action index under a surface-local point, `None` outside the panel.
@@ -213,7 +220,7 @@ impl Layout {
             return None;
         }
 
-        let top = self.actions_top(surface);
+        let top = self.rows_top(surface);
         if y < top || y >= top + self.list_h(count) {
             return None;
         }
@@ -501,23 +508,52 @@ mod tests {
     }
 
     #[test]
-    fn the_action_panel_adds_a_header_above_the_actions() {
+    fn a_fixed_height_is_the_full_panel_window() {
         let l = Layout::default();
-        assert_eq!(l.panel_h(3), l.content_h(3) + l.panel_header_h);
-        // the actions start where the first result row would, one header lower
-        let surface = (1920, 1080);
-        assert_eq!(
-            l.actions_top(surface),
-            l.rows_top(surface) + l.panel_header_h
-        );
+        assert_eq!(l.fixed_h(), 448.0);
+        assert_eq!(l.fixed_h(), l.content_h(l.max_rows));
+        assert_eq!(l.fixed_h(), l.panel_h(l.max_rows));
 
+        let bare = Layout {
+            footer: false,
+            ..Layout::default()
+        };
+        assert_eq!(bare.fixed_h(), bare.content_h(bare.max_rows));
+        assert_eq!(bare.fixed_h() + GAP + FOOTER_H, l.fixed_h());
+
+        let two = Layout {
+            max_rows: 2,
+            ..Layout::default()
+        };
+        assert_eq!(two.fixed_h(), two.content_h(2));
+    }
+
+    #[test]
+    fn the_body_fills_the_card_between_its_bands() {
+        let l = Layout::default();
+        assert_eq!(l.body_h(l.fixed_h()), l.max_rows as f32 * ROW_H);
+        assert_eq!(
+            l.body_h(l.content_h_for(l.split_h(1, PreviewKind::Image))),
+            l.split_h(1, PreviewKind::Image),
+            "a non-fixed split body is unchanged"
+        );
+        assert_eq!(l.body_h(l.content_h(2)), l.list_h(2));
+        assert_eq!(l.body_h(0.0), 0.0);
+    }
+
+    #[test]
+    fn the_action_panel_shares_the_list_band() {
+        let l = Layout::default();
+        assert_eq!(l.panel_h(3), l.content_h(3));
+
+        let surface = (1920, 1080);
         let left = l.card_x(surface) + 10.0;
-        let top = l.actions_top(surface);
+        let top = l.rows_top(surface);
         assert_eq!(l.action_at(surface, 0, 4, left, top), Some(0));
         assert_eq!(l.action_at(surface, 0, 4, left, top + ROW_H + 1.0), Some(1));
         // a `first` window shifts surface row 0 to that action
         assert_eq!(l.action_at(surface, 2, 20, left, top + 0.5), Some(2));
-        // above the actions is the header, not an action
+        // above the first action is the field, not an action
         assert_eq!(l.action_at(surface, 0, 4, left, top - 1.0), None);
         // only the `max_rows` window is drawn
         assert_eq!(

@@ -1,4 +1,3 @@
-use cosmic_text::Weight;
 use tiny_skia::Pixmap;
 use wayrun_core::wire::IconShape;
 
@@ -10,8 +9,8 @@ use crate::view::{Body, Frame};
 use super::canvas::{Canvas, Rect};
 use super::{RowBody, draw_row};
 
-/// The action panel (Shift+Enter): the parent row's title as a header, then the
-/// row's secondary commands as list rows in the same fixed window.
+/// The action panel (Shift+Enter): the row's secondary commands in the list
+/// band. The parent row or group title is drawn by the footer.
 pub(super) fn draw_actions(
     canvas: &Canvas,
     pixmap: &mut Pixmap,
@@ -24,32 +23,11 @@ pub(super) fn draw_actions(
     };
     let theme = frame.theme;
     let layout = frame.layout;
-    let font = &frame.font;
     let (left, width) = layout.row_band(frame.surface);
-
-    if let Some(title) = panel.parent_title {
-        let size = font.suggestion() * canvas.scale;
-        let shaped = text.fit(title, size, Weight::BOLD, width * canvas.scale);
-        let y = layout.rows_top(frame.surface);
-        let clip = [
-            canvas.px(left),
-            canvas.px(y),
-            canvas.px(width),
-            canvas.px(layout.panel_header_h),
-        ];
-        text.draw(
-            pixmap,
-            &shaped,
-            frame.fade(theme.primary, 0.9),
-            canvas.px(left),
-            canvas.px(y + (layout.panel_header_h - shaped.height / canvas.scale) / 2.0),
-            Some(clip),
-        );
-    }
 
     // The dot marks the entry the row's Enter runs: the remembered default, or
     // the row's own command while none is remembered.
-    let top = layout.actions_top(frame.surface);
+    let top = layout.rows_top(frame.surface);
     for (index, action) in panel
         .actions
         .iter()

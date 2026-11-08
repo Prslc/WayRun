@@ -117,7 +117,6 @@ pub fn draw(
                     &canvas,
                     pixmap,
                     frame,
-                    view.rows.len(),
                     preview,
                     preview::PreviewCaches {
                         text: &mut *text,

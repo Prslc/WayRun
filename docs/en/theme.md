@@ -62,7 +62,7 @@ stays.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `primary` | system palette | Accent: selection tint, accent bar, panel header. |
+| `primary` | system palette | Accent: selection tint, accent bar, the action panel title in the footer. |
 | `fg` | system palette | Text, icons and hint tints. |
 | `container` | system palette | Card fill. |
 | `dim` | `#0000004d` | Backdrop dim; its alpha is inline. |
@@ -213,7 +213,7 @@ The `[footer]` table has one key.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `enabled` | bool | `true` | Show the hint bar under the results: keys, result count and search status. `false` hides it and gives its band back to the card. |
+| `enabled` | bool | `true` | Show the hint bar under the results: keys, result count and search status. It also carries the action panel's row or group title, so `false` hides that title too. |
 
 ### Layout
 
@@ -226,7 +226,7 @@ The `[layout]` table sets the card geometry.
 | `top_ratio` | float | `0.20` | 0–1 | Card top as a fraction of the output height. |
 | `align` | string | `center` | `left`/`center`/`right` | Horizontal anchor on the output. |
 | `max_rows` | int | `5` | 1–8 | Visible result rows. |
-| `panel_header` | float | `28.0` | ≥ 0 | Action panel header band above the actions. |
+| `fixed_height` | bool | `false` | — | Hold the card at one height once there is a query or results: a full `max_rows` window (448 logical pixels at the defaults). Results, split previews and the action panel no longer resize it; shorter content leaves the space below the rows blank. An untouched field with no results stays the compact search-only card; a query expands it. |
 
 An unknown `align` keeps the default.
 

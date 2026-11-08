@@ -13,9 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fade and rise take, in milliseconds (0–2000, default 240). `0` skips the
   entrance while the card height spring and result-row motion still run;
   `reduced = true` still disables all motion. It applies live.
+- `theme.toml`'s `[layout].fixed_height` (default `false`) holds the card at
+  the height of `max_rows` rows once there is a query or results, so results,
+  split previews and the action panel no longer resize it. A pristine show
+  (no query, no results) stays the compact search-only card. It applies live.
 
 ### Changed
 
+- The action panel no longer draws a header band: the actions start where the
+  first result row would, and the parent row or group title moves to the right
+  of the footer, beside the action count. `[layout].panel_header` is gone; an
+  existing entry is ignored. A panel now matches a list with the same number
+  of rows in height.
 - The text family moved from `config.toml`'s `[font].family` to
   `theme.toml`'s `[font].family`, next to the interface size it belongs with.
   It still applies live. A `[font]` table left in `config.toml` is ignored, so
