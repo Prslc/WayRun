@@ -249,7 +249,7 @@ The `[motion]` table has these keys.
 
 | Key | Type | Default | Range | Meaning |
 | --- | --- | --- | --- | --- |
-| `reduced` | bool | `false` | — | Same as `WAYRUN_REDUCED_MOTION=1`: both animations start at their end state. |
+| `reduced` | bool | `false` | — | Same as `WAYRUN_REDUCED_MOTION=1`: turns animations off. The entrance, the card height spring and result-row motion start at their end state, and no animation frames are requested. The caret still blinks. This wins over `entrance_ms`. |
 | `entrance_ms` | integer | `240` | 0–2000 | How long the entrance fade and rise take, in milliseconds. `0` skips the entrance; the card height spring and result-row motion still run. `reduced = true` still wins. |
 
 Both apply live. Lowering `entrance_ms` mid-fade settles it at once; raising it

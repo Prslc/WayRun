@@ -53,5 +53,5 @@
 # size = 14.0                # interface size; roles scale by their shipped ratio
 
 [motion]
-# reduced = false            # start both animations at their end state
+# reduced = false            # turn animations off; the caret still blinks
 # entrance_ms = 240          # entrance fade-and-rise duration; 0 skips it
