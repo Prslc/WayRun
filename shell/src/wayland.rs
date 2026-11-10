@@ -413,8 +413,6 @@ impl Shell {
         let now = Instant::now();
         // `Status` is answered by the connection thread, so it is a no-op here.
         match command {
-            ipc::Command::Open => self.open(now),
-            ipc::Command::Close => self.dismiss(now),
             ipc::Command::Toggle => {
                 if self.layer.is_some() {
                     self.dismiss(now);

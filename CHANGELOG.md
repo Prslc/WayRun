@@ -37,10 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On KDE Plasma, `reboot`, `shutdown` and `logout` ask `org.kde.Shutdown` to
   end the session first and fall back to `systemctl`/`loginctl`, so systemd no
   longer stops `plasmashell` itself and waits out its timeout.
-- `wayrun status` reports the detected desktop after the `visible`/`hidden`
-  line.
+- `wayrun status` reports the detected desktop, the daemon pid, the socket path
+  and the version after the `visible`/`hidden` line.
 - The built-in system command rows describe the action instead of showing the
   shell command they run.
+
+### Removed
+
+- `wayrun open` and `wayrun close`; `wayrun toggle` covers both, and the socket
+  accepts only `toggle` and `status`. Update scripts that used them.
 
 ### Fixed
 

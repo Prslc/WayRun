@@ -60,8 +60,6 @@ fn main() -> process::ExitCode {
             render::bench();
             return process::ExitCode::SUCCESS;
         }
-        Some(Command::Open) => return ipc::client("open"),
-        Some(Command::Close) => return ipc::client("close"),
         Some(Command::Toggle) => return ipc::client("toggle"),
         Some(Command::Status) => return ipc::client("status"),
         None => {

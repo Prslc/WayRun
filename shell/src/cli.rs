@@ -18,13 +18,9 @@ pub struct Cli {
 pub enum Command {
     /// Run the launcher.
     Run,
-    /// Show the launcher.
-    Open,
-    /// Hide the launcher.
-    Close,
     /// Show or hide the launcher.
     Toggle,
-    /// Report whether the launcher is shown.
+    /// Report the launcher's state.
     Status,
     /// Run the rasteriser micro-benchmark; no Wayland.
     Bench,
@@ -138,14 +134,6 @@ mod tests {
         assert!(matches!(
             parse(&["wayrun", "run"]).command,
             Some(Command::Run)
-        ));
-        assert!(matches!(
-            parse(&["wayrun", "open"]).command,
-            Some(Command::Open)
-        ));
-        assert!(matches!(
-            parse(&["wayrun", "close"]).command,
-            Some(Command::Close)
         ));
         assert!(matches!(
             parse(&["wayrun", "toggle"]).command,
