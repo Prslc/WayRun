@@ -1,9 +1,11 @@
 pub mod db;
 pub mod desktop_action;
+pub mod desktop_env;
 pub mod executor;
 pub mod fs;
 pub mod handlers;
 pub mod icon;
 pub mod process;
+pub mod session_verbs;
 pub mod theme;
 pub mod xdg;

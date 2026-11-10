@@ -16,6 +16,10 @@ pub enum Action {
     RunInTerminal {
         cmd: String,
     },
+    /// A session verb the executor resolves for this desktop when it runs.
+    Session {
+        verb: SessionVerb,
+    },
     Launch {
         desktop_id: String,
     },
@@ -48,6 +52,18 @@ pub enum Action {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         payload: Option<serde_json::Value>,
     },
+}
+
+/// The session verbs a row can ask for; the executor picks the line this
+/// desktop needs, so a row never carries a desktop-specific command.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionVerb {
+    Lock,
+    Suspend,
+    Reboot,
+    Shutdown,
+    Logout,
 }
 
 impl Action {
@@ -216,6 +232,17 @@ mod tests {
             value,
             json!({ "type": "plugin", "plugin": "note", "action": "new" })
         );
+    }
+
+    #[test]
+    fn a_session_verb_round_trips_and_keys_itself() {
+        let action = Action::Session {
+            verb: SessionVerb::Reboot,
+        };
+        let value = json!({ "type": "session", "verb": "reboot" });
+        assert_eq!(serde_json::to_value(&action).unwrap(), value);
+        assert_eq!(serde_json::from_value::<Action>(value).unwrap(), action);
+        assert_eq!(action.key(), r#"{"type":"session","verb":"reboot"}"#);
     }
 
     #[test]

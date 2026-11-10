@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the height of `max_rows` rows once there is a query or results, so results,
   split previews and the action panel no longer resize it. A pristine show
   (no query, no results) stays the compact search-only card. It applies live.
+- Lua plugins can read the session's desktop id with `wayrun.desktop()`
+  (`kde`, `niri`, `hyprland`, …), resolved once at startup.
+- The `session` action (`{"type":"session","verb":"reboot"}`) lets a row ask
+  for `lock`, `suspend`, `reboot`, `shutdown` or `logout` without embedding a
+  desktop-specific command; the executor resolves it for the session.
 
 ### Changed
 
@@ -29,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `theme.toml`'s `[font].family`, next to the interface size it belongs with.
   It still applies live. A `[font]` table left in `config.toml` is ignored, so
   move the key to `theme.toml`.
+- On KDE Plasma, `reboot`, `shutdown` and `logout` ask `org.kde.Shutdown` to
+  end the session first and fall back to `systemctl`/`loginctl`, so systemd no
+  longer stops `plasmashell` itself and waits out its timeout.
+- `wayrun status` reports the detected desktop after the `visible`/`hidden`
+  line.
+- The built-in system command rows describe the action instead of showing the
+  shell command they run.
 
 ### Fixed
 

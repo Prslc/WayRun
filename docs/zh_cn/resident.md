@@ -49,7 +49,7 @@ systemctl --user enable --now wayrun-launcher
 
 ## 控制命令
 
-常驻实例持有 socket，响应四个命令：`open`、`close`、`toggle`、`status`。`status` 打印 `visible` 或 `hidden`。
+常驻实例持有 socket，响应四个命令：`open`、`close`、`toggle`、`status`。`status` 第一行打印 `visible` 或 `hidden`，第二行打印 `desktop: <标识>`；无法识别会话时为 `desktop: unknown`。
 
 不设 `WAYRUN_RESIDENT=1` 时，`wayrun run` 会弹出，关闭即退出。在终端里直接运行 `wayrun` 会打印命令列表；没有终端的调用（热键、systemd 单元、脚本）仍然运行启动器。
 

@@ -1,6 +1,6 @@
 use std::env;
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -12,6 +12,7 @@ use std::thread;
 use std::time::Duration;
 
 use calloop::channel::Sender;
+use wayrun_core::desktop;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
@@ -114,6 +115,12 @@ fn lock_instance(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// The status reply: visibility first, then the detected desktop.
+fn status_line(visible: bool, session: Option<&str>) -> String {
+    let state = if visible { "visible" } else { "hidden" };
+    format!("{state}\ndesktop: {}", session.unwrap_or("unknown"))
+}
+
 fn handle(stream: UnixStream, tx: Sender<Command>) {
     let _ = stream.set_read_timeout(Some(TIMEOUT));
     let _ = stream.set_write_timeout(Some(TIMEOUT));
@@ -127,13 +134,7 @@ fn handle(stream: UnixStream, tx: Sender<Command>) {
     }
 
     let response = match parse_request(&line) {
-        Ok(Command::Status) => {
-            if VISIBLE.load(Ordering::Relaxed) {
-                "visible".to_string()
-            } else {
-                "hidden".to_string()
-            }
-        }
+        Ok(Command::Status) => status_line(VISIBLE.load(Ordering::Relaxed), desktop::id()),
         Ok(command) => {
             let _ = tx.send(command);
             "ok".to_string()
@@ -164,7 +165,10 @@ pub fn client(verb: &str) -> process::ExitCode {
     }
 
     let mut response = String::new();
-    if BufReader::new(&stream).read_line(&mut response).is_err() {
+    if BufReader::new(&stream)
+        .read_to_string(&mut response)
+        .is_err()
+    {
         return process::ExitCode::FAILURE;
     }
     print!("{response}");
@@ -184,7 +188,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::process;
 
-    use super::{Command, lock_instance, parse_request};
+    use super::{Command, lock_instance, parse_request, status_line};
 
     #[test]
     fn a_second_instance_lock_is_refused() {
@@ -214,5 +218,20 @@ mod tests {
     fn a_typo_is_answered_rather_than_ignored() {
         let error = parse_request("toggl\n").unwrap_err();
         assert!(error.contains("toggl"), "{error}");
+    }
+
+    #[test]
+    fn status_names_the_desktop_on_a_second_line() {
+        assert_eq!(status_line(true, Some("kde")), "visible\ndesktop: kde");
+        assert_eq!(status_line(false, None), "hidden\ndesktop: unknown");
+    }
+
+    #[test]
+    fn the_first_status_line_stays_the_visibility() {
+        for visible in [true, false] {
+            let reply = status_line(visible, Some("niri"));
+            let first = reply.lines().next().unwrap();
+            assert_eq!(first, if visible { "visible" } else { "hidden" });
+        }
     }
 }

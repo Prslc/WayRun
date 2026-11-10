@@ -22,6 +22,7 @@
 ---@alias WayrunActionType
 ---| "run"
 ---| "run_in_terminal"
+---| "session"
 ---| "launch"
 ---| "copy"
 ---| "desktop_action"
@@ -34,6 +35,7 @@
 ---@class WayrunAction
 ---@field type WayrunActionType
 ---@field cmd string?          run, run_in_terminal
+---@field verb string?         session: lock, suspend, reboot, shutdown, logout
 ---@field desktop_id string?   launch, desktop_action, open_with
 ---@field action_id string?    desktop_action
 ---@field text string?         copy
@@ -152,6 +154,10 @@ function wayrun.date(seconds) end
 
 ---@return string
 function wayrun.locale() end
+
+--- The detected desktop environment's lowercase id, or nil when none is named.
+---@return string?
+function wayrun.desktop() end
 
 ---@param name string
 ---@return string?

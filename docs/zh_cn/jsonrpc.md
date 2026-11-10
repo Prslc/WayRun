@@ -49,6 +49,7 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"search","params":{"text":"firefox"},"i
 |--------|--------|--------|
 | `run` | `cmd` | 执行一条 shell 命令（一整行） |
 | `run_in_terminal` | `cmd` | 在终端模拟器中执行一条 shell 命令 |
+| `session` | `verb` | 执行会话动词（`lock`、`suspend`、`reboot`、`shutdown`、`logout`），按当前桌面选择命令；KDE 先请求 `org.kde.Shutdown` |
 | `launch` | `desktop_id` | 通过 GLib 的 `GAppInfo` 按 desktop id 启动应用 |
 | `copy` | `text` | 把文本写入 Wayland 剪贴板 |
 | `desktop_action` | `desktop_id`, `action_id` | 执行一个 `[Desktop Action …]` 分组 |

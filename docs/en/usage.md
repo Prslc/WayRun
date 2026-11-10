@@ -20,6 +20,11 @@ The table lists the built-in keywords. A plugin can add its own.
 | `lock` / `reboot` / `shutdown` | system commands |
 | `2 + 3` | inline calculator |
 
+On KDE Plasma, `reboot`, `shutdown` and `logout` ask the session manager
+(`org.kde.Shutdown`) to log out first, and fall back to `systemctl`/`loginctl`
+when that call fails. Stopping `plasmashell` through systemd can make the
+shutdown hang.
+
 Some features need an optional component. Copy and paste need `wl-clipboard`;
 without it, the keyword returns no rows. A host registered in `plugins.toml`
 adds its own keyword the same way. The full list is in

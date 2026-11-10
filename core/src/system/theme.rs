@@ -1,7 +1,8 @@
 use crate::wire::ThemeConfig;
-use std::env;
 use std::fs;
 use std::path::PathBuf;
+
+use super::desktop_env;
 
 /// The Material palette DankMaterialShell generated with matugen. It holds both
 /// modes and a `mode` key, so a switch is a plain file change.
@@ -15,19 +16,9 @@ pub fn kde_globals_path() -> Option<PathBuf> {
     Some(dirs::config_dir()?.join("kdeglobals"))
 }
 
-/// Whether this process runs inside a KDE session, where `kdeglobals` is the
-/// system palette and a DMS file may be left over from another desktop.
-fn kde_session() -> bool {
-    env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktop| {
-        desktop
-            .split(':')
-            .any(|name| name.eq_ignore_ascii_case("kde"))
-    }) || env::var("KDE_FULL_SESSION").is_ok_and(|full| full == "true")
-}
-
 /// The palette file the current session follows, watched for live changes.
 pub fn system_theme_path() -> Option<PathBuf> {
-    if kde_session() {
+    if desktop_env::is("kde") {
         kde_globals_path()
     } else {
         dms_colors_path()
@@ -69,7 +60,7 @@ pub fn default_theme() -> ThemeConfig {
 }
 
 pub fn load_theme() -> ThemeConfig {
-    let theme = if kde_session() {
+    let theme = if desktop_env::is("kde") {
         load_kde()
     } else {
         load_dms()

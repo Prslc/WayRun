@@ -116,6 +116,10 @@ pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua:
         "locale",
         lua.create_function(|_, ()| Ok(rust_i18n::locale()))?,
     )?;
+    sdk.set(
+        "desktop",
+        lua.create_function(|_, ()| Ok(crate::system::desktop_env::id().map(str::to_owned)))?,
+    )?;
     let env_active = Rc::clone(&shared.active);
     let env_scope = Rc::clone(&shared.env_scope);
     sdk.set(

@@ -30,6 +30,9 @@ pub use system::fs::write_if_absent;
 /// dismissal and the index reaper, both of which drop a large buffer.
 pub use system::fs::trim_allocator;
 
+/// The detected session desktop; shared with the shell's `status` reply.
+pub use system::desktop_env as desktop;
+
 fn runtime() -> Result<tokio::runtime::Runtime> {
     Ok(tokio::runtime::Builder::new_multi_thread()
         .enable_all()

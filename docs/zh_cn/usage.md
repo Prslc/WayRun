@@ -18,6 +18,8 @@
 | `lock` / `reboot` / `shutdown` | 系统命令 |
 | `2 + 3` | 即时计算 |
 
+KDE Plasma 下，`reboot`、`shutdown` 与 `logout` 先通过 D-Bus 请求会话管理器（`org.kde.Shutdown`）注销，调用失败时回退到 `systemctl`/`loginctl`。直接通过 systemd 停止 `plasmashell` 可能让关机卡住。
+
 有些功能依赖可选组件。复制与粘贴需要 `wl-clipboard`；缺少时，对应关键词返回空结果。在 `plugins.toml` 注册的宿主也会以同样方式带来关键词。完整列表见[功能依赖](install.md#功能依赖)。
 
 ### 路径查询
