@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: WayRun
-  text: 搜索，然后启动。
-  tagline: Wayland 原生的 Linux 应用启动器与快速搜索工具。
+  text: 无 GPU，无 GUI 框架
+  tagline: Wayland 原生的 Linux 应用启动器与快速搜索工具
   image:
     src: /logo.svg
     alt: WayRun
@@ -23,8 +23,8 @@ features:
     details: 文件与路径、$PATH 命令、系统命令与即时计算，共用同一段输入。
   - title: 动作面板
     details: Shift+Enter 打开按类型区分的动作面板：定位文件、运行 Desktop Action、复制链接。
-  - title: 不依赖 GPU
-    details: 覆盖层用软件光栅化进共享内存缓冲，不涉及 GPU 栈，也不依赖任何 GUI 工具包。
+  - title: 软件渲染
+    details: 覆盖层由 tiny-skia 光栅化成预乘 RGBA 位图，再作为 wl_shm 缓冲交给合成器。
   - title: 可主题化
     details: 跟随 KDE 配色方案或 DankMaterialShell 的 Material You 调色板，并可用 theme.toml 覆盖配色、模糊、布局、字体与动效。
   - title: 可扩展
