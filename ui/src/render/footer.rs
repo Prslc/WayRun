@@ -99,6 +99,7 @@ pub(super) fn footer_hints(
 }
 
 const KEYCAP_PAD_X: f32 = 5.0;
+const KEYCAP_PAD_Y: f32 = 3.0;
 const KEYCAP_RADIUS: f32 = 4.0;
 const KEY_LABEL_GAP: f32 = 6.0;
 const ITEM_GAP: f32 = 16.0;
@@ -136,8 +137,13 @@ fn count_label(n: usize, one: &'static str, many: &'static str) -> String {
     if n == 1 { t!(one) } else { t!(many, count = n) }
 }
 
-fn label_chip_w(shaped: &Shaped, scale: f32) -> f32 {
-    shaped.width / scale + 2.0 * KEYCAP_PAD_X
+fn chip_w(text_w: f32) -> f32 {
+    text_w + 2.0 * KEYCAP_PAD_X
+}
+
+/// A chip's height around a line of `text_h`, capped at the footer band.
+fn chip_h(text_h: f32) -> f32 {
+    (text_h + 2.0 * KEYCAP_PAD_Y).min(geom::FOOTER_H)
 }
 
 /// A label-only chip: the count pill and the no-match note share its style.
@@ -145,9 +151,9 @@ fn draw_label_chip(ctx: &mut DrawCtx, shaped: &Shaped, x: f32, center_y: f32) {
     let canvas = ctx.canvas;
     let frame = ctx.frame;
     let style = Style::of(frame);
-    let width = label_chip_w(shaped, canvas.scale);
+    let width = chip_w(shaped.width / canvas.scale);
     let height = shaped.height / canvas.scale;
-    let cap_h = (height + 6.0).min(geom::FOOTER_H);
+    let cap_h = chip_h(height);
     canvas.fill_round(
         ctx.pixmap,
         Rect {
@@ -216,9 +222,9 @@ pub(super) fn draw_footer(ctx: &mut DrawCtx) {
 
     let count_shaped =
         (!count.is_empty()).then(|| ctx.text.shape(&count, label_size, Weight::NORMAL));
-    let count_cap_w = count_shaped.as_ref().map_or(0.0, |shaped| {
-        shaped.width / canvas.scale + 2.0 * KEYCAP_PAD_X
-    });
+    let count_cap_w = count_shaped
+        .as_ref()
+        .map_or(0.0, |shaped| chip_w(shaped.width / canvas.scale));
     let limit = right
         - count_cap_w
         - if count_shaped.is_some() {
@@ -238,7 +244,7 @@ pub(super) fn draw_footer(ctx: &mut DrawCtx) {
 
         let key = ctx.text.shape(hint.key, key_size, Weight::NORMAL);
         let key_w = key.width / canvas.scale;
-        let cap_w = key_w + 2.0 * KEYCAP_PAD_X;
+        let cap_w = chip_w(key_w);
         // An action name is arbitrary, so it is elided to the room left instead
         // of dropping the whole hint the way a fixed label does.
         let label = if hint.effective {
@@ -253,7 +259,7 @@ pub(super) fn draw_footer(ctx: &mut DrawCtx) {
             ctx.text.shape(&hint.label, label_size, Weight::NORMAL)
         };
         let label_w = label.width / canvas.scale;
-        let cap_h = (key.height / canvas.scale + 6.0).min(geom::FOOTER_H);
+        let cap_h = chip_h(key.height / canvas.scale);
         if x + cap_w + KEY_LABEL_GAP + label_w > limit {
             break;
         }
@@ -311,7 +317,7 @@ pub(super) fn draw_footer(ctx: &mut DrawCtx) {
     }
 
     if let Some(shaped) = &count_shaped {
-        let x = right - label_chip_w(shaped, canvas.scale);
+        let x = right - chip_w(shaped.width / canvas.scale);
         draw_label_chip(ctx, shaped, x, center_y);
     }
 }
