@@ -5,7 +5,7 @@ use wayrun_core::wire::IconShape;
 
 use crate::geom::Rect;
 use crate::icons::IconDraw;
-use crate::text::{LINE_HEIGHT, Shaped, TextEngine, TextStyle};
+use crate::text::{LINE_HEIGHT, Shaped, TextEngine, TextStyle, split_wide};
 use crate::theme::tint;
 use crate::view::{Frame, PreviewView};
 
@@ -13,7 +13,7 @@ use super::DrawCtx;
 
 /// The pane sits inside the body, leaving a small card margin around it.
 const PANE_INSET: f32 = 4.0;
-pub(super) const PANE_PAD: f32 = 10.0;
+const PANE_PAD: f32 = 10.0;
 
 /// The split view's right column: a tonal pane holding an image, plain text or
 /// rendered Markdown.
@@ -26,7 +26,7 @@ pub(super) fn draw_preview(ctx: &mut DrawCtx, preview: &PreviewView<'_>) {
                 return;
             }
             fill_pane(ctx, pane);
-            draw_text(ctx, pane, body);
+            draw_text(ctx, pane.inset(PANE_PAD), body);
         }
         PreviewView::Markdown { text: body } => {
             let pane = text_pane(ctx.frame);
@@ -34,7 +34,7 @@ pub(super) fn draw_preview(ctx: &mut DrawCtx, preview: &PreviewView<'_>) {
                 return;
             }
             fill_pane(ctx, pane);
-            super::markdown::draw_markdown(ctx, pane, body);
+            super::markdown::draw_markdown(ctx, pane.inset(PANE_PAD), body);
         }
     }
 }
@@ -136,11 +136,11 @@ fn fit_image(width: u32, height: u32, max_w: f32, max_h: f32) -> (f32, f32) {
 }
 
 /// Plain text wrapped to the pane, clipped to it; no scrolling yet.
-fn draw_text(ctx: &mut DrawCtx, pane: Rect, body: &str) {
+fn draw_text(ctx: &mut DrawCtx, content: Rect, body: &str) {
     let frame = ctx.frame;
     let canvas = ctx.canvas;
-    let width = (pane.w - PANE_PAD * 2.0).max(1.0);
-    let height = (pane.h - PANE_PAD * 2.0).max(1.0);
+    let width = content.w.max(1.0);
+    let height = content.h.max(1.0);
     let size = frame.font.title() * canvas.scale;
     let line_h = (frame.font.title() * LINE_HEIGHT).round();
     if line_h <= 0.0 {
@@ -148,15 +148,15 @@ fn draw_text(ctx: &mut DrawCtx, pane: Rect, body: &str) {
     }
     let max_lines = (height / line_h).floor().max(1.0) as usize;
     let clip = [
-        canvas.px(pane.x + PANE_PAD),
-        canvas.px(pane.y + PANE_PAD),
+        canvas.px(content.x),
+        canvas.px(content.y),
         canvas.px(width),
         canvas.px(height),
     ];
     let color = frame.fade_rgba(Style::of(frame).text);
     let lines = wrap(ctx.text, body, size, width * canvas.scale, max_lines);
-    let x = pane.x + PANE_PAD;
-    let mut y = pane.y + PANE_PAD;
+    let x = content.x;
+    let mut y = content.y;
     for line in &lines {
         ctx.text.draw(
             ctx.pixmap,
@@ -229,69 +229,6 @@ fn wrap(
     lines
 }
 
-/// Split one over-long token into chunks that each fit `max_w`, on char
-/// boundaries; a single character wider than the column is kept alone.
-pub(super) fn split_wide(
-    engine: &mut TextEngine,
-    text: &str,
-    size: f32,
-    style: TextStyle,
-    max_w: f32,
-    budget: usize,
-) -> Vec<String> {
-    let mut chunks = Vec::new();
-    let mut rest = text;
-    while !rest.is_empty() && chunks.len() < budget {
-        let end = longest_prefix(engine, rest, size, style, max_w);
-        chunks.push(rest[..end].to_string());
-        rest = &rest[end..];
-    }
-    chunks
-}
-
-/// The byte end of the longest prefix that fits `max_w`; probing doubles from
-/// a few chars and then binary-searches, so only the cut chunk is shaped.
-fn longest_prefix(
-    engine: &mut TextEngine,
-    text: &str,
-    size: f32,
-    style: TextStyle,
-    max_w: f32,
-) -> usize {
-    let mut low = 0usize;
-    let mut high;
-    let mut probe = 8usize;
-    loop {
-        let end = char_end(text, probe);
-        if engine.shape_styled(&text[..end], size, style).width <= max_w {
-            if end == text.len() {
-                return end;
-            }
-            low = probe;
-            probe *= 2;
-        } else {
-            high = probe;
-            break;
-        }
-    }
-    while high - low > 1 {
-        let mid = low + (high - low) / 2;
-        let end = char_end(text, mid);
-        if engine.shape_styled(&text[..end], size, style).width <= max_w {
-            low = mid;
-        } else {
-            high = mid;
-        }
-    }
-    char_end(text, low.max(1))
-}
-
-fn char_end(text: &str, chars: usize) -> usize {
-    text.char_indices()
-        .nth(chars)
-        .map_or(text.len(), |(index, _)| index)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,21 +266,6 @@ mod tests {
         );
         assert!(lines.len() > 1);
         assert!(lines.iter().all(|line| line.width <= 40.5));
-    }
-
-    #[test]
-    fn a_wide_run_is_chunked_within_the_line_budget() {
-        let mut text = engine();
-        let chunks = split_wide(
-            &mut text,
-            &"中".repeat(200),
-            14.0,
-            TextStyle::normal(Weight::NORMAL),
-            40.0,
-            5,
-        );
-        assert_eq!(chunks.len(), 5);
-        assert!(chunks.iter().all(|chunk| !chunk.is_empty()));
     }
 
     #[test]

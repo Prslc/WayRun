@@ -5,13 +5,12 @@ use cosmic_text::Weight;
 
 use crate::config::FontConfig;
 use crate::markdown::{Block, ListItem, Span};
-use crate::text::{LINE_HEIGHT, Shaped, TextEngine, TextStyle};
+use crate::text::{LINE_HEIGHT, Shaped, TextEngine, TextStyle, split_wide};
 use crate::view::Frame;
 
 use crate::geom::Rect;
 
 use super::DrawCtx;
-use super::preview::PANE_PAD;
 
 #[derive(Clone, Copy)]
 enum Tone {
@@ -209,14 +208,8 @@ impl<'a> Layouter<'a> {
                 let line_height = (size * LINE_HEIGHT).round().max(1.0);
                 let remaining = self.viewport.origin_y + self.viewport.max_h - self.y;
                 let budget = ((remaining / line_height).ceil() as usize).max(1);
-                for chunk in super::preview::split_wide(
-                    self.text,
-                    &token.text,
-                    size,
-                    token.style,
-                    max_line,
-                    budget,
-                ) {
+                for chunk in split_wide(self.text, &token.text, size, token.style, max_line, budget)
+                {
                     pending.push(Pending {
                         text: chunk,
                         style: token.style,
@@ -562,18 +555,18 @@ fn push_word(
     *hard = false;
 }
 
-pub(super) fn draw_markdown(ctx: &mut DrawCtx, pane: Rect, body: &str) {
-    if pane.w <= 0.0 || pane.h <= 0.0 {
+pub(super) fn draw_markdown(ctx: &mut DrawCtx, content: Rect, body: &str) {
+    if content.w <= 0.0 || content.h <= 0.0 {
         return;
     }
     let frame = ctx.frame;
     let canvas = ctx.canvas;
     let document = ctx.markdown.get(body);
     let scale = canvas.scale;
-    let max_w = (canvas.px(pane.w - 2.0 * PANE_PAD)).max(1.0);
-    let max_h = (canvas.px(pane.h - 2.0 * PANE_PAD)).max(1.0);
-    let origin_x = canvas.px(pane.x + PANE_PAD);
-    let origin_y = canvas.px(pane.y + PANE_PAD);
+    let max_w = canvas.px(content.w).max(1.0);
+    let max_h = canvas.px(content.h).max(1.0);
+    let origin_x = canvas.px(content.x);
+    let origin_y = canvas.px(content.y);
     let palette = Palette::of(frame);
     let viewport = Viewport {
         origin_x,
@@ -587,7 +580,7 @@ pub(super) fn draw_markdown(ctx: &mut DrawCtx, pane: Rect, body: &str) {
     let layout = layouter.finish();
 
     for background in &layout.backgrounds {
-        if let Some(rect) = clip_rect(background.rect, pane) {
+        if let Some(rect) = clip_rect(background.rect, content) {
             canvas.fill_round(ctx.pixmap, rect, background.radius, background.color);
         }
     }
@@ -616,7 +609,7 @@ pub(super) fn draw_markdown(ctx: &mut DrawCtx, pane: Rect, body: &str) {
         );
     }
     for strike in &layout.strikes {
-        if let Some(rect) = clip_rect(strike.rect, pane) {
+        if let Some(rect) = clip_rect(strike.rect, content) {
             canvas.fill_round(ctx.pixmap, rect, 0.0, strike.color);
         }
     }

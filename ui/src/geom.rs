@@ -50,6 +50,16 @@ impl Rect {
         }
     }
 
+    /// The rectangle shrunk by `by` on every side, never past zero.
+    pub fn inset(self, by: f32) -> Self {
+        Self {
+            x: self.x + by,
+            y: self.y + by,
+            w: (self.w - 2.0 * by).max(0.0),
+            h: (self.h - 2.0 * by).max(0.0),
+        }
+    }
+
     /// The same rectangle in the target's pixels: a path is built in pixmap
     /// space, so every rect handed to one must be scaled, not just radii.
     pub fn scaled(self, scale: f32) -> Self {
@@ -519,6 +529,10 @@ mod tests {
         assert_eq!((field.x, field.y), (card.x + PAD, card.y + PAD));
         assert_eq!((field.w, field.h), (card.w - 2.0 * PAD, SEARCH_H));
         assert_eq!(l.rows_top(surface), field.bottom() + GAP);
+
+        let inner = card.inset(PAD);
+        assert_eq!((inner.x, inner.w), (card.x + PAD, card.w - 2.0 * PAD));
+        assert_eq!(card.inset(card.w).w, 0.0);
 
         let footer = l.footer_rect(surface, 300.0);
         assert_eq!(footer.bottom(), card.bottom() - PAD);

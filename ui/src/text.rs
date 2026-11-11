@@ -359,6 +359,69 @@ impl TextEngine {
     }
 }
 
+/// Split one over-long token into chunks that each fit `max_w`, on char
+/// boundaries; a single character wider than the column is kept alone.
+pub(crate) fn split_wide(
+    engine: &mut TextEngine,
+    text: &str,
+    size: f32,
+    style: TextStyle,
+    max_w: f32,
+    budget: usize,
+) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() && chunks.len() < budget {
+        let end = longest_prefix(engine, rest, size, style, max_w);
+        chunks.push(rest[..end].to_string());
+        rest = &rest[end..];
+    }
+    chunks
+}
+
+/// The byte end of the longest prefix that fits `max_w`; probing doubles from
+/// a few chars and then binary-searches, so only the cut chunk is shaped.
+fn longest_prefix(
+    engine: &mut TextEngine,
+    text: &str,
+    size: f32,
+    style: TextStyle,
+    max_w: f32,
+) -> usize {
+    let mut low = 0usize;
+    let mut high;
+    let mut probe = 8usize;
+    loop {
+        let end = char_end(text, probe);
+        if engine.shape_styled(&text[..end], size, style).width <= max_w {
+            if end == text.len() {
+                return end;
+            }
+            low = probe;
+            probe *= 2;
+        } else {
+            high = probe;
+            break;
+        }
+    }
+    while high - low > 1 {
+        let mid = low + (high - low) / 2;
+        let end = char_end(text, mid);
+        if engine.shape_styled(&text[..end], size, style).width <= max_w {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    char_end(text, low.max(1))
+}
+
+fn char_end(text: &str, chars: usize) -> usize {
+    text.char_indices()
+        .nth(chars)
+        .map_or(text.len(), |(index, _)| index)
+}
+
 /// Map a configured family onto cosmic-text's generic families; anything else
 /// is a named family.
 fn family_of(family: &str) -> Family<'_> {
@@ -426,6 +489,21 @@ mod tests {
     use super::{LINE_CACHE_MAX, TextEngine, TextStyle, blend, family_of};
     use cosmic_text::{Family, Weight};
     use std::rc::Rc;
+
+    #[test]
+    fn a_wide_run_is_chunked_within_the_line_budget() {
+        let mut engine = TextEngine::with_family("Source Han Sans CN".to_string());
+        let chunks = super::split_wide(
+            &mut engine,
+            &"中".repeat(200),
+            14.0,
+            TextStyle::normal(Weight::NORMAL),
+            40.0,
+            5,
+        );
+        assert_eq!(chunks.len(), 5);
+        assert!(chunks.iter().all(|chunk| !chunk.is_empty()));
+    }
 
     #[test]
     fn generic_families_map_to_their_cosmic_variants() {
