@@ -8,7 +8,9 @@ use crate::geom;
 use crate::text::{Shaped, TextEngine};
 use crate::view::Frame;
 
-use super::canvas::{Canvas, Rect};
+use crate::geom::Rect;
+
+use super::canvas::Canvas;
 
 /// One key hint: a keycap and its label. An empty key is a plain note; an
 /// `effective` label is the action a remembered default makes `Enter` run.
@@ -186,11 +188,10 @@ pub(super) fn draw_footer(
 
     // The footer is the card's last band, so it rides the drawn height rather
     // than jumping ahead to the resting one.
-    let layout = frame.layout;
-    let top = layout.card_top(frame.surface) + frame.card_h - geom::PAD - geom::FOOTER_H;
-    let center_y = top + geom::FOOTER_H / 2.0;
-    let (left, width) = layout.row_band(frame.surface);
-    let right = left + width;
+    let band = frame.layout.footer_rect(frame.surface, frame.card_h);
+    let center_y = band.center_y();
+    let left = band.x;
+    let right = band.right();
     let font_size = frame.font.suggestion();
     let label_size = font_size * canvas.scale;
     let key_size = (font_size - 1.0).max(6.0) * canvas.scale;

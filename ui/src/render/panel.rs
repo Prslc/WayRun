@@ -1,12 +1,11 @@
 use tiny_skia::Pixmap;
 use wayrun_core::wire::IconShape;
 
-use crate::geom;
 use crate::icons::IconCache;
 use crate::text::TextEngine;
 use crate::view::{Body, Frame};
 
-use super::canvas::{Canvas, Rect};
+use super::canvas::Canvas;
 use super::{RowBody, draw_row};
 
 /// The action panel (Shift+Enter): the row's secondary commands in the list
@@ -22,12 +21,10 @@ pub(super) fn draw_actions(
         return;
     };
     let theme = frame.theme;
-    let layout = frame.layout;
-    let (left, width) = layout.row_band(frame.surface);
 
     // The dot marks the entry the row's Enter runs: the remembered default, or
     // the row's own command while none is remembered.
-    let top = layout.rows_top(frame.surface);
+    let layout = frame.layout;
     for (index, action) in panel
         .actions
         .iter()
@@ -36,12 +33,7 @@ pub(super) fn draw_actions(
         .take(layout.max_rows)
     {
         let body = RowBody {
-            rect: Rect {
-                x: left,
-                y: top + (index - panel.first) as f32 * geom::ROW_H,
-                w: width,
-                h: geom::ROW_H,
-            },
+            rect: layout.row_rect(frame.surface, false, index, panel.first),
             selected: index == panel.selected,
             hovered: panel.hovered == Some(index),
             icon: action.icon.as_deref(),

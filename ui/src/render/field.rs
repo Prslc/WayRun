@@ -7,7 +7,9 @@ use tiny_skia::Pixmap;
 use crate::text::TextEngine;
 use crate::view::Frame;
 
-use super::canvas::{Canvas, Rect, TEXT_INSET};
+use crate::geom::Rect;
+
+use super::canvas::{Canvas, TEXT_INSET};
 
 pub(super) fn draw_magnifier(canvas: &Canvas, pixmap: &mut Pixmap, field: Rect, frame: &Frame<'_>) {
     // A 2px circle of radius 6.2 at (9, 9) with a handle to (19, 19) in a 22×22
@@ -139,13 +141,7 @@ pub(super) fn draw_query(
 /// The caret's box and how far the query is scrolled so it fits. The one caret
 /// geometry, shared with the IME cursor rectangle, so the two cannot drift.
 fn caret_box(frame: &Frame<'_>, text: &mut TextEngine) -> (Rect, f32) {
-    let surface = frame.surface;
-    let layout = frame.layout;
-    let field = Rect::field_at(
-        layout.card_x(surface),
-        layout.card_top(surface),
-        layout.card_w(surface),
-    );
+    let field = frame.layout.field_rect(frame.surface);
     let scale = frame.scale;
     let query_size = frame.font.query();
     let before = text.shape(

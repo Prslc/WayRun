@@ -7,7 +7,9 @@ use crate::markdown::MarkdownCache;
 use crate::text::TextEngine;
 use crate::view::{Body, Frame};
 
-use super::canvas::{Canvas, Rect};
+use crate::geom::Rect;
+
+use super::canvas::Canvas;
 use super::{field, footer, list, panel, preview};
 
 pub fn draw(
@@ -32,12 +34,7 @@ pub fn draw(
     let layout = frame.layout;
     let dim_rgb = frame.dim_color();
 
-    let card = Rect {
-        x: layout.card_x(surface),
-        y: layout.card_top(surface),
-        w: layout.card_w(surface),
-        h: frame.card_h,
-    };
+    let card = layout.card_rect(surface, frame.card_h);
 
     // The frame is retained, so a settled frame repaints only the card and
     // leaves the dim in place; an animation or fresh frame repaints it all.
@@ -53,23 +50,8 @@ pub fn draw(
             ],
         );
     } else {
-        // A shrink has to erase the old card's rows too, so the region spans the
-        // union of the previous and current bottoms, not just the current card.
-        // The hairline's antialiased rim reaches a pixel past the card rect:
-        // restore that band too, or each settled repaint accumulates its alpha.
-        const PAD: f32 = 1.0;
-        let base_bottom = card.bottom().max(frame.last_card_bottom);
-        canvas.restore_dim(
-            pixmap,
-            Rect {
-                x: card.x - PAD,
-                y: card.y - PAD,
-                w: card.w + 2.0 * PAD,
-                h: base_bottom - card.y + 2.0 * PAD,
-            },
-            dim,
-            dim_rgb,
-        );
+        let repaint = layout.card_repaint_rect(surface, frame.card_h, frame.last_card_bottom);
+        canvas.restore_dim(pixmap, repaint, dim, dim_rgb);
     }
     mark("clear");
 
@@ -103,7 +85,7 @@ pub fn draw(
     }
 
     mark("card");
-    let field_rect = Rect::field_at(card.x, card.y, card.w);
+    let field_rect = layout.field_rect(surface);
     field::draw_magnifier(&canvas, pixmap, field_rect, frame);
     field::draw_query(&canvas, pixmap, field_rect, frame, text);
     mark("query");

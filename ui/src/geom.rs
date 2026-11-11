@@ -16,6 +16,51 @@ pub const PREVIEW_GAP: f32 = 16.0;
 /// the image and centered, so its body only needs room for a thumbnail.
 const IMAGE_MIN_H: f32 = 200.0;
 const TEXT_MIN_H: f32 = 220.0;
+/// The hairline's antialiased rim reaches one logical pixel past the card rect.
+pub const AA_PAD: f32 = 1.0;
+
+/// A logical rectangle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+impl Rect {
+    pub fn right(self) -> f32 {
+        self.x + self.w
+    }
+
+    pub fn bottom(self) -> f32 {
+        self.y + self.h
+    }
+
+    pub fn center_y(self) -> f32 {
+        self.y + self.h / 2.0
+    }
+
+    pub fn inflate(self, by: f32) -> Self {
+        Self {
+            x: self.x - by,
+            y: self.y - by,
+            w: self.w + 2.0 * by,
+            h: self.h + 2.0 * by,
+        }
+    }
+
+    /// The same rectangle in the target's pixels: a path is built in pixmap
+    /// space, so every rect handed to one must be scaled, not just radii.
+    pub fn scaled(self, scale: f32) -> Self {
+        Self {
+            x: self.x * scale,
+            y: self.y * scale,
+            w: self.w * scale,
+            h: self.h * scale,
+        }
+    }
+}
 
 /// The preview body's shape differs by content, never its column width.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,6 +193,67 @@ impl Layout {
         self.card_top(surface) + PAD + SEARCH_H + GAP
     }
 
+    pub fn card_rect(&self, surface: (u32, u32), card_h: f32) -> Rect {
+        Rect {
+            x: self.card_x(surface),
+            y: self.card_top(surface),
+            w: self.card_w(surface),
+            h: card_h,
+        }
+    }
+
+    /// What a settled repaint restores: the card, the hairline's AA rim, and the
+    /// union of the previous and current bottoms so a shrink erases the old rows.
+    pub fn card_repaint_rect(&self, surface: (u32, u32), card_h: f32, last_bottom: f32) -> Rect {
+        let card = self.card_rect(surface, card_h);
+        let bottom = card.bottom().max(last_bottom);
+        Rect {
+            h: bottom - card.y,
+            ..card
+        }
+        .inflate(AA_PAD)
+    }
+
+    pub fn field_rect(&self, surface: (u32, u32)) -> Rect {
+        Rect {
+            x: self.card_x(surface) + PAD,
+            y: self.card_top(surface) + PAD,
+            w: self.card_w(surface) - 2.0 * PAD,
+            h: SEARCH_H,
+        }
+    }
+
+    /// The footer band, riding the card's drawn height rather than its resting one.
+    pub fn footer_rect(&self, surface: (u32, u32), card_h: f32) -> Rect {
+        let (left, width) = self.row_band(surface);
+        Rect {
+            x: left,
+            y: self.card_top(surface) + card_h - PAD - FOOTER_H,
+            w: width,
+            h: FOOTER_H,
+        }
+    }
+
+    /// A row in the list band, at the window's pitch; motion is the caller's.
+    pub fn row_rect(&self, surface: (u32, u32), split: bool, index: usize, first: usize) -> Rect {
+        let (left, width) = self.list_band(surface, split);
+        Rect {
+            x: left,
+            y: self.row_y(surface, index, first),
+            w: width,
+            h: ROW_H,
+        }
+    }
+
+    fn row_y(&self, surface: (u32, u32), index: usize, first: usize) -> f32 {
+        self.rows_top(surface) + (index - first) as f32 * ROW_H
+    }
+
+    /// The inverse of [`Self::row_y`]: one arithmetic for drawing and hit testing.
+    fn row_index(&self, surface: (u32, u32), first: usize, y: f32) -> usize {
+        first + ((y - self.rows_top(surface)) / ROW_H) as usize
+    }
+
     pub fn list_h(&self, rows: usize) -> f32 {
         (rows as f32 * ROW_H).min(self.max_rows as f32 * ROW_H)
     }
@@ -231,7 +337,7 @@ impl Layout {
             return None;
         }
 
-        let index = first + ((y - top) / ROW_H) as usize;
+        let index = self.row_index(surface, first, y);
         (index < count).then_some(index)
     }
 
@@ -314,7 +420,7 @@ impl Layout {
             return None;
         }
 
-        let index = first + ((y - top) / ROW_H) as usize;
+        let index = self.row_index(surface, first, y);
         (index < rows).then_some(index)
     }
 
@@ -391,6 +497,45 @@ mod tests {
             l.row_at(surface, false, 0, 2, left, top + 2.0 * ROW_H + 1.0),
             None
         );
+    }
+
+    #[test]
+    fn the_rects_match_the_bands_they_describe() {
+        let l = Layout::default();
+        let surface = (1920, 1080);
+
+        let card = l.card_rect(surface, 300.0);
+        assert_eq!(
+            (card.x, card.y, card.w, card.h),
+            (
+                l.card_x(surface),
+                l.card_top(surface),
+                l.card_w(surface),
+                300.0
+            )
+        );
+
+        let field = l.field_rect(surface);
+        assert_eq!((field.x, field.y), (card.x + PAD, card.y + PAD));
+        assert_eq!((field.w, field.h), (card.w - 2.0 * PAD, SEARCH_H));
+        assert_eq!(l.rows_top(surface), field.bottom() + GAP);
+
+        let footer = l.footer_rect(surface, 300.0);
+        assert_eq!(footer.bottom(), card.bottom() - PAD);
+        assert_eq!(footer.h, FOOTER_H);
+
+        // a settled repaint carries the AA rim and the previous bottom
+        let repaint = l.card_repaint_rect(surface, 200.0, card.bottom());
+        assert_eq!((repaint.x, repaint.y), (card.x - AA_PAD, card.y - AA_PAD));
+        assert_eq!(repaint.bottom(), card.bottom() + AA_PAD);
+        assert_eq!(repaint.h, card.h + 2.0 * AA_PAD);
+
+        // the drawn row and the hit test are one arithmetic
+        let left = l.row_band(surface).0;
+        let y = l.row_rect(surface, false, 3, 0).y;
+        assert_eq!(y, l.rows_top(surface) + 3.0 * ROW_H);
+        assert_eq!(l.row_at(surface, false, 0, 10, left, y + 1.0), Some(3));
+        assert_eq!(l.row_at(surface, false, 0, 10, left, y - 1.0), Some(2));
     }
 
     #[test]

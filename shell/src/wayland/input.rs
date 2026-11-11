@@ -328,12 +328,12 @@ impl PointerHandler for Shell {
 
         for event in events {
             let inside_card = {
-                let layout = self.app.layout();
+                let card = self
+                    .app
+                    .layout()
+                    .card_rect(self.app.surface, self.app.card_height());
                 let (x, y) = (event.position.0 as f32, event.position.1 as f32);
-                x >= layout.card_x(self.app.surface)
-                    && x <= layout.card_x(self.app.surface) + layout.card_w(self.app.surface)
-                    && y >= layout.card_top(self.app.surface)
-                    && y <= layout.card_top(self.app.surface) + self.app.card_height()
+                x >= card.x && x <= card.right() && y >= card.y && y <= card.bottom()
             };
 
             match event.kind {

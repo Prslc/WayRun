@@ -2,12 +2,12 @@ use std::time::Instant;
 
 use tiny_skia::Pixmap;
 
-use crate::geom;
+use crate::geom::Rect;
 use crate::icons::IconCache;
 use crate::text::TextEngine;
 use crate::view::{Body, Frame};
 
-use super::canvas::{Canvas, Rect};
+use super::canvas::Canvas;
 use super::{RowBody, draw_row};
 
 pub(super) fn draw_list(
@@ -22,8 +22,7 @@ pub(super) fn draw_list(
         return;
     };
     let layout = frame.layout;
-    let (left, width) = layout.list_band(frame.surface, list.preview.is_some());
-    let top = layout.rows_top(frame.surface);
+    let split = list.preview.is_some();
 
     for (index, row) in list
         .rows
@@ -38,12 +37,11 @@ pub(super) fn draw_list(
             .copied()
             .flatten()
             .map_or((1.0, 0.0), |motion| motion.sample(now));
+        let rect = layout.row_rect(frame.surface, split, index, list.first);
         let body = RowBody {
             rect: Rect {
-                x: left,
-                y: top + (index - list.first) as f32 * geom::ROW_H + offset,
-                w: width,
-                h: geom::ROW_H,
+                y: rect.y + offset,
+                ..rect
             },
             alpha,
             selected: index == list.selected,

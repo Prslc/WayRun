@@ -9,7 +9,9 @@ use crate::markdown::MarkdownCache;
 use crate::text::{LINE_HEIGHT, Shaped, TextEngine, TextStyle};
 use crate::view::{Frame, PreviewView};
 
-use super::canvas::{Canvas, Rect};
+use crate::geom::Rect;
+
+use super::canvas::Canvas;
 
 /// The pane sits inside the body, leaving a small card margin around it.
 const PANE_INSET: f32 = 4.0;

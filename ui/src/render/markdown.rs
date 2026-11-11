@@ -9,7 +9,9 @@ use crate::markdown::{Block, ListItem, MarkdownCache, Span};
 use crate::text::{LINE_HEIGHT, Shaped, TextEngine, TextStyle};
 use crate::view::Frame;
 
-use super::canvas::{Canvas, Rect};
+use crate::geom::Rect;
+
+use super::canvas::Canvas;
 use super::preview::PANE_PAD;
 
 #[derive(Clone, Copy)]

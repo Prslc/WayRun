@@ -7,7 +7,9 @@ use crate::icons::{IconCache, IconDraw};
 use crate::text::TextEngine;
 use crate::view::Frame;
 
-use super::canvas::{Canvas, ENTER_GLYPH, Rect, SUBMENU_GLYPH};
+use crate::geom::Rect;
+
+use super::canvas::{Canvas, ENTER_GLYPH, SUBMENU_GLYPH};
 
 /// The highlight shared by the result list and the action panel: a primary tint
 /// for the selected or hovered row, plus the accent bar on the selected one.

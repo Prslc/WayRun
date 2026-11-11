@@ -3,6 +3,7 @@ use tiny_skia::{
 };
 
 use crate::geom;
+use crate::geom::Rect;
 
 // The magnifier's box, the gap after it and the input inset.
 const MAGNIFIER_BOX: f32 = 22.0;
@@ -190,51 +191,6 @@ impl Canvas {
             Transform::identity(),
             None,
         );
-    }
-}
-
-/// A logical rectangle.
-#[derive(Clone, Copy)]
-pub struct Rect {
-    pub x: f32,
-    pub y: f32,
-    pub w: f32,
-    pub h: f32,
-}
-
-impl Rect {
-    pub fn right(self) -> f32 {
-        self.x + self.w
-    }
-
-    pub fn bottom(self) -> f32 {
-        self.y + self.h
-    }
-
-    pub fn center_y(self) -> f32 {
-        self.y + self.h / 2.0
-    }
-
-    /// The search field inside a card at `(x, y)` of width `w`, inset by `PAD`
-    /// and `SEARCH_H` tall; the IME's `caret_box` shares it so they cannot drift.
-    pub fn field_at(x: f32, y: f32, w: f32) -> Self {
-        Self {
-            x: x + geom::PAD,
-            y: y + geom::PAD,
-            w: w - 2.0 * geom::PAD,
-            h: geom::SEARCH_H,
-        }
-    }
-
-    /// The same rectangle in the target's pixels: `round_rect` works in pixmap
-    /// space, so every rect passed to it must be scaled, not just radii.
-    pub fn scaled(self, scale: f32) -> Self {
-        Self {
-            x: self.x * scale,
-            y: self.y * scale,
-            w: self.w * scale,
-            h: self.h * scale,
-        }
     }
 }
 

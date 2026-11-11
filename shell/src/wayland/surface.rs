@@ -218,16 +218,20 @@ impl Shell {
         let damage = if full {
             Damage::FULL
         } else {
-            // The card damage carries the hairline's antialiased rim, one
-            // logical pixel beyond the card rect, like the renderer's restore.
-            let pad = (scale.ceil() as i32).max(1);
-            let base_bottom = new_bottom.max(self.app.last_card_bottom);
-            Damage::rect(
-                (layout.card_x(surface_size) * scale).floor() as i32 - pad,
-                (top * scale).floor() as i32 - pad,
-                (layout.card_w(surface_size) * scale).ceil() as i32 + 2 * pad,
-                ((base_bottom - top) * scale).ceil() as i32 + 3 * pad,
-            )
+            let repaint = layout.card_repaint_rect(
+                surface_size,
+                self.app.card_height(),
+                self.app.last_card_bottom,
+            );
+            let (x0, y0) = (
+                (repaint.x * scale).floor() as i32,
+                (repaint.y * scale).floor() as i32,
+            );
+            let (x1, y1) = (
+                (repaint.right() * scale).ceil() as i32,
+                (repaint.bottom() * scale).ceil() as i32,
+            );
+            Damage::rect(x0, y0, x1 - x0, y1 - y0)
         };
         self.pending_damage.add(damage);
         self.app.last_card_bottom = new_bottom;
