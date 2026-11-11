@@ -27,6 +27,7 @@ pub struct ListView<'a> {
 }
 
 /// What the split view shows beside the list.
+#[derive(Clone, Copy)]
 pub enum PreviewView<'a> {
     Image { path: &'a str },
     Text { text: &'a str },
@@ -113,11 +114,6 @@ impl Frame<'_> {
     /// A resolved surface colour, whose own inline alpha rides the entrance.
     pub fn fade_rgba(&self, color: [u8; 4]) -> [u8; 4] {
         self.fade([color[0], color[1], color[2]], color[3] as f32 / 255.0)
-    }
-
-    /// [`Self::fade`] with a per-row alpha on top of the entrance.
-    pub fn fade_scaled(&self, color: [u8; 3], alpha: f32, scale: f32) -> [u8; 4] {
-        self.fade(color, alpha * scale)
     }
 
     /// [`Self::fade_rgba`] with a per-row alpha on top of the entrance.

@@ -7,10 +7,9 @@ use crate::markdown::MarkdownCache;
 use crate::text::TextEngine;
 use crate::view::{Body, Frame};
 
-use crate::geom::Rect;
-
+use super::DrawCtx;
 use super::canvas::Canvas;
-use super::{field, footer, list, panel, preview};
+use super::{card, field, footer, list, panel, preview};
 
 pub fn draw(
     pixmap: &mut Pixmap,
@@ -29,19 +28,27 @@ pub fn draw(
         }
     };
     mark("start");
-    let canvas = Canvas { scale: frame.scale };
-    let surface = frame.surface;
-    let layout = frame.layout;
-    let dim_rgb = frame.dim_color();
+    let mut ctx = DrawCtx {
+        canvas: Canvas { scale: frame.scale },
+        pixmap,
+        text,
+        icons,
+        markdown,
+        now,
+        frame,
+    };
 
-    let card = layout.card_rect(surface, frame.card_h);
+    let surface = ctx.frame.surface;
+    let layout = ctx.frame.layout;
+    let dim_rgb = ctx.frame.dim_color();
+    let card = layout.card_rect(surface, ctx.frame.card_h);
 
     // The frame is retained, so a settled frame repaints only the card and
     // leaves the dim in place; an animation or fresh frame repaints it all.
-    let dim = frame.dim_alpha();
+    let dim = ctx.frame.dim_alpha();
     if full {
-        canvas.fill_all(
-            pixmap,
+        ctx.canvas.fill_all(
+            ctx.pixmap,
             [
                 dim_rgb[0],
                 dim_rgb[1],
@@ -50,80 +57,45 @@ pub fn draw(
             ],
         );
     } else {
-        let repaint = layout.card_repaint_rect(surface, frame.card_h, frame.last_card_bottom);
-        canvas.restore_dim(pixmap, repaint, dim, dim_rgb);
+        let repaint =
+            layout.card_repaint_rect(surface, ctx.frame.card_h, ctx.frame.last_card_bottom);
+        ctx.canvas.restore_dim(ctx.pixmap, repaint, dim, dim_rgb);
     }
     mark("clear");
 
-    // The card: a translucent fill with a hairline. The hairline is a *ring*,
-    // not a base fill, which would raise the interior's alpha.
-    let border = frame.surfaces.hairline_width;
-    canvas.fill_round(
-        pixmap,
-        Rect {
-            x: card.x + border,
-            y: card.y + border,
-            w: card.w - 2.0 * border,
-            h: card.h - 2.0 * border,
-        },
-        layout.radius - border,
-        frame.fade_rgba(frame.surfaces.card),
-    );
-    if border > 0.0 {
-        canvas.stroke_round(
-            pixmap,
-            Rect {
-                x: card.x + border / 2.0,
-                y: card.y + border / 2.0,
-                w: card.w - border,
-                h: card.h - border,
-            },
-            layout.hairline_radius(border),
-            border,
-            frame.fade_rgba(frame.surfaces.hairline),
-        );
-    }
-
+    card::draw(&mut ctx);
     mark("card");
     let field_rect = layout.field_rect(surface);
-    field::draw_magnifier(&canvas, pixmap, field_rect, frame);
-    field::draw_query(&canvas, pixmap, field_rect, frame, text);
+    field::draw_magnifier(&mut ctx, field_rect);
+    field::draw_query(&mut ctx, field_rect);
     mark("query");
 
-    match &frame.body {
-        Body::Panel(_) => panel::draw_actions(&canvas, pixmap, frame, text, icons),
+    match &ctx.frame.body {
+        Body::Panel(_) => panel::draw_actions(&mut ctx),
         Body::List(view) if !view.rows.is_empty() => {
-            list::draw_list(&canvas, pixmap, frame, text, icons, now);
-            if let Some(preview) = &view.preview {
-                preview::draw_preview(
-                    &canvas,
-                    pixmap,
-                    frame,
-                    preview,
-                    preview::PreviewCaches {
-                        text: &mut *text,
-                        markdown: &mut *markdown,
-                        icons: &mut *icons,
-                    },
-                );
+            let preview = view.preview;
+            list::draw_list(&mut ctx);
+            if let Some(preview) = preview {
+                preview::draw_preview(&mut ctx, &preview);
             }
         }
         Body::List(_) => {}
     }
     mark("list");
 
-    if layout.footer && layout.footer_fits(frame.card_h) {
-        footer::draw_footer(&canvas, pixmap, frame, text);
+    if layout.footer && layout.footer_fits(ctx.frame.card_h) {
+        footer::draw_footer(&mut ctx);
         mark("footer");
     }
 
     // A growing payload lays rows out immediately while the height animates, so
     // the band below the card's bottom belongs to the backdrop.
-    let resting = layout.card_top(surface) + frame.content_h;
+    let resting = layout.card_top(surface) + ctx.frame.content_h;
     let bottom = card.y + card.h;
     let mut band = None;
     if full && bottom < resting {
-        canvas.restore_dim_below(pixmap, bottom, surface, dim, dim_rgb);
+        ctx.canvas
+            .restore_dim_below(ctx.pixmap, bottom, surface, dim, dim_rgb);
         band = Some(bottom);
     }
 

@@ -146,7 +146,8 @@ impl Surfaces {
     }
 }
 
-fn tint(rgb: [u8; 3], alpha: f32) -> [u8; 4] {
+/// A base role at an explicit alpha, the vocabulary a component's style uses.
+pub(crate) fn tint(rgb: [u8; 3], alpha: f32) -> [u8; 4] {
     [rgb[0], rgb[1], rgb[2], alpha_u8(alpha)]
 }
 

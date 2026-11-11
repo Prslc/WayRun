@@ -2,26 +2,10 @@ use tiny_skia::{
     BlendMode, Color, FillRule, Paint, Path, PathBuilder, Pixmap, Shader, Stroke, Transform,
 };
 
-use crate::geom;
 use crate::geom::Rect;
 
-// The magnifier's box, the gap after it and the input inset.
-const MAGNIFIER_BOX: f32 = 22.0;
-const MAGNIFIER_GAP: f32 = 12.0;
-const INPUT_PAD: f32 = 8.0;
-
-/// The search field's inner insets (the card's `PAD` and the magnifier column);
-/// the IME needs it to place the caret rectangle.
-pub const TEXT_INSET: f32 = geom::PAD + MAGNIFIER_BOX + MAGNIFIER_GAP + INPUT_PAD;
-
-/// The return hint uses the covered `⏎` form rather than `↵`, which the shaping
-/// family may lack and then fall back widely.
-pub const ENTER_GLYPH: &str = "⏎";
-
-/// A group entry's trailing mark: Enter opens a further panel level.
-pub const SUBMENU_GLYPH: &str = "›";
-
 /// Everything logical→physical scaling goes through here.
+#[derive(Clone, Copy)]
 pub struct Canvas {
     pub scale: f32,
 }

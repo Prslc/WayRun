@@ -2,16 +2,15 @@ use std::mem;
 use std::rc::Rc;
 
 use cosmic_text::Weight;
-use tiny_skia::Pixmap;
 
 use crate::config::FontConfig;
-use crate::markdown::{Block, ListItem, MarkdownCache, Span};
+use crate::markdown::{Block, ListItem, Span};
 use crate::text::{LINE_HEIGHT, Shaped, TextEngine, TextStyle};
 use crate::view::Frame;
 
 use crate::geom::Rect;
 
-use super::canvas::Canvas;
+use super::DrawCtx;
 use super::preview::PANE_PAD;
 
 #[derive(Clone, Copy)]
@@ -563,19 +562,13 @@ fn push_word(
     *hard = false;
 }
 
-pub(super) fn draw_markdown(
-    canvas: &Canvas,
-    pixmap: &mut Pixmap,
-    frame: &Frame<'_>,
-    pane: Rect,
-    body: &str,
-    text: &mut TextEngine,
-    cache: &mut MarkdownCache,
-) {
+pub(super) fn draw_markdown(ctx: &mut DrawCtx, pane: Rect, body: &str) {
     if pane.w <= 0.0 || pane.h <= 0.0 {
         return;
     }
-    let document = cache.get(body);
+    let frame = ctx.frame;
+    let canvas = ctx.canvas;
+    let document = ctx.markdown.get(body);
     let scale = canvas.scale;
     let max_w = (canvas.px(pane.w - 2.0 * PANE_PAD)).max(1.0);
     let max_h = (canvas.px(pane.h - 2.0 * PANE_PAD)).max(1.0);
@@ -589,21 +582,21 @@ pub(super) fn draw_markdown(
         max_h,
         scale,
     };
-    let mut layouter = Layouter::new(text, frame.font.clone(), palette, viewport);
+    let mut layouter = Layouter::new(ctx.text, frame.font.clone(), palette, viewport);
     layouter.blocks(&document.blocks, 0.0, Tone::Text);
     let layout = layouter.finish();
 
     for background in &layout.backgrounds {
         if let Some(rect) = clip_rect(background.rect, pane) {
-            canvas.fill_round(pixmap, rect, background.radius, background.color);
+            canvas.fill_round(ctx.pixmap, rect, background.radius, background.color);
         }
     }
 
     let clip = [origin_x, origin_y, max_w, max_h];
     for line in &layout.lines {
         for run in &line.runs {
-            text.draw(
-                pixmap,
+            ctx.text.draw(
+                ctx.pixmap,
                 &run.shaped,
                 palette.tone(run.tone),
                 run.x,
@@ -613,8 +606,8 @@ pub(super) fn draw_markdown(
         }
     }
     for run in &layout.extras {
-        text.draw(
-            pixmap,
+        ctx.text.draw(
+            ctx.pixmap,
             &run.shaped,
             palette.tone(run.tone),
             run.x,
@@ -624,7 +617,7 @@ pub(super) fn draw_markdown(
     }
     for strike in &layout.strikes {
         if let Some(rect) = clip_rect(strike.rect, pane) {
-            canvas.fill_round(pixmap, rect, 0.0, strike.color);
+            canvas.fill_round(ctx.pixmap, rect, 0.0, strike.color);
         }
     }
 }
