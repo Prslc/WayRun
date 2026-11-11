@@ -15,6 +15,11 @@ impl Canvas {
         value * self.scale
     }
 
+    /// A physical length back in the logical pixels a layout works in.
+    pub fn unpx(&self, value: f32) -> f32 {
+        value / self.scale
+    }
+
     pub fn color(rgba: [u8; 4]) -> Color {
         Color::from_rgba8(rgba[0], rgba[1], rgba[2], rgba[3])
     }
@@ -120,6 +125,14 @@ impl Canvas {
 
     pub fn fill_round(&self, pixmap: &mut Pixmap, rect: Rect, radius: f32, rgba: [u8; 4]) {
         if let Some(path) = round_rect(rect.scaled(self.scale), self.px(radius)) {
+            self.fill_path(pixmap, &path, rgba);
+        }
+    }
+
+    /// A rounded fill whose rect is already in pixels, for a layout that works
+    /// in physical space; the radius stays logical.
+    pub fn fill_round_px(&self, pixmap: &mut Pixmap, rect: Rect, radius: f32, rgba: [u8; 4]) {
+        if let Some(path) = round_rect(rect, self.px(radius)) {
             self.fill_path(pixmap, &path, rgba);
         }
     }

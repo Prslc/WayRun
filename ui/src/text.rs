@@ -10,7 +10,13 @@ use tiny_skia::Pixmap;
 use crate::config::FontConfig;
 
 /// The card's line height as a multiple of the font size.
-pub const LINE_HEIGHT: f32 = 1.2;
+const LINE_HEIGHT: f32 = 1.2;
+
+/// The line-box height for a font `size`, rounded to a pixel; the unit is the
+/// caller's, so the same helper serves a logical style and a physical shape.
+pub fn line_height(size: f32) -> f32 {
+    (size * LINE_HEIGHT).round().max(1.0)
+}
 
 /// The weight/slant/family a shaped line uses; colour is not part of it, so a
 /// theme change never invalidates the cache.
@@ -33,12 +39,12 @@ impl TextStyle {
 
 pub struct Shaped {
     buffer: Buffer,
-    /// The line's advance width, for the caret and right-aligned text.
+    /// The line's advance width, in physical pixels.
     pub width: f32,
-    /// Line-box height (`size * LINE_HEIGHT`).
+    /// Line-box height (`size * LINE_HEIGHT`), in physical pixels.
     pub height: f32,
-    /// The line-box top to the baseline (the largest `run.line_y`), so runs of
-    /// different families can share one baseline.
+    /// The line-box top to the baseline, in physical pixels (the largest
+    /// `run.line_y`), so runs of different families can share one baseline.
     pub baseline: f32,
 }
 
@@ -122,12 +128,13 @@ impl TextEngine {
         self.lines.clear();
     }
 
-    /// Shape one unwrapped line, cached by text/size/style; every later frame
-    /// that draws it is a hash lookup.
+    /// Shape one unwrapped line at `size` physical pixels, cached by
+    /// text/size/style; every later frame that draws it is a hash lookup.
     pub fn shape(&mut self, text: &str, size: f32, weight: Weight) -> Rc<Shaped> {
         self.shape_styled(text, size, TextStyle::normal(weight))
     }
 
+    /// [`Self::shape`] with an explicit style; `size` is in physical pixels.
     pub fn shape_styled(&mut self, text: &str, size: f32, style: TextStyle) -> Rc<Shaped> {
         let key = LineKey::Plain(ShapeKey::new(text, size, style));
         if let Some(shaped) = self.touch(&key) {
@@ -173,8 +180,8 @@ impl TextEngine {
     }
 
     fn shape_uncached(&mut self, text: &str, size: f32, style: TextStyle) -> Shaped {
-        let line_height = (size * LINE_HEIGHT).round();
-        let mut buffer = Buffer::new(&mut self.font_system, Metrics::new(size, line_height));
+        let metrics = line_height(size);
+        let mut buffer = Buffer::new(&mut self.font_system, Metrics::new(size, metrics));
         // No constraints: a single line, whatever its width (long titles are
         // clipped by the caller).
         buffer.set_size(&mut self.font_system, None, None);
@@ -205,13 +212,13 @@ impl TextEngine {
         Shaped {
             buffer,
             width,
-            height: line_height,
+            height: metrics,
             baseline,
         }
     }
 
-    /// Shape one line elided with `…` to fit `max_width`, keyed by all four
-    /// inputs so a redraw re-uses it; only an overlong line pays the search.
+    /// Shape one line elided with `…` to fit `max_width` physical pixels, keyed by
+    /// all four inputs so a redraw re-uses it; only an overlong line pays the search.
     pub fn fit(&mut self, text: &str, size: f32, weight: Weight, max_width: f32) -> Rc<Shaped> {
         self.fit_styled(text, size, TextStyle::normal(weight), max_width)
     }
@@ -503,6 +510,13 @@ mod tests {
         );
         assert_eq!(chunks.len(), 5);
         assert!(chunks.iter().all(|chunk| !chunk.is_empty()));
+    }
+
+    #[test]
+    fn the_line_height_helper_matches_a_shaped_box() {
+        let mut engine = TextEngine::with_family("Source Han Sans CN".to_string());
+        let shaped = engine.shape("line", 14.0, Weight::NORMAL);
+        assert_eq!(super::line_height(14.0), shaped.height);
     }
 
     #[test]

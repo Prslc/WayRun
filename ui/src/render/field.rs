@@ -4,7 +4,7 @@ use cosmic_text::Weight;
 use rust_i18n::t;
 use tiny_skia::Pixmap;
 
-use crate::text::TextEngine;
+use crate::text::{TextEngine, line_height};
 use crate::theme::tint;
 use crate::view::Frame;
 
@@ -95,7 +95,7 @@ pub(super) fn draw_query(ctx: &mut DrawCtx, field: Rect) {
     let placeholder = frame.field.query.is_empty() && frame.field.preedit.is_none();
     if placeholder {
         let shaped = ctx.text.shape(placeholder_text(), size, Weight::MEDIUM);
-        let top = field.center_y() - shaped.height / (2.0 * canvas.scale);
+        let top = field.center_y() - canvas.unpx(shaped.height) / 2.0;
         ctx.text.draw(
             ctx.pixmap,
             &shaped,
@@ -109,7 +109,7 @@ pub(super) fn draw_query(ctx: &mut DrawCtx, field: Rect) {
 
     let query = frame.field.query;
     let shaped = ctx.text.shape(query, size, Weight::MEDIUM);
-    let top = field.center_y() - shaped.height / (2.0 * canvas.scale);
+    let top = field.center_y() - canvas.unpx(shaped.height) / 2.0;
     // the drawn caret and the rectangle the IME is told about are one geometry
     let (caret, shift) = caret_box(frame, ctx.text);
 
@@ -118,8 +118,8 @@ pub(super) fn draw_query(ctx: &mut DrawCtx, field: Rect) {
     if let Some((start, end)) = frame.field.selection {
         let from = ctx.text.shape(&query[..start], size, Weight::MEDIUM);
         let to = ctx.text.shape(&query[..end], size, Weight::MEDIUM);
-        let left = (x + from.width / canvas.scale - shift).max(x);
-        let right = (x + to.width / canvas.scale - shift).min(x + width);
+        let left = (x + canvas.unpx(from.width) - shift).max(x);
+        let right = (x + canvas.unpx(to.width) - shift).min(x + width);
         if right > left {
             canvas.fill_rect(
                 ctx.pixmap,
@@ -151,7 +151,7 @@ pub(super) fn draw_query(ctx: &mut DrawCtx, field: Rect) {
             x: caret.x,
             y: field.center_y() - 14.0,
             // a long composition is cut at the field's edge, not over the toolbar
-            w: (x + width - caret.x).clamp(0.0, shaped.width / canvas.scale + 1.0),
+            w: (x + width - caret.x).clamp(0.0, canvas.unpx(shaped.width) + 1.0),
             h: 28.0,
         };
         canvas.fill_rect(ctx.pixmap, quad, frame.fade_rgba(style.preedit_quad));
@@ -171,6 +171,7 @@ pub(super) fn draw_query(ctx: &mut DrawCtx, field: Rect) {
 fn caret_box(frame: &Frame<'_>, text: &mut TextEngine) -> (Rect, f32) {
     let field = frame.layout.field_rect(frame.surface);
     let scale = frame.scale;
+    let canvas = Canvas { scale };
     let query_size = frame.font.query();
     let before = text.shape(
         &frame.field.query[..frame.field.caret],
@@ -178,13 +179,13 @@ fn caret_box(frame: &Frame<'_>, text: &mut TextEngine) -> (Rect, f32) {
         Weight::MEDIUM,
     );
     let area = text_area(field);
-    let shift = scroll_for(area.0 + before.width / scale, area);
+    let shift = scroll_for(area.0 + canvas.unpx(before.width), area);
 
     // The caret is 1px wide at the *line box* height, not at the font size.
-    let line_height = (query_size * crate::text::LINE_HEIGHT).round();
+    let line_height = line_height(query_size);
     (
         Rect {
-            x: area.0 + before.width / scale - shift,
+            x: area.0 + canvas.unpx(before.width) - shift,
             y: field.center_y() - line_height / 2.0,
             w: 1.0,
             h: line_height,

@@ -102,7 +102,7 @@ pub struct Frame<'a> {
 impl Frame<'_> {
     /// A card-content colour at `alpha`, scaled by the entrance fade: the whole
     /// card arrives as one unit and the first frame really is invisible.
-    pub fn fade(&self, color: [u8; 3], alpha: f32) -> [u8; 4] {
+    fn fade(&self, color: [u8; 3], alpha: f32) -> [u8; 4] {
         [
             color[0],
             color[1],

@@ -151,8 +151,8 @@ fn draw_label_chip(ctx: &mut DrawCtx, shaped: &Shaped, x: f32, center_y: f32) {
     let canvas = ctx.canvas;
     let frame = ctx.frame;
     let style = Style::of(frame);
-    let width = chip_w(shaped.width / canvas.scale);
-    let height = shaped.height / canvas.scale;
+    let width = chip_w(canvas.unpx(shaped.width));
+    let height = canvas.unpx(shaped.height);
     let cap_h = chip_h(height);
     canvas.fill_round(
         ctx.pixmap,
@@ -224,7 +224,7 @@ pub(super) fn draw_footer(ctx: &mut DrawCtx) {
         (!count.is_empty()).then(|| ctx.text.shape(&count, label_size, Weight::NORMAL));
     let count_cap_w = count_shaped
         .as_ref()
-        .map_or(0.0, |shaped| chip_w(shaped.width / canvas.scale));
+        .map_or(0.0, |shaped| chip_w(canvas.unpx(shaped.width)));
     let limit = right
         - count_cap_w
         - if count_shaped.is_some() {
@@ -243,7 +243,7 @@ pub(super) fn draw_footer(ctx: &mut DrawCtx) {
         }
 
         let key = ctx.text.shape(hint.key, key_size, Weight::NORMAL);
-        let key_w = key.width / canvas.scale;
+        let key_w = canvas.unpx(key.width);
         let cap_w = chip_w(key_w);
         // An action name is arbitrary, so it is elided to the room left instead
         // of dropping the whole hint the way a fixed label does.
@@ -258,8 +258,8 @@ pub(super) fn draw_footer(ctx: &mut DrawCtx) {
         } else {
             ctx.text.shape(&hint.label, label_size, Weight::NORMAL)
         };
-        let label_w = label.width / canvas.scale;
-        let cap_h = chip_h(key.height / canvas.scale);
+        let label_w = canvas.unpx(label.width);
+        let cap_h = chip_h(canvas.unpx(key.height));
         if x + cap_w + KEY_LABEL_GAP + label_w > limit {
             break;
         }
@@ -281,7 +281,7 @@ pub(super) fn draw_footer(ctx: &mut DrawCtx) {
             &key,
             frame.fade_rgba(style.key),
             canvas.px(x + KEYCAP_PAD_X),
-            canvas.px(center_y - key.height / canvas.scale / 2.0),
+            canvas.px(center_y - canvas.unpx(key.height) / 2.0),
             None,
         );
         ctx.text.draw(
@@ -289,7 +289,7 @@ pub(super) fn draw_footer(ctx: &mut DrawCtx) {
             &label,
             frame.fade_rgba(style.label),
             canvas.px(x + cap_w + KEY_LABEL_GAP),
-            canvas.px(center_y - label.height / canvas.scale / 2.0),
+            canvas.px(center_y - canvas.unpx(label.height) / 2.0),
             None,
         );
         x += cap_w + KEY_LABEL_GAP + label_w + ITEM_GAP;
@@ -303,8 +303,8 @@ pub(super) fn draw_footer(ctx: &mut DrawCtx) {
             let shaped = ctx
                 .text
                 .fit(title, label_size, Weight::BOLD, room * canvas.scale);
-            let width = shaped.width / canvas.scale;
-            let height = shaped.height / canvas.scale;
+            let width = canvas.unpx(shaped.width);
+            let height = canvas.unpx(shaped.height);
             ctx.text.draw(
                 ctx.pixmap,
                 &shaped,
@@ -317,7 +317,7 @@ pub(super) fn draw_footer(ctx: &mut DrawCtx) {
     }
 
     if let Some(shaped) = &count_shaped {
-        let x = right - chip_w(shaped.width / canvas.scale);
+        let x = right - chip_w(canvas.unpx(shaped.width));
         draw_label_chip(ctx, shaped, x, center_y);
     }
 }

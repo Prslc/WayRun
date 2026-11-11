@@ -193,14 +193,14 @@ pub(super) fn draw_row(ctx: &mut DrawCtx, body: &RowBody<'_>) {
     });
     let enter_w = enter
         .as_ref()
-        .map_or(0.0, |shaped| shaped.width / canvas.scale + 12.0);
+        .map_or(0.0, |shaped| canvas.unpx(shaped.width) + 12.0);
     let chevron = body.expand.then(|| {
         ctx.text
             .shape(SUBMENU_GLYPH, 13.0 * canvas.scale, Weight::NORMAL)
     });
     let chevron_w = chevron
         .as_ref()
-        .map_or(0.0, |shaped| shaped.width / canvas.scale + 12.0);
+        .map_or(0.0, |shaped| canvas.unpx(shaped.width) + 12.0);
     let marker_w = if body.default_marker { 12.0 } else { 0.0 };
     let labels_max = (rect.right() - 10.0 - labels_x - enter_w - chevron_w - marker_w).max(0.0);
 
@@ -214,7 +214,7 @@ pub(super) fn draw_row(ctx: &mut DrawCtx, body: &RowBody<'_>) {
         },
         labels_max * canvas.scale,
     );
-    let title_h = title.height / canvas.scale;
+    let title_h = canvas.unpx(title.height);
     let summary = body.summary.map(|summary| {
         ctx.text.fit(
             summary,
@@ -225,7 +225,7 @@ pub(super) fn draw_row(ctx: &mut DrawCtx, body: &RowBody<'_>) {
     });
     let summary_h = summary
         .as_ref()
-        .map_or(0.0, |shaped| shaped.height / canvas.scale);
+        .map_or(0.0, |shaped| canvas.unpx(shaped.height));
 
     // The labels column holds title + 2px + summary, centred in the row.
     let block = title_h

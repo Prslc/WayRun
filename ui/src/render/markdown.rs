@@ -5,7 +5,8 @@ use cosmic_text::Weight;
 
 use crate::config::FontConfig;
 use crate::markdown::{Block, ListItem, Span};
-use crate::text::{LINE_HEIGHT, Shaped, TextEngine, TextStyle, split_wide};
+use crate::text::{Shaped, TextEngine, TextStyle, line_height, split_wide};
+use crate::theme::tint;
 use crate::view::Frame;
 
 use crate::geom::Rect;
@@ -33,14 +34,15 @@ struct Palette {
 
 impl Palette {
     fn of(frame: &Frame<'_>) -> Self {
+        let fg = frame.theme.fg;
         Self {
-            text: frame.fade(frame.theme.fg, 0.85),
-            heading: frame.fade(frame.theme.fg, 1.0),
-            accent: frame.fade_rgba(frame.surfaces.accent),
-            muted: frame.fade_rgba(frame.surfaces.summary),
-            hover: frame.fade_rgba(frame.surfaces.hover),
-            bar: frame.fade_rgba(frame.surfaces.muted),
-            rule: frame.fade_rgba(frame.surfaces.hairline),
+            text: tint(fg, 0.85),
+            heading: tint(fg, 1.0),
+            accent: frame.surfaces.accent,
+            muted: frame.surfaces.summary,
+            hover: frame.surfaces.hover,
+            bar: frame.surfaces.muted,
+            rule: frame.surfaces.hairline,
         }
     }
 
@@ -54,6 +56,8 @@ impl Palette {
     }
 }
 
+/// The layouter works in physical pixels, so shaping metrics apply directly;
+/// the content rect is converted to them once, at the draw entry.
 #[derive(Clone, Copy)]
 struct Viewport {
     origin_x: f32,
@@ -205,9 +209,9 @@ impl<'a> Layouter<'a> {
                 if !pending.is_empty() {
                     self.flush(&mut pending, size);
                 }
-                let line_height = (size * LINE_HEIGHT).round().max(1.0);
+                let line_h = line_height(size);
                 let remaining = self.viewport.origin_y + self.viewport.max_h - self.y;
-                let budget = ((remaining / line_height).ceil() as usize).max(1);
+                let budget = ((remaining / line_h).ceil() as usize).max(1);
                 for chunk in split_wide(self.text, &token.text, size, token.style, max_line, budget)
                 {
                     pending.push(Pending {
@@ -410,28 +414,16 @@ impl<'a> Layouter<'a> {
     }
 
     fn backgrounds(&mut self, x: f32, y: f32, w: f32, h: f32, color: [u8; 4], radius: f32) {
-        let scale = self.viewport.scale;
         self.layout.backgrounds.push(Background {
-            rect: Rect {
-                x: x / scale,
-                y: y / scale,
-                w: w / scale,
-                h: h / scale,
-            },
+            rect: Rect { x, y, w, h },
             color,
             radius,
         });
     }
 
     fn strike(&mut self, x: f32, y: f32, w: f32, h: f32, color: [u8; 4]) {
-        let scale = self.viewport.scale;
         self.layout.strikes.push(Background {
-            rect: Rect {
-                x: x / scale,
-                y: y / scale,
-                w: w / scale,
-                h: h / scale,
-            },
+            rect: Rect { x, y, w, h },
             color,
             radius: 0.0,
         });
@@ -567,6 +559,12 @@ pub(super) fn draw_markdown(ctx: &mut DrawCtx, content: Rect, body: &str) {
     let max_h = canvas.px(content.h).max(1.0);
     let origin_x = canvas.px(content.x);
     let origin_y = canvas.px(content.y);
+    let clip_content = Rect {
+        x: origin_x,
+        y: origin_y,
+        w: max_w,
+        h: max_h,
+    };
     let palette = Palette::of(frame);
     let viewport = Viewport {
         origin_x,
@@ -580,8 +578,13 @@ pub(super) fn draw_markdown(ctx: &mut DrawCtx, content: Rect, body: &str) {
     let layout = layouter.finish();
 
     for background in &layout.backgrounds {
-        if let Some(rect) = clip_rect(background.rect, content) {
-            canvas.fill_round(ctx.pixmap, rect, background.radius, background.color);
+        if let Some(rect) = clip_rect(background.rect, clip_content) {
+            canvas.fill_round_px(
+                ctx.pixmap,
+                rect,
+                background.radius,
+                frame.fade_rgba(background.color),
+            );
         }
     }
 
@@ -591,7 +594,7 @@ pub(super) fn draw_markdown(ctx: &mut DrawCtx, content: Rect, body: &str) {
             ctx.text.draw(
                 ctx.pixmap,
                 &run.shaped,
-                palette.tone(run.tone),
+                frame.fade_rgba(palette.tone(run.tone)),
                 run.x,
                 run.top,
                 Some(clip),
@@ -602,15 +605,15 @@ pub(super) fn draw_markdown(ctx: &mut DrawCtx, content: Rect, body: &str) {
         ctx.text.draw(
             ctx.pixmap,
             &run.shaped,
-            palette.tone(run.tone),
+            frame.fade_rgba(palette.tone(run.tone)),
             run.x,
             run.top,
             Some(clip),
         );
     }
     for strike in &layout.strikes {
-        if let Some(rect) = clip_rect(strike.rect, content) {
-            canvas.fill_round(ctx.pixmap, rect, 0.0, strike.color);
+        if let Some(rect) = clip_rect(strike.rect, clip_content) {
+            canvas.fill_round_px(ctx.pixmap, rect, 0.0, frame.fade_rgba(strike.color));
         }
     }
 }

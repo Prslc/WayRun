@@ -5,7 +5,7 @@ use wayrun_core::wire::IconShape;
 
 use crate::geom::Rect;
 use crate::icons::IconDraw;
-use crate::text::{LINE_HEIGHT, Shaped, TextEngine, TextStyle, split_wide};
+use crate::text::{Shaped, TextEngine, TextStyle, line_height, split_wide};
 use crate::theme::tint;
 use crate::view::{Frame, PreviewView};
 
@@ -142,7 +142,7 @@ fn draw_text(ctx: &mut DrawCtx, content: Rect, body: &str) {
     let width = content.w.max(1.0);
     let height = content.h.max(1.0);
     let size = frame.font.title() * canvas.scale;
-    let line_h = (frame.font.title() * LINE_HEIGHT).round();
+    let line_h = line_height(frame.font.title());
     if line_h <= 0.0 {
         return;
     }
