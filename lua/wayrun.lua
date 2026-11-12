@@ -226,6 +226,10 @@ function wayrun.fs.list(dir) end
 ---@return WayrunStat?
 function wayrun.fs.stat(path) end
 
+---@param path string
+---@return string?
+function wayrun.fs.readlink(path) end
+
 ---@param text string
 ---@return any
 function wayrun.json.decode(text) end

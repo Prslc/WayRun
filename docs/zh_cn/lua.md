@@ -132,6 +132,7 @@ on_click = { type = "plugin", plugin = "my-plugin", action = "new",
 | `wayrun.fs.read(name)` | 读取文件：插件目录下的相对名，或声明的读取区域、插件目录、插件缓存、脚本目录中的绝对路径或 `~/` 路径；不存在时为 nil，越界时报错 |
 | `wayrun.fs.list(dir)` | 上述位置中某目录的条目名，已排序；没有则为 nil |
 | `wayrun.fs.stat(path)` | 上述位置中路径的 `{ mtime_ns, size }`，没有则为 nil |
+| `wayrun.fs.readlink(path)` | 符号链接的目标；路径不存在或不是链接时为 nil。链接本身必须在上述位置内，目标可以指向任意位置（常用的是进程的 `/proc/<pid>/exe`） |
 | `wayrun.fs.write(path, data)` | 把字符串写入插件目录或缓存（自动创建父目录）；成功为 true；`kv.db` 及其同级文件保留 |
 | `wayrun.fs.delete(path)` | 删除插件目录或缓存中的文件；文件本来就不存在时也为 true |
 | `wayrun.toml.decode(text)` | TOML 输入，表输出 |

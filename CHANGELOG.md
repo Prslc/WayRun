@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   absolute path exactly as an `app-search` row shows them, so a plugin does not
   parse `.desktop` files to label a process. The binding is additive: a script
   can test for it, and `PLUGIN_API` stays at 1.
+- `wayrun.fs.readlink(path)` returns a symbolic link's target, or nil when the
+  path is absent or not a link. The link itself must lie in the plugin's
+  readable places while its target may point anywhere, so a plugin can read
+  `/proc/<pid>/exe` to tell apart processes that share a name. The binding is
+  additive: a script can test for it, and `PLUGIN_API` stays at 1.
 
 ### Changed
 
