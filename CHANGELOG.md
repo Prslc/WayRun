@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-12
+
+### Added
+
+- `theme.toml`'s `[motion].entrance_ms` sets how long the launcher's entrance
+  fade and rise take, in milliseconds (0–2000, default 240). `0` skips the
+  entrance while the card height spring and result-row motion still run;
+  `reduced = true` still disables all motion. It applies live.
+- `theme.toml`'s `[layout].fixed_height` (default `false`) holds the card at
+  the height of `max_rows` rows once there is a query or results, so results,
+  split previews and the action panel no longer resize it. A pristine show
+  (no query, no results) stays the compact search-only card. It applies live.
+- Lua plugins can read the session's desktop id with `wayrun.desktop()`
+  (`kde`, `niri`, `hyprland`, …), resolved once at startup.
+- The `session` action (`{"type":"session","verb":"reboot"}`) lets a row ask
+  for `lock`, `suspend`, `reboot`, `shutdown` or `logout` without embedding a
+  desktop-specific command; the executor resolves it for the session.
+- A `run_in_terminal` action takes `keep_open`
+  (`{"type":"run_in_terminal","cmd":"pacman -S x","keep_open":true}`): once the
+  command exits, the terminal continues in an interactive `$SHELL` instead of
+  closing, so a plugin's install or build output stays readable. The plugin
+  that emits the action decides; rows without the field behave as before, and
+  the field is additive, so `PLUGIN_API` stays at 1.
+- `wayrun.apps()` lists the installed applications as `{ id, name, icon,
+  exec }`, with the name in the interface language and the icon resolved to an
+  absolute path exactly as an `app-search` row shows them, so a plugin does not
+  parse `.desktop` files to label a process. The binding is additive: a script
+  can test for it, and `PLUGIN_API` stays at 1.
+- `wayrun.fs.readlink(path)` returns a symbolic link's target, or nil when the
+  path is absent or not a link. The link itself must lie in the plugin's
+  readable places while its target may point anywhere, so a plugin can read
+  `/proc/<pid>/exe` to tell apart processes that share a name. The binding is
+  additive: a script can test for it, and `PLUGIN_API` stays at 1.
+
+### Changed
+
+- The action panel no longer draws a header band: the actions start where the
+  first result row would, and the parent row or group title moves to the right
+  of the footer, beside the action count. `[layout].panel_header` is gone; an
+  existing entry is ignored. A panel now matches a list with the same number
+  of rows in height.
+- The text family moved from `config.toml`'s `[font].family` to
+  `theme.toml`'s `[font].family`, next to the interface size it belongs with.
+  It still applies live. A `[font]` table left in `config.toml` is ignored, so
+  move the key to `theme.toml`.
+- On KDE Plasma, `reboot`, `shutdown` and `logout` ask `org.kde.Shutdown` to
+  end the session first and fall back to `systemctl`/`loginctl`, so systemd no
+  longer stops `plasmashell` itself and waits out its timeout.
+- `wayrun status` reports the detected desktop, the daemon pid, the socket path
+  and the version after the `visible`/`hidden` line.
+- The built-in system command rows describe the action instead of showing the
+  shell command they run.
+
+### Removed
+
+- **Breaking**: `wayrun open` and `wayrun close` are gone; `wayrun toggle`
+  covers both, and the socket accepts only `toggle` and `status`. Update
+  scripts that used them.
+
+### Fixed
+
+- The footer no longer paints hints or the no-match note over the search field
+  while the card is still compact. "No results" waits for the search to land
+  and uses the count pill's chip style instead of the accent colour.
+
 ## [0.11.0] - 2026-11-07
 
 ### Added
@@ -891,7 +956,9 @@ and, with `--core`, the backend service.
 - Resident mode over `$XDG_RUNTIME_DIR/wayrun.sock` for zero cold-start
   (`wayrun toggle`).
 
-[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/Prslc/WayRun/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/Prslc/WayRun/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Prslc/WayRun/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Prslc/WayRun/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Prslc/WayRun/compare/v0.7.0...v0.8.0

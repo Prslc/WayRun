@@ -7,8 +7,16 @@ use cosmic_text::{
 };
 use tiny_skia::Pixmap;
 
+use crate::config::FontConfig;
+
 /// The card's line height as a multiple of the font size.
-pub const LINE_HEIGHT: f32 = 1.2;
+const LINE_HEIGHT: f32 = 1.2;
+
+/// The line-box height for a font `size`, rounded to a pixel; the unit is the
+/// caller's, so the same helper serves a logical style and a physical shape.
+pub fn line_height(size: f32) -> f32 {
+    (size * LINE_HEIGHT).round().max(1.0)
+}
 
 /// The weight/slant/family a shaped line uses; colour is not part of it, so a
 /// theme change never invalidates the cache.
@@ -31,12 +39,12 @@ impl TextStyle {
 
 pub struct Shaped {
     buffer: Buffer,
-    /// The line's advance width, for the caret and right-aligned text.
+    /// The line's advance width, in physical pixels.
     pub width: f32,
-    /// Line-box height (`size * LINE_HEIGHT`).
+    /// Line-box height (`size * LINE_HEIGHT`), in physical pixels.
     pub height: f32,
-    /// The line-box top to the baseline (the largest `run.line_y`), so runs of
-    /// different families can share one baseline.
+    /// The line-box top to the baseline, in physical pixels (the largest
+    /// `run.line_y`), so runs of different families can share one baseline.
     pub baseline: f32,
 }
 
@@ -85,6 +93,13 @@ pub struct TextEngine {
     family: String,
 }
 
+impl Default for TextEngine {
+    /// The shipped family, until the theme applies its own.
+    fn default() -> Self {
+        Self::with_family(FontConfig::default().family)
+    }
+}
+
 impl TextEngine {
     pub fn with_family(family: String) -> Self {
         Self {
@@ -113,12 +128,13 @@ impl TextEngine {
         self.lines.clear();
     }
 
-    /// Shape one unwrapped line, cached by text/size/style; every later frame
-    /// that draws it is a hash lookup.
+    /// Shape one unwrapped line at `size` physical pixels, cached by
+    /// text/size/style; every later frame that draws it is a hash lookup.
     pub fn shape(&mut self, text: &str, size: f32, weight: Weight) -> Rc<Shaped> {
         self.shape_styled(text, size, TextStyle::normal(weight))
     }
 
+    /// [`Self::shape`] with an explicit style; `size` is in physical pixels.
     pub fn shape_styled(&mut self, text: &str, size: f32, style: TextStyle) -> Rc<Shaped> {
         let key = LineKey::Plain(ShapeKey::new(text, size, style));
         if let Some(shaped) = self.touch(&key) {
@@ -164,8 +180,8 @@ impl TextEngine {
     }
 
     fn shape_uncached(&mut self, text: &str, size: f32, style: TextStyle) -> Shaped {
-        let line_height = (size * LINE_HEIGHT).round();
-        let mut buffer = Buffer::new(&mut self.font_system, Metrics::new(size, line_height));
+        let metrics = line_height(size);
+        let mut buffer = Buffer::new(&mut self.font_system, Metrics::new(size, metrics));
         // No constraints: a single line, whatever its width (long titles are
         // clipped by the caller).
         buffer.set_size(&mut self.font_system, None, None);
@@ -196,13 +212,13 @@ impl TextEngine {
         Shaped {
             buffer,
             width,
-            height: line_height,
+            height: metrics,
             baseline,
         }
     }
 
-    /// Shape one line elided with `…` to fit `max_width`, keyed by all four
-    /// inputs so a redraw re-uses it; only an overlong line pays the search.
+    /// Shape one line elided with `…` to fit `max_width` physical pixels, keyed by
+    /// all four inputs so a redraw re-uses it; only an overlong line pays the search.
     pub fn fit(&mut self, text: &str, size: f32, weight: Weight, max_width: f32) -> Rc<Shaped> {
         self.fit_styled(text, size, TextStyle::normal(weight), max_width)
     }
@@ -350,6 +366,69 @@ impl TextEngine {
     }
 }
 
+/// Split one over-long token into chunks that each fit `max_w`, on char
+/// boundaries; a single character wider than the column is kept alone.
+pub(crate) fn split_wide(
+    engine: &mut TextEngine,
+    text: &str,
+    size: f32,
+    style: TextStyle,
+    max_w: f32,
+    budget: usize,
+) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() && chunks.len() < budget {
+        let end = longest_prefix(engine, rest, size, style, max_w);
+        chunks.push(rest[..end].to_string());
+        rest = &rest[end..];
+    }
+    chunks
+}
+
+/// The byte end of the longest prefix that fits `max_w`; probing doubles from
+/// a few chars and then binary-searches, so only the cut chunk is shaped.
+fn longest_prefix(
+    engine: &mut TextEngine,
+    text: &str,
+    size: f32,
+    style: TextStyle,
+    max_w: f32,
+) -> usize {
+    let mut low = 0usize;
+    let mut high;
+    let mut probe = 8usize;
+    loop {
+        let end = char_end(text, probe);
+        if engine.shape_styled(&text[..end], size, style).width <= max_w {
+            if end == text.len() {
+                return end;
+            }
+            low = probe;
+            probe *= 2;
+        } else {
+            high = probe;
+            break;
+        }
+    }
+    while high - low > 1 {
+        let mid = low + (high - low) / 2;
+        let end = char_end(text, mid);
+        if engine.shape_styled(&text[..end], size, style).width <= max_w {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    char_end(text, low.max(1))
+}
+
+fn char_end(text: &str, chars: usize) -> usize {
+    text.char_indices()
+        .nth(chars)
+        .map_or(text.len(), |(index, _)| index)
+}
+
 /// Map a configured family onto cosmic-text's generic families; anything else
 /// is a named family.
 fn family_of(family: &str) -> Family<'_> {
@@ -417,6 +496,28 @@ mod tests {
     use super::{LINE_CACHE_MAX, TextEngine, TextStyle, blend, family_of};
     use cosmic_text::{Family, Weight};
     use std::rc::Rc;
+
+    #[test]
+    fn a_wide_run_is_chunked_within_the_line_budget() {
+        let mut engine = TextEngine::with_family("Source Han Sans CN".to_string());
+        let chunks = super::split_wide(
+            &mut engine,
+            &"中".repeat(200),
+            14.0,
+            TextStyle::normal(Weight::NORMAL),
+            40.0,
+            5,
+        );
+        assert_eq!(chunks.len(), 5);
+        assert!(chunks.iter().all(|chunk| !chunk.is_empty()));
+    }
+
+    #[test]
+    fn the_line_height_helper_matches_a_shaped_box() {
+        let mut engine = TextEngine::with_family("Source Han Sans CN".to_string());
+        let shaped = engine.shape("line", 14.0, Weight::NORMAL);
+        assert_eq!(super::line_height(14.0), shaped.height);
+    }
 
     #[test]
     fn generic_families_map_to_their_cosmic_variants() {

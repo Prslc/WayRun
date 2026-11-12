@@ -62,7 +62,7 @@ stays.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `primary` | system palette | Accent: selection tint, accent bar, panel header. |
+| `primary` | system palette | Accent: selection tint, accent bar, the action panel title in the footer. |
 | `fg` | system palette | Text, icons and hint tints. |
 | `container` | system palette | Card fill. |
 | `dim` | `#0000004d` | Backdrop dim; its alpha is inline. |
@@ -213,7 +213,7 @@ The `[footer]` table has one key.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `enabled` | bool | `true` | Show the hint bar under the results: keys, result count and search status. `false` hides it and gives its band back to the card. |
+| `enabled` | bool | `true` | Show the hint bar under the results: keys, result count and search status. It also carries the action panel's row or group title, so `false` hides that title too. |
 
 ### Layout
 
@@ -226,24 +226,31 @@ The `[layout]` table sets the card geometry.
 | `top_ratio` | float | `0.20` | 0–1 | Card top as a fraction of the output height. |
 | `align` | string | `center` | `left`/`center`/`right` | Horizontal anchor on the output. |
 | `max_rows` | int | `5` | 1–8 | Visible result rows. |
-| `panel_header` | float | `28.0` | ≥ 0 | Action panel header band above the actions. |
+| `fixed_height` | bool | `false` | — | Hold the card at one height once there is a query or results: a full `max_rows` window (448 logical pixels at the defaults). Results, split previews and the action panel no longer resize it; shorter content leaves the space below the rows blank. An untouched field with no results stays the compact search-only card; a query expands it. |
 
 An unknown `align` keeps the default.
 
 ### Font
 
-The `[font]` table sets the interface size in logical pixels. One size drives
-every role; the rest scale with it. The font family is not here; it lives in
-`config.toml` under `[font].family`.
+The `[font]` table sets the text family and the interface size in logical
+pixels. One size drives every role; the rest scale with it. Glyphs the family
+lacks fall back to the system fonts.
 
 | Key | Type | Default | Range | Meaning |
 | --- | --- | --- | --- | --- |
+| `family` | string | `sans-serif` | — | Primary shaping family, or a generic name (`serif`, `sans-serif`, `monospace`). |
 | `size` | float | `14.0` | 1–96 | A result row's title; the other roles scale from it. |
+
+Both apply live; a family change re-shapes every cached line.
 
 ### Motion
 
-The `[motion]` table has one key.
+The `[motion]` table has these keys.
 
-| Key | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `reduced` | bool | `false` | Same as `WAYRUN_REDUCED_MOTION=1`: both animations start at their end state. |
+| Key | Type | Default | Range | Meaning |
+| --- | --- | --- | --- | --- |
+| `reduced` | bool | `false` | — | Same as `WAYRUN_REDUCED_MOTION=1`: turns animations off. The entrance, the card height spring and result-row motion start at their end state, and no animation frames are requested. The caret still blinks. This wins over `entrance_ms`. |
+| `entrance_ms` | integer | `240` | 0–2000 | How long the entrance fade and rise take, in milliseconds. `0` skips the entrance; the card height spring and result-row motion still run. `reduced = true` still wins. |
+
+Both apply live. Lowering `entrance_ms` mid-fade settles it at once; raising it
+lets the current fade finish from when the show began.

@@ -12,7 +12,6 @@ pub mod edit;
 #[serde(default)]
 pub struct Config {
     pub ui: Ui,
-    pub font: Font,
     pub icon: Icon,
     pub files: Files,
 }
@@ -24,15 +23,6 @@ pub struct Ui {
     /// follows the session's `$LC_ALL`/`$LC_MESSAGES`/`$LANG`.
     #[serde(deserialize_with = "lenient_blank")]
     pub locale: String,
-}
-
-#[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
-#[serde(default)]
-pub struct Font {
-    /// The family the UI shapes with; missing glyphs fall back to the system, so
-    /// a family covering only the scripts you read keeps the rest out of memory.
-    #[serde(deserialize_with = "lenient_family")]
-    pub family: String,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug, Default, PartialEq)]
@@ -63,16 +53,6 @@ fn lenient_blank<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Er
     })
 }
 
-/// A blank family keeps the shipped default instead of shaping with nothing.
-fn lenient_family<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
-    let family = String::deserialize(d)?;
-    Ok(if family.trim().is_empty() {
-        Font::default().family
-    } else {
-        family
-    })
-}
-
 impl Default for Files {
     fn default() -> Self {
         Self {
@@ -88,14 +68,6 @@ impl Default for Files {
 /// Names the walk never enters unless the user writes their own `exclude` list;
 /// the shipped template shows them commented out.
 const SHIPPED_EXCLUDES: [&str; 3] = ["node_modules", "target", "__pycache__"];
-
-impl Default for Font {
-    fn default() -> Self {
-        Self {
-            family: "sans-serif".to_string(),
-        }
-    }
-}
 
 impl Config {
     /// The file's config, or `None` when it is absent or unparseable. A watcher
@@ -173,7 +145,6 @@ mod tests {
     #[test]
     fn a_key_of_the_wrong_type_rejects_the_file() {
         assert!(toml::from_str::<Config>("[files]\nexclude = \"node_modules\"").is_err());
-        assert!(toml::from_str::<Config>("[font]\nfamily = 5").is_err());
     }
 
     #[test]
@@ -185,25 +156,16 @@ mod tests {
     fn present_keys_override_field_by_field() {
         let config = parse(
             r#"
-            [font]
-            family = "Noto Sans"
-
             [icon]
             theme = "Papirus"
             "#,
         );
-        assert_eq!(config.font.family, "Noto Sans");
         assert_eq!(config.icon.theme, "Papirus");
     }
 
     #[test]
     fn a_blank_theme_keeps_the_default() {
         assert_eq!(parse("[icon]\ntheme = \"  \"").icon, Icon::default());
-    }
-
-    #[test]
-    fn a_blank_family_keeps_the_default() {
-        assert_eq!(parse("[font]\nfamily = \"  \"").font, Font::default());
     }
 
     #[test]

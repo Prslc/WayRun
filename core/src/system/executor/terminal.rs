@@ -26,12 +26,17 @@ pub fn open_terminal(uri: &str) {
 
 /// Run a command in a terminal: a PATH binary needs a tty to be usable (btop,
 /// htop, nvim), so it gets an interactive shell instead of a detached run.
-pub fn run_in_terminal(cmd: &str) {
-    run_in_terminal_in(cmd, None);
+pub fn run_in_terminal(cmd: &str, keep_open: bool) {
+    spawn_terminal(cmd, None, keep_open);
 }
 
 pub fn run_in_terminal_in(cmd: &str, dir: Option<&Path>) {
-    let Some(argv) = terminal_run_argv(env::var("TERMINAL").ok().as_deref(), cmd, dir) else {
+    spawn_terminal(cmd, dir, false);
+}
+
+fn spawn_terminal(cmd: &str, dir: Option<&Path>, keep_open: bool) {
+    let Some(argv) = terminal_run_argv(env::var("TERMINAL").ok().as_deref(), cmd, dir, keep_open)
+    else {
         return;
     };
     spawn_argv(&argv, dir);
@@ -39,7 +44,12 @@ pub fn run_in_terminal_in(cmd: &str, dir: Option<&Path>) {
 
 /// The terminal argv that runs `cmd`: the emulator, its command separator and
 /// `sh -c cmd`, so a run keeps the shell semantics `run:` already had.
-fn terminal_run_argv(terminal: Option<&str>, cmd: &str, dir: Option<&Path>) -> Option<Vec<String>> {
+fn terminal_run_argv(
+    terminal: Option<&str>,
+    cmd: &str,
+    dir: Option<&Path>,
+    keep_open: bool,
+) -> Option<Vec<String>> {
     let mut argv = terminal_command_from(terminal)?;
     if let Some(dir) = dir
         && let Some(flag) = terminal_dir_arg(&argv, dir)
@@ -49,9 +59,15 @@ fn terminal_run_argv(terminal: Option<&str>, cmd: &str, dir: Option<&Path>) -> O
     if let Some(flag) = terminal_exec_flag(&argv) {
         argv.extend(flag);
     }
+    // The newline keeps a command that ends in `&` a valid line of its own.
+    let line = if keep_open {
+        format!("{cmd}\nexec \"${{SHELL:-sh}}\"")
+    } else {
+        cmd.to_string()
+    };
     argv.push("sh".to_string());
     argv.push("-c".to_string());
-    argv.push(cmd.to_string());
+    argv.push(line);
     Some(argv)
 }
 
@@ -224,27 +240,40 @@ mod tests {
     #[test]
     fn a_terminal_runs_the_command_through_a_shell() {
         assert_eq!(
-            terminal_run_argv(Some("kitty"), "/usr/bin/btop", None),
+            terminal_run_argv(Some("kitty"), "/usr/bin/btop", None, false),
             Some(argv(&["kitty", "sh", "-c", "/usr/bin/btop"]))
         );
         assert_eq!(
-            terminal_run_argv(Some("alacritty"), "htop", None),
+            terminal_run_argv(Some("alacritty"), "htop", None, false),
             Some(argv(&["alacritty", "-e", "sh", "-c", "htop"]))
         );
         assert_eq!(
-            terminal_run_argv(Some("gnome-terminal"), "nvim", None),
+            terminal_run_argv(Some("gnome-terminal"), "nvim", None, false),
             Some(argv(&["gnome-terminal", "--", "sh", "-c", "nvim"]))
         );
         assert_eq!(
-            terminal_run_argv(Some("wezterm"), "btop", None),
+            terminal_run_argv(Some("wezterm"), "btop", None, false),
             Some(argv(&["wezterm", "start", "--", "sh", "-c", "btop"]))
+        );
+    }
+
+    #[test]
+    fn a_kept_open_run_continues_in_the_users_shell() {
+        assert_eq!(
+            terminal_run_argv(Some("kitty"), "pacman -S x", None, true),
+            Some(argv(&[
+                "kitty",
+                "sh",
+                "-c",
+                "pacman -S x\nexec \"${SHELL:-sh}\""
+            ]))
         );
     }
 
     #[test]
     fn a_wezterm_already_given_a_subcommand_does_not_repeat_it() {
         assert_eq!(
-            terminal_run_argv(Some("wezterm start"), "btop", None),
+            terminal_run_argv(Some("wezterm start"), "btop", None, false),
             Some(argv(&["wezterm", "start", "--", "sh", "-c", "btop"]))
         );
     }
@@ -257,7 +286,7 @@ mod tests {
             Some(argv(&["start", "--cwd", "/tmp/project"]))
         );
         assert_eq!(
-            terminal_run_argv(Some("/usr/bin/gnome-terminal"), "nvim", None),
+            terminal_run_argv(Some("/usr/bin/gnome-terminal"), "nvim", None, false),
             Some(argv(&["/usr/bin/gnome-terminal", "--", "sh", "-c", "nvim"]))
         );
     }

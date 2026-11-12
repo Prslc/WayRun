@@ -33,6 +33,11 @@ command.suspend: Suspend
 command.reboot: Reboot
 command.shutdown: Shutdown
 command.logout: Logout
+command.lock.description: Lock the screen; the session keeps running
+command.suspend.description: Suspend the computer; the session is kept
+command.reboot.description: Restart the computer
+command.shutdown.description: Power off the computer
+command.logout.description: End the session; the computer stays on
 
 action.open: Open
 action.open_with: Open with

@@ -18,7 +18,7 @@
 
 ## 概述
 
-整个项目只产出一个 Rust 可执行文件 `wayrun`：启动器本体，以及它通过 `--core` 使用的后端。覆盖层完全用软件光栅化进共享内存缓冲，因此不涉及 GPU 栈，也不依赖任何 GUI 工具包。
+整个项目只产出一个 Rust 可执行文件 `wayrun`：启动器本体，以及它通过 `--core` 使用的后端。覆盖层完全用软件光栅化进共享内存缓冲，因此不涉及 GPU 栈，也不依赖任何 GUI 框架。
 
 ## 演示
 
@@ -66,7 +66,7 @@ ln -s "$(pwd)/target/release/wayrun" ~/.local/bin/wayrun
 
 - [安装](install.md)：环境要求、下载或构建、首次启动、功能依赖。
 - [使用说明](usage.md)：前缀、按键与复制粘贴。
-- [配置](config.md)：`config.toml`（界面语言、字体、图标、文件索引）。
+- [配置](config.md)：`config.toml`（界面语言、图标、文件索引）。
 - [主题](theme.md)：系统调色板与 `theme.toml`（配色、模糊、布局、字体、动效）。
 - [常驻模式](resident.md)：systemd 单元与控制命令。
 - [插件](plugins.md)：`plugins.toml`、内置插件与外部 JSON-RPC 宿主。

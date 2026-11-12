@@ -13,7 +13,7 @@ wayrun config set files.index false
 wayrun config set files.exclude '["node_modules", "target"]'
 ```
 
-`locale` 在启动时读取，修改后需要执行 `systemctl --user restart wayrun-launcher`。其余键（包括 `font.family`）通过监听器即时生效。
+`locale` 在启动时读取，修改后需要执行 `systemctl --user restart wayrun-launcher`。其余键通过监听器即时生效。
 
 ## 界面语言
 
@@ -30,16 +30,6 @@ wayrun config set files.exclude '["node_modules", "target"]'
 这个选择也决定 `.desktop` 文件带来的文字用哪种语言：应用名称、说明与桌面动作名。没有对应文案表的值回退到英文；留空等同不写这个键。
 
 两种方式都只在启动时读取，修改后需要重启服务。
-
-## 字体
-
-`[font]` 表设置文本字体族。
-
-| 键 | 默认 | 含义 |
-| --- | --- | --- |
-| `family` | `sans-serif` | 主文本字体族，或通用名（`serif`、`sans-serif`、`monospace`）。 |
-
-文件变化后，启动器会立即用新的字体族重新排版。字体族缺少的字形回退到系统字体。界面字号在 `theme.toml` 的 `[font].size`，同样即时生效。
 
 ## 图标主题
 

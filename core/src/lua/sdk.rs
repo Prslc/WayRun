@@ -116,6 +116,26 @@ pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua:
         "locale",
         lua.create_function(|_, ()| Ok(rust_i18n::locale()))?,
     )?;
+    sdk.set(
+        "desktop",
+        lua.create_function(|_, ()| Ok(crate::system::desktop_env::id().map(str::to_owned)))?,
+    )?;
+    sdk.set(
+        "apps",
+        lua.create_function(|lua, ()| {
+            let list = lua.create_table()?;
+            let apps = crate::provider::application::app_entries();
+            for (at, app) in apps.into_iter().enumerate() {
+                let entry = lua.create_table()?;
+                entry.set("id", app.id)?;
+                entry.set("name", app.name)?;
+                entry.set("exec", app.exec)?;
+                entry.set("icon", app.icon)?;
+                list.set(at + 1, entry)?;
+            }
+            Ok(list)
+        })?,
+    )?;
     let env_active = Rc::clone(&shared.active);
     let env_scope = Rc::clone(&shared.env_scope);
     sdk.set(
@@ -203,6 +223,23 @@ pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua:
             read_path(&own, cache.as_deref(), declared, script.as_deref(), path)
         })
     };
+    let link_guard: areas::Guard = {
+        let read_areas = Rc::clone(&shared.read_areas);
+        let guard_active = Rc::clone(&shared.active);
+        let script = dir.clone();
+        Rc::new(move |path: &str| {
+            let Some(id) = guard_active.borrow().clone() else {
+                return Err("this read ran outside a plugin call".to_string());
+            };
+            let Some(own) = plugin_dir(&id) else {
+                return Err("no plugin directory".to_string());
+            };
+            let cache = plugin_cache_dir(&id);
+            let areas = read_areas.borrow();
+            let declared = areas.get(&id).map(Vec::as_slice).unwrap_or(&[]);
+            link_path(&own, cache.as_deref(), declared, script.as_deref(), path)
+        })
+    };
     let write_guard: areas::Guard = {
         let guard_active = Rc::clone(&shared.active);
         Rc::new(move |path: &str| {
@@ -217,7 +254,10 @@ pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua:
     };
     sdk.set("json", json_lib(lua)?)?;
     sdk.set("toml", toml_lib(lua)?)?;
-    sdk.set("fs", fs_lib(lua, Rc::clone(&read_guard), write_guard)?)?;
+    sdk.set(
+        "fs",
+        fs_lib(lua, Rc::clone(&read_guard), link_guard, write_guard)?,
+    )?;
     let stores: kv::Handle = Rc::new(RefCell::new(kv::Stores::default()));
     sdk.set(
         "http",
@@ -377,6 +417,30 @@ fn read_path(
     if areas::relative(path) {
         return areas::inside(own, path);
     }
+    areas::check(&read_roots(own, cache, declared, script), path)
+}
+
+/// [`read_path`] for a link the caller reads rather than follows; the target
+/// itself is not tested.
+fn link_path(
+    own: &Path,
+    cache: Option<&Path>,
+    declared: &[PathBuf],
+    script: Option<&Path>,
+    path: &str,
+) -> Result<PathBuf, String> {
+    if areas::relative(path) {
+        return areas::inside_link(own, path);
+    }
+    areas::check_link(&read_roots(own, cache, declared, script), path)
+}
+
+fn read_roots(
+    own: &Path,
+    cache: Option<&Path>,
+    declared: &[PathBuf],
+    script: Option<&Path>,
+) -> Vec<PathBuf> {
     let mut roots = declared.to_vec();
     roots.push(own.to_path_buf());
     if let Some(cache) = cache {
@@ -385,7 +449,7 @@ fn read_path(
     if let Some(dir) = script {
         roots.push(dir.to_path_buf());
     }
-    areas::check(&roots, path)
+    roots
 }
 
 /// A write path: the plugin directory or its cache, never the kv store.
@@ -419,7 +483,12 @@ fn write_path(own: &Path, cache: Option<&Path>, path: &str) -> Result<PathBuf, S
     Ok(resolved)
 }
 
-fn fs_lib(lua: &Lua, read: areas::Guard, write: areas::Guard) -> mlua::Result<Table> {
+fn fs_lib(
+    lua: &Lua,
+    read: areas::Guard,
+    link: areas::Guard,
+    write: areas::Guard,
+) -> mlua::Result<Table> {
     let lib = lua.create_table()?;
     let list_guard = Rc::clone(&read);
     lib.set(
@@ -442,6 +511,18 @@ fn fs_lib(lua: &Lua, read: areas::Guard, write: areas::Guard) -> mlua::Result<Ta
                 list.set(at + 1, name)?;
             }
             Ok(Value::Table(list))
+        })?,
+    )?;
+    let readlink_guard = Rc::clone(&link);
+    lib.set(
+        "readlink",
+        lua.create_function(move |_, path: String| {
+            let target = readlink_guard(&path).map_err(|problem| {
+                mlua::Error::RuntimeError(format!("fs.readlink {path:?}: {problem}"))
+            })?;
+            Ok(fs::read_link(target)
+                .ok()
+                .map(|target| target.display().to_string()))
         })?,
     )?;
     let stat_guard = Rc::clone(&read);

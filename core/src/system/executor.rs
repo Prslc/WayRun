@@ -6,6 +6,7 @@ use std::process;
 use std::sync::OnceLock;
 
 use crate::system::process::{DEADLINE, output_within, wait_within};
+use crate::system::session_verbs;
 
 mod terminal;
 
@@ -265,7 +266,8 @@ pub fn execute(command: &crate::wire::Action) {
     use crate::wire::Action;
     match command {
         Action::Run { cmd } => execute_command(cmd),
-        Action::RunInTerminal { cmd } => run_in_terminal(cmd),
+        Action::RunInTerminal { cmd, keep_open } => run_in_terminal(cmd, *keep_open),
+        Action::Session { verb } => execute_command(session_verbs::command(*verb)),
         Action::Launch { desktop_id } => launch_app(desktop_id),
         Action::Copy { text } => copy_text(text),
         Action::DesktopAction {

@@ -60,8 +60,6 @@ fn main() -> process::ExitCode {
             render::bench();
             return process::ExitCode::SUCCESS;
         }
-        Some(Command::Open) => return ipc::client("open"),
-        Some(Command::Close) => return ipc::client("close"),
         Some(Command::Toggle) => return ipc::client("toggle"),
         Some(Command::Status) => return ipc::client("status"),
         None => {
@@ -225,7 +223,6 @@ fn run() -> Result<(), Box<dyn Error>> {
     let (paste_tx, paste_channel) = calloop::channel::channel();
     let (icon_tx, icon_channel) = calloop::channel::channel();
     let (appearance_tx, appearance_channel) = calloop::channel::channel();
-    let (family_tx, family_channel) = calloop::channel::channel();
 
     loop_handle.insert_source(backend_channel, |event, _, state: &mut Shell| {
         if let ChannelEvent::Msg(event) = event {
@@ -252,11 +249,6 @@ fn run() -> Result<(), Box<dyn Error>> {
             state.on_appearance(config, Instant::now());
         }
     })?;
-    loop_handle.insert_source(family_channel, |event, _, state: &mut Shell| {
-        if let ChannelEvent::Msg(family) = event {
-            state.on_font_family(family);
-        }
-    })?;
     WaylandSource::new(conn.clone(), event_queue).insert(loop_handle.clone())?;
 
     let icon_jobs = wayrun_ui::icons::spawn_worker(move |result| icon_tx.send(result).is_ok());
@@ -265,7 +257,6 @@ fn run() -> Result<(), Box<dyn Error>> {
     shell.on_appearance(config::load(), Instant::now());
     // Held for the process's life: dropping it stops live config updates.
     let _appearance_watcher = config::watch(appearance_tx);
-    let _family_watcher = config::watch_family(family_tx);
 
     backend::start(backend_tx);
 

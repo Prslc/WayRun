@@ -7,8 +7,9 @@ use crate::markdown::MarkdownCache;
 use crate::text::TextEngine;
 use crate::view::{Body, Frame};
 
-use super::canvas::{Canvas, Rect};
-use super::{field, footer, list, panel, preview};
+use super::DrawCtx;
+use super::canvas::Canvas;
+use super::{card, field, footer, list, panel, preview};
 
 pub fn draw(
     pixmap: &mut Pixmap,
@@ -27,24 +28,27 @@ pub fn draw(
         }
     };
     mark("start");
-    let canvas = Canvas { scale: frame.scale };
-    let surface = frame.surface;
-    let layout = frame.layout;
-    let dim_rgb = frame.dim_color();
-
-    let card = Rect {
-        x: layout.card_x(surface),
-        y: layout.card_top(surface),
-        w: layout.card_w(surface),
-        h: frame.card_h,
+    let mut ctx = DrawCtx {
+        canvas: Canvas { scale: frame.scale },
+        pixmap,
+        text,
+        icons,
+        markdown,
+        now,
+        frame,
     };
+
+    let surface = ctx.frame.surface;
+    let layout = ctx.frame.layout;
+    let dim_rgb = ctx.frame.dim_color();
+    let card = layout.card_rect(surface, ctx.frame.card_h);
 
     // The frame is retained, so a settled frame repaints only the card and
     // leaves the dim in place; an animation or fresh frame repaints it all.
-    let dim = frame.dim_alpha();
+    let dim = ctx.frame.dim_alpha();
     if full {
-        canvas.fill_all(
-            pixmap,
+        ctx.canvas.fill_all(
+            ctx.pixmap,
             [
                 dim_rgb[0],
                 dim_rgb[1],
@@ -53,96 +57,45 @@ pub fn draw(
             ],
         );
     } else {
-        // A shrink has to erase the old card's rows too, so the region spans the
-        // union of the previous and current bottoms, not just the current card.
-        // The hairline's antialiased rim reaches a pixel past the card rect:
-        // restore that band too, or each settled repaint accumulates its alpha.
-        const PAD: f32 = 1.0;
-        let base_bottom = card.bottom().max(frame.last_card_bottom);
-        canvas.restore_dim(
-            pixmap,
-            Rect {
-                x: card.x - PAD,
-                y: card.y - PAD,
-                w: card.w + 2.0 * PAD,
-                h: base_bottom - card.y + 2.0 * PAD,
-            },
-            dim,
-            dim_rgb,
-        );
+        let repaint =
+            layout.card_repaint_rect(surface, ctx.frame.card_h, ctx.frame.last_card_bottom);
+        ctx.canvas.restore_dim(ctx.pixmap, repaint, dim, dim_rgb);
     }
     mark("clear");
 
-    // The card: a translucent fill with a hairline. The hairline is a *ring*,
-    // not a base fill, which would raise the interior's alpha.
-    let border = frame.surfaces.hairline_width;
-    canvas.fill_round(
-        pixmap,
-        Rect {
-            x: card.x + border,
-            y: card.y + border,
-            w: card.w - 2.0 * border,
-            h: card.h - 2.0 * border,
-        },
-        layout.radius - border,
-        frame.fade_rgba(frame.surfaces.card),
-    );
-    if border > 0.0 {
-        canvas.stroke_round(
-            pixmap,
-            Rect {
-                x: card.x + border / 2.0,
-                y: card.y + border / 2.0,
-                w: card.w - border,
-                h: card.h - border,
-            },
-            layout.hairline_radius(border),
-            border,
-            frame.fade_rgba(frame.surfaces.hairline),
-        );
-    }
-
+    card::draw(&mut ctx);
     mark("card");
-    let field_rect = Rect::field_at(card.x, card.y, card.w);
-    field::draw_magnifier(&canvas, pixmap, field_rect, frame);
-    field::draw_query(&canvas, pixmap, field_rect, frame, text);
+    let field_rect = layout.field_rect(surface);
+    field::draw_magnifier(&mut ctx, field_rect);
+    field::draw_query(&mut ctx, field_rect);
     mark("query");
 
-    match &frame.body {
-        Body::Panel(_) => panel::draw_actions(&canvas, pixmap, frame, text, icons),
+    match &ctx.frame.body {
+        Body::Panel(_) => panel::draw_actions(&mut ctx),
         Body::List(view) if !view.rows.is_empty() => {
-            list::draw_list(&canvas, pixmap, frame, text, icons, now);
-            if let Some(preview) = &view.preview {
-                preview::draw_preview(
-                    &canvas,
-                    pixmap,
-                    frame,
-                    view.rows.len(),
-                    preview,
-                    preview::PreviewCaches {
-                        text: &mut *text,
-                        markdown: &mut *markdown,
-                        icons: &mut *icons,
-                    },
-                );
+            let preview = view.preview;
+            list::draw_list(&mut ctx);
+            if let Some(preview) = preview {
+                preview::draw_preview(&mut ctx, &preview);
             }
         }
         Body::List(_) => {}
     }
     mark("list");
 
-    if layout.footer {
-        footer::draw_footer(&canvas, pixmap, frame, text);
+    if layout.footer && layout.footer_fits(ctx.frame.card_h) {
+        footer::draw_footer(&mut ctx);
         mark("footer");
     }
 
     // A growing payload lays rows out immediately while the height animates, so
     // the band below the card's bottom belongs to the backdrop.
-    let resting = layout.card_top(surface) + frame.content_h;
+    let resting = layout.card_top(surface) + ctx.frame.content_h;
     let bottom = card.y + card.h;
     let mut band = None;
     if full && bottom < resting {
-        canvas.restore_dim_below(pixmap, bottom, surface, dim, dim_rgb);
+        ctx.canvas
+            .restore_dim_below(ctx.pixmap, bottom, surface, dim, dim_rgb);
         band = Some(bottom);
     }
 
@@ -260,6 +213,33 @@ mod tests {
             (shown.red(), shown.green(), shown.blue()),
             (hidden.red(), hidden.green(), hidden.blue()),
             "the footer's keycap chip goes with it"
+        );
+    }
+
+    #[test]
+    fn a_compact_card_draws_no_footer() {
+        use crate::geom::{FOOTER_H, PAD};
+
+        let mut frame = test_frame((1600, 1080));
+        frame.card_h = frame.layout.empty_h();
+        frame.content_h = frame.card_h;
+        frame.footer.rows = 3;
+        frame.footer.query_empty = false;
+
+        // Where the footer would land on the still-compact card.
+        let layout = frame.layout;
+        let x = (layout.card_x(frame.surface) + PAD + 3.0) as u32;
+        let top = layout.card_top(frame.surface) + frame.card_h - PAD - FOOTER_H;
+        let y = (top + FOOTER_H / 2.0) as u32;
+
+        let with_hints = render(&frame).pixel(x, y).unwrap();
+        frame.footer.rows = 0;
+        frame.footer.query_empty = true;
+        let bare = render(&frame).pixel(x, y).unwrap();
+        assert_eq!(
+            (with_hints.red(), with_hints.green(), with_hints.blue()),
+            (bare.red(), bare.green(), bare.blue()),
+            "the footer waits for the card to grow"
         );
     }
 

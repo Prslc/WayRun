@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: WayRun
-  text: Search, then launch.
-  tagline: A Wayland-native application launcher and quick-search tool for Linux.
+  text: No GPU. No toolkit.
+  tagline: A Wayland-native application launcher and quick-search tool for Linux
   image:
     src: /logo.svg
     alt: WayRun
@@ -23,8 +23,8 @@ features:
     details: Files and paths, $PATH commands, system commands, and inline math, all from the same input.
   - title: Action panel
     details: Shift+Enter opens a per-type action menu — reveal a file, run a desktop action, copy a link.
-  - title: No GPU stack
-    details: The overlay is rasterised in software into a shared-memory buffer. No GPU stack, no GUI toolkit.
+  - title: Software-rendered
+    details: The overlay is rasterised with tiny-skia into a premultiplied-RGBA pixmap and handed to the compositor as a wl_shm buffer.
   - title: Themeable
     details: Follows KDE's colour scheme or DankMaterialShell's Material You palette, with theme.toml overrides for colours, blur, layout, typography and motion.
   - title: Extensible

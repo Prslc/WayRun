@@ -16,6 +16,61 @@ pub const PREVIEW_GAP: f32 = 16.0;
 /// the image and centered, so its body only needs room for a thumbnail.
 const IMAGE_MIN_H: f32 = 200.0;
 const TEXT_MIN_H: f32 = 220.0;
+/// The hairline's antialiased rim reaches one logical pixel past the card rect.
+pub const AA_PAD: f32 = 1.0;
+
+/// A logical rectangle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+impl Rect {
+    pub fn right(self) -> f32 {
+        self.x + self.w
+    }
+
+    pub fn bottom(self) -> f32 {
+        self.y + self.h
+    }
+
+    pub fn center_y(self) -> f32 {
+        self.y + self.h / 2.0
+    }
+
+    pub fn inflate(self, by: f32) -> Self {
+        Self {
+            x: self.x - by,
+            y: self.y - by,
+            w: self.w + 2.0 * by,
+            h: self.h + 2.0 * by,
+        }
+    }
+
+    /// The rectangle shrunk by `by` on every side, never past zero.
+    pub fn inset(self, by: f32) -> Self {
+        Self {
+            x: self.x + by,
+            y: self.y + by,
+            w: (self.w - 2.0 * by).max(0.0),
+            h: (self.h - 2.0 * by).max(0.0),
+        }
+    }
+
+    /// The same rectangle in the target's pixels: a path is built in pixmap
+    /// space, so every rect handed to one must be scaled, not just radii.
+    pub fn scaled(self, scale: f32) -> Self {
+        Self {
+            x: self.x * scale,
+            y: self.y * scale,
+            w: self.w * scale,
+            h: self.h * scale,
+        }
+    }
+}
 
 /// The preview body's shape differs by content, never its column width.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,7 +98,8 @@ pub struct Layout {
     pub align: Align,
     pub radius: f32,
     pub max_rows: usize,
-    pub panel_header_h: f32,
+    /// Hold the card at a full `max_rows` height in every state.
+    pub fixed_height: bool,
     /// Whether the hint bar is drawn; hiding it gives its band back to the card.
     pub footer: bool,
     /// The entrance's remaining rise, in logical pixels: a frame draws with a
@@ -59,7 +115,7 @@ impl Default for Layout {
             align: Align::Center,
             radius: 16.0,
             max_rows: 5,
-            panel_header_h: 28.0,
+            fixed_height: false,
             footer: true,
             offset_y: 0.0,
         }
@@ -147,6 +203,67 @@ impl Layout {
         self.card_top(surface) + PAD + SEARCH_H + GAP
     }
 
+    pub fn card_rect(&self, surface: (u32, u32), card_h: f32) -> Rect {
+        Rect {
+            x: self.card_x(surface),
+            y: self.card_top(surface),
+            w: self.card_w(surface),
+            h: card_h,
+        }
+    }
+
+    /// What a settled repaint restores: the card, the hairline's AA rim, and the
+    /// union of the previous and current bottoms so a shrink erases the old rows.
+    pub fn card_repaint_rect(&self, surface: (u32, u32), card_h: f32, last_bottom: f32) -> Rect {
+        let card = self.card_rect(surface, card_h);
+        let bottom = card.bottom().max(last_bottom);
+        Rect {
+            h: bottom - card.y,
+            ..card
+        }
+        .inflate(AA_PAD)
+    }
+
+    pub fn field_rect(&self, surface: (u32, u32)) -> Rect {
+        Rect {
+            x: self.card_x(surface) + PAD,
+            y: self.card_top(surface) + PAD,
+            w: self.card_w(surface) - 2.0 * PAD,
+            h: SEARCH_H,
+        }
+    }
+
+    /// The footer band, riding the card's drawn height rather than its resting one.
+    pub fn footer_rect(&self, surface: (u32, u32), card_h: f32) -> Rect {
+        let (left, width) = self.row_band(surface);
+        Rect {
+            x: left,
+            y: self.card_top(surface) + card_h - PAD - FOOTER_H,
+            w: width,
+            h: FOOTER_H,
+        }
+    }
+
+    /// A row in the list band, at the window's pitch; motion is the caller's.
+    pub fn row_rect(&self, surface: (u32, u32), split: bool, index: usize, first: usize) -> Rect {
+        let (left, width) = self.list_band(surface, split);
+        Rect {
+            x: left,
+            y: self.row_y(surface, index, first),
+            w: width,
+            h: ROW_H,
+        }
+    }
+
+    fn row_y(&self, surface: (u32, u32), index: usize, first: usize) -> f32 {
+        self.rows_top(surface) + (index - first) as f32 * ROW_H
+    }
+
+    /// The inverse of [`Self::row_y`]: one arithmetic for drawing and hit testing.
+    fn row_index(&self, surface: (u32, u32), first: usize, y: f32) -> usize {
+        first + ((y - self.rows_top(surface)) / ROW_H) as usize
+    }
+
     pub fn list_h(&self, rows: usize) -> f32 {
         (rows as f32 * ROW_H).min(self.max_rows as f32 * ROW_H)
     }
@@ -172,6 +289,18 @@ impl Layout {
         self.base_h() + GAP + body_h
     }
 
+    /// The list/preview body under a card of `card_h`; at rest it is the split
+    /// body outside fixed mode, `max_rows * ROW_H` with it.
+    pub fn body_h(&self, card_h: f32) -> f32 {
+        (card_h - self.base_h() - GAP).max(0.0)
+    }
+
+    /// Whether a card of `card_h` has grown enough to hold the footer band
+    /// below the field, so its hints never paint over the query.
+    pub fn footer_fits(&self, card_h: f32) -> bool {
+        card_h >= self.base_h()
+    }
+
     /// The split body's height: an image needs room for a thumbnail, text a
     /// readable minimum; a short list grows the card down either way.
     pub fn split_h(&self, rows: usize, kind: PreviewKind) -> f32 {
@@ -187,16 +316,16 @@ impl Layout {
         PAD + SEARCH_H + PAD
     }
 
-    /// The card height with the action panel open: like `content_h`, but the
-    /// list band holds the actions under a header instead of the results.
+    /// The card height with the action panel open: the same list band, holding
+    /// the actions instead of the results.
     pub fn panel_h(&self, actions: usize) -> f32 {
-        self.base_h() + GAP + self.panel_header_h + self.list_h(actions)
+        self.content_h(actions)
     }
 
-    /// The y of the first action row: the panel header sits where the first
-    /// result row would.
-    pub fn actions_top(&self, surface: (u32, u32)) -> f32 {
-        self.rows_top(surface) + self.panel_header_h
+    /// The card's one height while `fixed_height` is set: a full `max_rows`
+    /// window (448 logical pixels at the defaults).
+    pub fn fixed_h(&self) -> f32 {
+        self.content_h(self.max_rows)
     }
 
     /// The action index under a surface-local point, `None` outside the panel.
@@ -213,12 +342,12 @@ impl Layout {
             return None;
         }
 
-        let top = self.actions_top(surface);
+        let top = self.rows_top(surface);
         if y < top || y >= top + self.list_h(count) {
             return None;
         }
 
-        let index = first + ((y - top) / ROW_H) as usize;
+        let index = self.row_index(surface, first, y);
         (index < count).then_some(index)
     }
 
@@ -301,7 +430,7 @@ impl Layout {
             return None;
         }
 
-        let index = first + ((y - top) / ROW_H) as usize;
+        let index = self.row_index(surface, first, y);
         (index < rows).then_some(index)
     }
 
@@ -378,6 +507,49 @@ mod tests {
             l.row_at(surface, false, 0, 2, left, top + 2.0 * ROW_H + 1.0),
             None
         );
+    }
+
+    #[test]
+    fn the_rects_match_the_bands_they_describe() {
+        let l = Layout::default();
+        let surface = (1920, 1080);
+
+        let card = l.card_rect(surface, 300.0);
+        assert_eq!(
+            (card.x, card.y, card.w, card.h),
+            (
+                l.card_x(surface),
+                l.card_top(surface),
+                l.card_w(surface),
+                300.0
+            )
+        );
+
+        let field = l.field_rect(surface);
+        assert_eq!((field.x, field.y), (card.x + PAD, card.y + PAD));
+        assert_eq!((field.w, field.h), (card.w - 2.0 * PAD, SEARCH_H));
+        assert_eq!(l.rows_top(surface), field.bottom() + GAP);
+
+        let inner = card.inset(PAD);
+        assert_eq!((inner.x, inner.w), (card.x + PAD, card.w - 2.0 * PAD));
+        assert_eq!(card.inset(card.w).w, 0.0);
+
+        let footer = l.footer_rect(surface, 300.0);
+        assert_eq!(footer.bottom(), card.bottom() - PAD);
+        assert_eq!(footer.h, FOOTER_H);
+
+        // a settled repaint carries the AA rim and the previous bottom
+        let repaint = l.card_repaint_rect(surface, 200.0, card.bottom());
+        assert_eq!((repaint.x, repaint.y), (card.x - AA_PAD, card.y - AA_PAD));
+        assert_eq!(repaint.bottom(), card.bottom() + AA_PAD);
+        assert_eq!(repaint.h, card.h + 2.0 * AA_PAD);
+
+        // the drawn row and the hit test are one arithmetic
+        let left = l.row_band(surface).0;
+        let y = l.row_rect(surface, false, 3, 0).y;
+        assert_eq!(y, l.rows_top(surface) + 3.0 * ROW_H);
+        assert_eq!(l.row_at(surface, false, 0, 10, left, y + 1.0), Some(3));
+        assert_eq!(l.row_at(surface, false, 0, 10, left, y - 1.0), Some(2));
     }
 
     #[test]
@@ -478,6 +650,9 @@ mod tests {
         assert_eq!(l.empty_h(), 80.0);
         assert_eq!(l.row_radius(), 8.0);
         assert_eq!(l.hairline_radius(HAIRLINE_W), 15.5);
+        // the footer band needs the card to grow past the field and the gap
+        assert!(l.footer_fits(l.content_h(0)));
+        assert!(!l.footer_fits(l.empty_h()));
         // a narrower output shrinks the card to fit its padding
         assert_eq!(l.card_w((1920, 1080)), 730.0);
         assert_eq!(l.card_w((720, 1080)), 692.0);
@@ -501,23 +676,52 @@ mod tests {
     }
 
     #[test]
-    fn the_action_panel_adds_a_header_above_the_actions() {
+    fn a_fixed_height_is_the_full_panel_window() {
         let l = Layout::default();
-        assert_eq!(l.panel_h(3), l.content_h(3) + l.panel_header_h);
-        // the actions start where the first result row would, one header lower
-        let surface = (1920, 1080);
-        assert_eq!(
-            l.actions_top(surface),
-            l.rows_top(surface) + l.panel_header_h
-        );
+        assert_eq!(l.fixed_h(), 448.0);
+        assert_eq!(l.fixed_h(), l.content_h(l.max_rows));
+        assert_eq!(l.fixed_h(), l.panel_h(l.max_rows));
 
+        let bare = Layout {
+            footer: false,
+            ..Layout::default()
+        };
+        assert_eq!(bare.fixed_h(), bare.content_h(bare.max_rows));
+        assert_eq!(bare.fixed_h() + GAP + FOOTER_H, l.fixed_h());
+
+        let two = Layout {
+            max_rows: 2,
+            ..Layout::default()
+        };
+        assert_eq!(two.fixed_h(), two.content_h(2));
+    }
+
+    #[test]
+    fn the_body_fills_the_card_between_its_bands() {
+        let l = Layout::default();
+        assert_eq!(l.body_h(l.fixed_h()), l.max_rows as f32 * ROW_H);
+        assert_eq!(
+            l.body_h(l.content_h_for(l.split_h(1, PreviewKind::Image))),
+            l.split_h(1, PreviewKind::Image),
+            "a non-fixed split body is unchanged"
+        );
+        assert_eq!(l.body_h(l.content_h(2)), l.list_h(2));
+        assert_eq!(l.body_h(0.0), 0.0);
+    }
+
+    #[test]
+    fn the_action_panel_shares_the_list_band() {
+        let l = Layout::default();
+        assert_eq!(l.panel_h(3), l.content_h(3));
+
+        let surface = (1920, 1080);
         let left = l.card_x(surface) + 10.0;
-        let top = l.actions_top(surface);
+        let top = l.rows_top(surface);
         assert_eq!(l.action_at(surface, 0, 4, left, top), Some(0));
         assert_eq!(l.action_at(surface, 0, 4, left, top + ROW_H + 1.0), Some(1));
         // a `first` window shifts surface row 0 to that action
         assert_eq!(l.action_at(surface, 2, 20, left, top + 0.5), Some(2));
-        // above the actions is the header, not an action
+        // above the first action is the field, not an action
         assert_eq!(l.action_at(surface, 0, 4, left, top - 1.0), None);
         // only the `max_rows` window is drawn
         assert_eq!(

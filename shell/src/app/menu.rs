@@ -12,7 +12,7 @@ pub struct Menu {
 
 /// One panel level: the row's actions at the root, a group's children below it.
 pub struct MenuLevel {
-    /// The header line; the root leaves it to the row's title.
+    /// The title line; the root leaves it to the row's title.
     pub title: Option<String>,
     pub actions: Vec<ActionItem>,
     pub cursor: Cursor,
@@ -35,7 +35,7 @@ impl Menu {
             .map_or_else(Cursor::default, |level| level.cursor)
     }
 
-    /// The current level's own header, when it has one.
+    /// The current level's own title, when it has one.
     pub fn title(&self) -> Option<&str> {
         self.current()?.title.as_deref()
     }
@@ -269,7 +269,7 @@ impl State {
             .map(|(scope, id)| (scope, Some(id)))
     }
 
-    /// The panel's header: the row's title at the root, a group's title inside.
+    /// The panel's title: the row's title at the root, a group's title inside.
     pub fn menu_title(&self) -> Option<&str> {
         let menu = self.menu.as_ref()?;
         menu.title()
@@ -521,8 +521,8 @@ mod tests {
             state.selected_action().unwrap().title,
             "Reveal in file manager"
         );
-        // the panel is taller than the one-row list it replaced
-        assert_eq!(state.content_height(), state.layout().panel_h(1));
+        // the panel is as tall as a one-row list
+        assert_eq!(state.content_height(), state.layout().content_h(1));
 
         state.menu = None;
         assert!(state.menu.is_none());
@@ -857,9 +857,10 @@ mod tests {
     }
 
     #[test]
-    fn enter_opens_a_group_and_the_panel_header_names_it() {
+    fn enter_opens_a_group_and_the_footer_names_it() {
         let uri = "file:///tmp/a.txt";
         let mut state = state();
+        let now = Instant::now();
         state.apply_results(
             vec![file_row(
                 uri,
@@ -881,15 +882,17 @@ mod tests {
                     ),
                 ],
             )],
-            Instant::now(),
+            now,
         );
 
         assert!(state.open_actions());
         assert_eq!(state.menu_title(), Some("a.txt"));
+        assert_eq!(state.frame(now).footer.panel_title, Some("a.txt"));
         state.menu_select(1);
         assert!(matches!(state.menu_enter(), MenuEnter::Opened));
         assert_eq!(state.menu_title(), Some("Open with"));
-        assert_eq!(state.content_height(), state.layout().panel_h(2));
+        assert_eq!(state.frame(now).footer.panel_title, Some("Open with"));
+        assert_eq!(state.content_height(), state.layout().content_h(2));
         assert_eq!(state.selected_action().unwrap().title, "Firefox");
 
         match state.menu_enter() {
@@ -899,7 +902,11 @@ mod tests {
 
         assert!(state.menu_back(), "escape returns to the row's actions");
         assert_eq!(state.menu_title(), Some("a.txt"));
+        assert_eq!(state.frame(now).footer.panel_title, Some("a.txt"));
         assert!(!state.menu_back(), "the root level has nowhere to go");
+
+        state.menu = None;
+        assert_eq!(state.frame(now).footer.panel_title, None);
     }
 
     #[test]
@@ -961,7 +968,7 @@ mod tests {
 
         let menu = state.menu.as_ref().expect("the panel comes back");
         assert_eq!(menu.levels.len(), 2);
-        assert!(menu.title().is_some(), "the submenu keeps its own header");
+        assert!(menu.title().is_some(), "the submenu keeps its own title");
         assert!(menu.actions()[0].default);
         assert_eq!(menu.cursor().selected, 0);
 

@@ -1,6 +1,6 @@
 # 插件目录
 
-下面的示例都在 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区。它们只是参考材料：只有 `plugins.toml` 指向某个插件时，它才会被注册。多数 Lua 示例是单个脚本；`kde.lua` 还带有 `kde/` 模块。Python 示例是一个目录，自带一份 `wayrun_plugin/`。
+下面的示例都在 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) 工作区。它们只是参考材料：只有 `plugins.toml` 指向某个插件时，它才会被注册。多数 Lua 示例是单个脚本；`kde.lua` 与 `windows.lua` 还分别带有 `kde/` 和 `windows/` 模块。Python 示例是一个目录，自带一份 `wayrun_plugin/`。
 
 ## Lua 示例
 
@@ -18,8 +18,10 @@
 | [汇率换算](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/currency.lua) | 按每日汇率换算货币 | 网络 |
 | [KDE 设置](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/kde.lua) | 搜索 KDE 系统设置 | KDE Plasma；`systemsettings` 或 `kcmshell6` |
 | [软件包](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/packages.lua) | 搜索 pacman 仓库与 AUR | Arch；`pacman`；可选的 `paru` 或 `yay` |
+| [窗口切换](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/windows.lua) | 在打开的窗口之间切换 | KDE、niri 或 Hyprland；`busctl`、`niri` 或 `hyprctl` |
+| [结束进程](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/kill.lua) | 按名称查找进程，发送 SIGTERM 或 SIGKILL | `ps`、`kill`（procps-ng） |
 
-`firefox.lua` 与 `web.lua` 读取脚本旁的 `assets/` 目录；`documents.lua` 读取 `documents/`，`kde.lua` 读取 `kde/`。复制脚本时把目录一起带上。
+`firefox.lua` 与 `web.lua` 读取脚本旁的 `assets/` 目录；`documents.lua` 读取 `documents/`，`kde.lua` 读取 `kde/`，`windows.lua` 读取 `windows/`。复制脚本时把目录一起带上。
 
 ## Python 示例
 

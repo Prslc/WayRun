@@ -27,6 +27,7 @@ pub struct ListView<'a> {
 }
 
 /// What the split view shows beside the list.
+#[derive(Clone, Copy)]
 pub enum PreviewView<'a> {
     Image { path: &'a str },
     Text { text: &'a str },
@@ -45,7 +46,6 @@ impl PreviewView<'_> {
 
 /// The action panel that replaces the list.
 pub struct PanelView<'a> {
-    pub parent_title: Option<&'a str>,
     pub actions: &'a [ActionItem],
     pub first: usize,
     pub selected: usize,
@@ -66,12 +66,16 @@ pub struct FooterView<'a> {
     pub action_count: usize,
     pub query_empty: bool,
     pub panel: bool,
+    /// A search is in flight; the footer holds its no-match note.
+    pub searching: bool,
     /// A search has been in flight past the delay; the footer says so.
     pub loading: bool,
     pub has_actions: bool,
     pub can_default: bool,
     pub is_default: bool,
     pub effective_label: Option<&'a str>,
+    /// The open panel's row or group title; the footer draws it at the right.
+    pub panel_title: Option<&'a str>,
 }
 
 /// One frame, fully resolved: the renderer reads nothing else.
@@ -98,7 +102,7 @@ pub struct Frame<'a> {
 impl Frame<'_> {
     /// A card-content colour at `alpha`, scaled by the entrance fade: the whole
     /// card arrives as one unit and the first frame really is invisible.
-    pub fn fade(&self, color: [u8; 3], alpha: f32) -> [u8; 4] {
+    fn fade(&self, color: [u8; 3], alpha: f32) -> [u8; 4] {
         [
             color[0],
             color[1],
@@ -110,11 +114,6 @@ impl Frame<'_> {
     /// A resolved surface colour, whose own inline alpha rides the entrance.
     pub fn fade_rgba(&self, color: [u8; 4]) -> [u8; 4] {
         self.fade([color[0], color[1], color[2]], color[3] as f32 / 255.0)
-    }
-
-    /// [`Self::fade`] with a per-row alpha on top of the entrance.
-    pub fn fade_scaled(&self, color: [u8; 3], alpha: f32, scale: f32) -> [u8; 4] {
-        self.fade(color, alpha * scale)
     }
 
     /// [`Self::fade_rgba`] with a per-row alpha on top of the entrance.

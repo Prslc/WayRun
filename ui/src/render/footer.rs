@@ -2,13 +2,15 @@ use std::sync::OnceLock;
 
 use cosmic_text::Weight;
 use rust_i18n::t;
-use tiny_skia::Pixmap;
 
 use crate::geom;
-use crate::text::TextEngine;
+use crate::text::Shaped;
+use crate::theme::tint;
 use crate::view::Frame;
 
-use super::canvas::{Canvas, Rect};
+use crate::geom::Rect;
+
+use super::DrawCtx;
 
 /// One key hint: a keycap and its label. An empty key is a plain note; an
 /// `effective` label is the action a remembered default makes `Enter` run.
@@ -72,7 +74,7 @@ pub(super) fn footer_hints(
     has_actions: bool,
     can_default: bool,
     is_default: bool,
-    loading: bool,
+    searching: bool,
 ) -> &'static [Hint] {
     let hints = hints();
     if panel {
@@ -89,7 +91,7 @@ pub(super) fn footer_hints(
         } else {
             &hints.launch
         }
-    } else if query_empty || loading {
+    } else if query_empty || searching {
         &[]
     } else {
         &hints.no_match
@@ -97,21 +99,86 @@ pub(super) fn footer_hints(
 }
 
 const KEYCAP_PAD_X: f32 = 5.0;
+const KEYCAP_PAD_Y: f32 = 3.0;
 const KEYCAP_RADIUS: f32 = 4.0;
 const KEY_LABEL_GAP: f32 = 6.0;
 const ITEM_GAP: f32 = 16.0;
 const COUNT_GAP: f32 = 14.0;
+/// The panel title is a label, not a hint: below this width it would paint a
+/// lone ellipsis, so it is dropped rather than drawn that way.
+const TITLE_MIN_W: f32 = 40.0;
+
+/// The footer's own tokens: the keycap chips, their labels, the count pill and
+/// the panel title.
+struct Style {
+    keycap_fill: [u8; 4],
+    key: [u8; 4],
+    label: [u8; 4],
+    chip_fill: [u8; 4],
+    chip_text: [u8; 4],
+    title: [u8; 4],
+}
+
+impl Style {
+    fn of(frame: &Frame<'_>) -> Self {
+        let fg = frame.theme.fg;
+        Self {
+            keycap_fill: tint(fg, 0.09),
+            key: tint(fg, 0.75),
+            label: frame.surfaces.footer,
+            chip_fill: tint(fg, 0.06),
+            chip_text: frame.surfaces.muted,
+            title: tint(frame.theme.primary, 0.9),
+        }
+    }
+}
 
 fn count_label(n: usize, one: &'static str, many: &'static str) -> String {
     if n == 1 { t!(one) } else { t!(many, count = n) }
 }
 
-pub(super) fn draw_footer(
-    canvas: &Canvas,
-    pixmap: &mut Pixmap,
-    frame: &Frame<'_>,
-    text: &mut TextEngine,
-) {
+fn chip_w(text_w: f32) -> f32 {
+    text_w + 2.0 * KEYCAP_PAD_X
+}
+
+/// A chip's height around a line of `text_h`, capped at the footer band.
+fn chip_h(text_h: f32) -> f32 {
+    (text_h + 2.0 * KEYCAP_PAD_Y).min(geom::FOOTER_H)
+}
+
+/// A label-only chip: the count pill and the no-match note share its style.
+fn draw_label_chip(ctx: &mut DrawCtx, shaped: &Shaped, x: f32, center_y: f32) {
+    let canvas = ctx.canvas;
+    let frame = ctx.frame;
+    let style = Style::of(frame);
+    let width = chip_w(canvas.unpx(shaped.width));
+    let height = canvas.unpx(shaped.height);
+    let cap_h = chip_h(height);
+    canvas.fill_round(
+        ctx.pixmap,
+        Rect {
+            x,
+            y: center_y - cap_h / 2.0,
+            w: width,
+            h: cap_h,
+        },
+        KEYCAP_RADIUS,
+        frame.fade_rgba(style.chip_fill),
+    );
+    ctx.text.draw(
+        ctx.pixmap,
+        shaped,
+        frame.fade_rgba(style.chip_text),
+        canvas.px(x + KEYCAP_PAD_X),
+        canvas.px(center_y - height / 2.0),
+        None,
+    );
+}
+
+pub(super) fn draw_footer(ctx: &mut DrawCtx) {
+    let frame = ctx.frame;
+    let canvas = ctx.canvas;
+    let style = Style::of(frame);
     let footer = &frame.footer;
     let panel = footer.panel;
     let empty = footer.rows == 0;
@@ -122,7 +189,7 @@ pub(super) fn draw_footer(
         footer.has_actions,
         footer.can_default,
         footer.is_default,
-        footer.loading,
+        footer.searching,
     );
 
     let count = if panel {
@@ -145,19 +212,19 @@ pub(super) fn draw_footer(
 
     // The footer is the card's last band, so it rides the drawn height rather
     // than jumping ahead to the resting one.
-    let layout = frame.layout;
-    let top = layout.card_top(frame.surface) + frame.card_h - geom::PAD - geom::FOOTER_H;
-    let center_y = top + geom::FOOTER_H / 2.0;
-    let (left, width) = layout.row_band(frame.surface);
-    let right = left + width;
+    let band = frame.layout.footer_rect(frame.surface, frame.card_h);
+    let center_y = band.center_y();
+    let left = band.x;
+    let right = band.right();
     let font_size = frame.font.suggestion();
     let label_size = font_size * canvas.scale;
     let key_size = (font_size - 1.0).max(6.0) * canvas.scale;
 
-    let count_shaped = (!count.is_empty()).then(|| text.shape(&count, label_size, Weight::NORMAL));
-    let count_cap_w = count_shaped.as_ref().map_or(0.0, |shaped| {
-        shaped.width / canvas.scale + 2.0 * KEYCAP_PAD_X
-    });
+    let count_shaped =
+        (!count.is_empty()).then(|| ctx.text.shape(&count, label_size, Weight::NORMAL));
+    let count_cap_w = count_shaped
+        .as_ref()
+        .map_or(0.0, |shaped| chip_w(canvas.unpx(shaped.width)));
     let limit = right
         - count_cap_w
         - if count_shaped.is_some() {
@@ -170,44 +237,36 @@ pub(super) fn draw_footer(
     let effective = footer.effective_label;
     for hint in hints {
         if hint.key.is_empty() {
-            let shaped = text.shape(&hint.label, label_size, Weight::NORMAL);
-            let height = shaped.height / canvas.scale;
-            text.draw(
-                pixmap,
-                &shaped,
-                frame.fade(frame.theme.primary, 0.7),
-                canvas.px(x),
-                canvas.px(center_y - height / 2.0),
-                None,
-            );
+            let shaped = ctx.text.shape(&hint.label, label_size, Weight::NORMAL);
+            draw_label_chip(ctx, &shaped, x, center_y);
             break;
         }
 
-        let key = text.shape(hint.key, key_size, Weight::NORMAL);
-        let key_w = key.width / canvas.scale;
-        let cap_w = key_w + 2.0 * KEYCAP_PAD_X;
+        let key = ctx.text.shape(hint.key, key_size, Weight::NORMAL);
+        let key_w = canvas.unpx(key.width);
+        let cap_w = chip_w(key_w);
         // An action name is arbitrary, so it is elided to the room left instead
         // of dropping the whole hint the way a fixed label does.
         let label = if hint.effective {
             let room = limit - x - cap_w - KEY_LABEL_GAP;
-            text.fit(
+            ctx.text.fit(
                 effective.unwrap_or(&hint.label),
                 label_size,
                 Weight::NORMAL,
-                room,
+                room * canvas.scale,
             )
         } else {
-            text.shape(&hint.label, label_size, Weight::NORMAL)
+            ctx.text.shape(&hint.label, label_size, Weight::NORMAL)
         };
-        let label_w = label.width / canvas.scale;
-        let cap_h = (key.height / canvas.scale + 6.0).min(geom::FOOTER_H);
+        let label_w = canvas.unpx(label.width);
+        let cap_h = chip_h(canvas.unpx(key.height));
         if x + cap_w + KEY_LABEL_GAP + label_w > limit {
             break;
         }
 
         // The keycap is a chip around the key glyph, centred in the footer band.
-        canvas.fill_round(
-            pixmap,
+        ctx.canvas.fill_round(
+            ctx.pixmap,
             Rect {
                 x,
                 y: center_y - cap_h / 2.0,
@@ -215,52 +274,51 @@ pub(super) fn draw_footer(
                 h: cap_h,
             },
             KEYCAP_RADIUS,
-            frame.fade(frame.theme.fg, 0.09),
+            frame.fade_rgba(style.keycap_fill),
         );
-        text.draw(
-            pixmap,
+        ctx.text.draw(
+            ctx.pixmap,
             &key,
-            frame.fade(frame.theme.fg, 0.75),
+            frame.fade_rgba(style.key),
             canvas.px(x + KEYCAP_PAD_X),
-            canvas.px(center_y - key.height / canvas.scale / 2.0),
+            canvas.px(center_y - canvas.unpx(key.height) / 2.0),
             None,
         );
-        text.draw(
-            pixmap,
+        ctx.text.draw(
+            ctx.pixmap,
             &label,
-            frame.fade_rgba(frame.surfaces.footer),
+            frame.fade_rgba(style.label),
             canvas.px(x + cap_w + KEY_LABEL_GAP),
-            canvas.px(center_y - label.height / canvas.scale / 2.0),
+            canvas.px(center_y - canvas.unpx(label.height) / 2.0),
             None,
         );
         x += cap_w + KEY_LABEL_GAP + label_w + ITEM_GAP;
     }
 
+    if let Some(title) = footer.panel_title.filter(|title| !title.trim().is_empty()) {
+        // `x` already carries the ITEM_GAP after the last drawn hint; `limit`
+        // sits COUNT_GAP left of the count pill.
+        let room = limit - x;
+        if room >= TITLE_MIN_W {
+            let shaped = ctx
+                .text
+                .fit(title, label_size, Weight::BOLD, room * canvas.scale);
+            let width = canvas.unpx(shaped.width);
+            let height = canvas.unpx(shaped.height);
+            ctx.text.draw(
+                ctx.pixmap,
+                &shaped,
+                frame.fade_rgba(style.title),
+                canvas.px(limit - width),
+                canvas.px(center_y - height / 2.0),
+                None,
+            );
+        }
+    }
+
     if let Some(shaped) = &count_shaped {
-        let width = shaped.width / canvas.scale;
-        let height = shaped.height / canvas.scale;
-        let cap_w = width + 2.0 * KEYCAP_PAD_X;
-        let cap_h = (height + 6.0).min(geom::FOOTER_H);
-        let x = right - cap_w;
-        canvas.fill_round(
-            pixmap,
-            Rect {
-                x,
-                y: center_y - cap_h / 2.0,
-                w: cap_w,
-                h: cap_h,
-            },
-            KEYCAP_RADIUS,
-            frame.fade(frame.theme.fg, 0.06),
-        );
-        text.draw(
-            pixmap,
-            shaped,
-            frame.fade_rgba(frame.surfaces.muted),
-            canvas.px(x + KEYCAP_PAD_X),
-            canvas.px(center_y - height / 2.0),
-            None,
-        );
+        let x = right - chip_w(canvas.unpx(shaped.width));
+        draw_label_chip(ctx, shaped, x, center_y);
     }
 }
 

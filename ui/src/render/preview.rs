@@ -1,107 +1,95 @@
 use std::rc::Rc;
 
 use cosmic_text::Weight;
-use tiny_skia::Pixmap;
 use wayrun_core::wire::IconShape;
 
-use crate::geom::PreviewKind;
-use crate::icons::{IconCache, IconDraw};
-use crate::markdown::MarkdownCache;
-use crate::text::{LINE_HEIGHT, Shaped, TextEngine, TextStyle};
+use crate::geom::Rect;
+use crate::icons::IconDraw;
+use crate::text::{Shaped, TextEngine, TextStyle, line_height, split_wide};
+use crate::theme::tint;
 use crate::view::{Frame, PreviewView};
 
-use super::canvas::{Canvas, Rect};
+use super::DrawCtx;
 
 /// The pane sits inside the body, leaving a small card margin around it.
 const PANE_INSET: f32 = 4.0;
-pub(super) const PANE_PAD: f32 = 10.0;
-
-/// The caches a preview draw borrows; bundled so the draw keeps a small signature.
-pub(super) struct PreviewCaches<'a> {
-    pub text: &'a mut TextEngine,
-    pub markdown: &'a mut MarkdownCache,
-    pub icons: &'a mut IconCache,
-}
+const PANE_PAD: f32 = 10.0;
 
 /// The split view's right column: a tonal pane holding an image, plain text or
 /// rendered Markdown.
-pub(super) fn draw_preview(
-    canvas: &Canvas,
-    pixmap: &mut Pixmap,
-    frame: &Frame<'_>,
-    rows: usize,
-    preview: &PreviewView<'_>,
-    caches: PreviewCaches<'_>,
-) {
+pub(super) fn draw_preview(ctx: &mut DrawCtx, preview: &PreviewView<'_>) {
     match preview {
-        PreviewView::Image { path } => draw_image(canvas, pixmap, frame, rows, path, caches.icons),
+        PreviewView::Image { path } => draw_image(ctx, path),
         PreviewView::Text { text: body } => {
-            let pane = text_pane(frame, rows);
+            let pane = text_pane(ctx.frame);
             if pane.w <= 0.0 || pane.h <= 0.0 {
                 return;
             }
-            fill_pane(canvas, pixmap, frame, pane);
-            draw_text(canvas, pixmap, frame, pane, body, caches.text);
+            fill_pane(ctx, pane);
+            draw_text(ctx, pane.inset(PANE_PAD), body);
         }
         PreviewView::Markdown { text: body } => {
-            let pane = text_pane(frame, rows);
+            let pane = text_pane(ctx.frame);
             if pane.w <= 0.0 || pane.h <= 0.0 {
                 return;
             }
-            fill_pane(canvas, pixmap, frame, pane);
-            super::markdown::draw_markdown(
-                canvas,
-                pixmap,
-                frame,
-                pane,
-                body,
-                caches.text,
-                caches.markdown,
-            );
+            fill_pane(ctx, pane);
+            super::markdown::draw_markdown(ctx, pane.inset(PANE_PAD), body);
         }
     }
 }
 
-fn fill_pane(canvas: &Canvas, pixmap: &mut Pixmap, frame: &Frame<'_>, pane: Rect) {
-    canvas.fill_round(
-        pixmap,
+/// The preview's own tokens: the tonal pane and the plain-text ink.
+struct Style {
+    pane: [u8; 4],
+    text: [u8; 4],
+}
+
+impl Style {
+    fn of(frame: &Frame<'_>) -> Self {
+        Self {
+            pane: frame.surfaces.preview,
+            text: tint(frame.theme.fg, 0.85),
+        }
+    }
+}
+
+fn fill_pane(ctx: &mut DrawCtx, pane: Rect) {
+    let frame = ctx.frame;
+    ctx.canvas.fill_round(
+        ctx.pixmap,
         pane,
         frame.layout.row_radius(),
-        frame.fade_rgba(frame.surfaces.preview),
+        frame.fade_rgba(Style::of(frame).pane),
     );
 }
 
-fn text_pane(frame: &Frame<'_>, rows: usize) -> Rect {
+fn text_pane(frame: &Frame<'_>) -> Rect {
     let layout = frame.layout;
     let (left, width) = layout.preview_band(frame.surface);
     Rect {
         x: left,
         y: layout.rows_top(frame.surface) + PANE_INSET,
         w: width,
-        h: (layout.split_h(rows, PreviewKind::Text) - PANE_INSET * 2.0).max(0.0),
+        h: (layout.body_h(frame.content_h) - PANE_INSET * 2.0).max(0.0),
     }
 }
 
 /// A pane fitted to the image's aspect, centered in the body. The square render
 /// is centered on that pane; its transparent letterbox never paints.
-fn draw_image(
-    canvas: &Canvas,
-    pixmap: &mut Pixmap,
-    frame: &Frame<'_>,
-    rows: usize,
-    path: &str,
-    icons: &mut IconCache,
-) {
+fn draw_image(ctx: &mut DrawCtx, path: &str) {
     if path.is_empty() {
         return;
     }
+    let frame = ctx.frame;
+    let canvas = ctx.canvas;
     let layout = frame.layout;
     let (band_left, band_w) = layout.preview_band(frame.surface);
     let body_top = layout.rows_top(frame.surface);
-    let body_h = layout.split_h(rows, PreviewKind::Image);
+    let body_h = layout.body_h(frame.content_h);
     let max_w = (band_w - PANE_PAD * 2.0).max(1.0);
     let max_h = (body_h - PANE_INSET * 2.0 - PANE_PAD * 2.0).max(1.0);
-    let (image_w, image_h) = match icons.aspect(path) {
+    let (image_w, image_h) = match ctx.icons.aspect(path) {
         Some((width, height)) if width > 0 && height > 0 => fit_image(width, height, max_w, max_h),
         _ => {
             let side = max_w.min(max_h);
@@ -118,7 +106,7 @@ fn draw_image(
     if pane.w <= 0.0 || pane.h <= 0.0 {
         return;
     }
-    fill_pane(canvas, pixmap, frame, pane);
+    fill_pane(ctx, pane);
 
     // The contain-fit square is centered on the fitted image, so the visible
     // pixels land inside the pane while the letterbox falls outside it.
@@ -126,8 +114,8 @@ fn draw_image(
     let square_x = pane.x + (pane.w - square) / 2.0;
     let square_y = pane.y + (pane.h - square) / 2.0;
     let size = (square * canvas.scale).round().max(1.0) as u32;
-    icons.draw(
-        pixmap,
+    ctx.icons.draw(
+        ctx.pixmap,
         IconDraw {
             path,
             x: canvas.px(square_x),
@@ -148,34 +136,36 @@ fn fit_image(width: u32, height: u32, max_w: f32, max_h: f32) -> (f32, f32) {
 }
 
 /// Plain text wrapped to the pane, clipped to it; no scrolling yet.
-fn draw_text(
-    canvas: &Canvas,
-    pixmap: &mut Pixmap,
-    frame: &Frame<'_>,
-    pane: Rect,
-    body: &str,
-    text: &mut TextEngine,
-) {
-    let width = (pane.w - PANE_PAD * 2.0).max(1.0);
-    let height = (pane.h - PANE_PAD * 2.0).max(1.0);
+fn draw_text(ctx: &mut DrawCtx, content: Rect, body: &str) {
+    let frame = ctx.frame;
+    let canvas = ctx.canvas;
+    let width = content.w.max(1.0);
+    let height = content.h.max(1.0);
     let size = frame.font.title() * canvas.scale;
-    let line_h = (frame.font.title() * LINE_HEIGHT).round();
+    let line_h = line_height(frame.font.title());
     if line_h <= 0.0 {
         return;
     }
     let max_lines = (height / line_h).floor().max(1.0) as usize;
     let clip = [
-        canvas.px(pane.x + PANE_PAD),
-        canvas.px(pane.y + PANE_PAD),
+        canvas.px(content.x),
+        canvas.px(content.y),
         canvas.px(width),
         canvas.px(height),
     ];
-    let color = frame.fade(frame.theme.fg, 0.85);
-    let lines = wrap(text, body, size, width * canvas.scale, max_lines);
-    let x = pane.x + PANE_PAD;
-    let mut y = pane.y + PANE_PAD;
+    let color = frame.fade_rgba(Style::of(frame).text);
+    let lines = wrap(ctx.text, body, size, width * canvas.scale, max_lines);
+    let x = content.x;
+    let mut y = content.y;
     for line in &lines {
-        text.draw(pixmap, line, color, canvas.px(x), canvas.px(y), Some(clip));
+        ctx.text.draw(
+            ctx.pixmap,
+            line,
+            color,
+            canvas.px(x),
+            canvas.px(y),
+            Some(clip),
+        );
         y += line_h;
     }
 }
@@ -239,69 +229,6 @@ fn wrap(
     lines
 }
 
-/// Split one over-long token into chunks that each fit `max_w`, on char
-/// boundaries; a single character wider than the column is kept alone.
-pub(super) fn split_wide(
-    engine: &mut TextEngine,
-    text: &str,
-    size: f32,
-    style: TextStyle,
-    max_w: f32,
-    budget: usize,
-) -> Vec<String> {
-    let mut chunks = Vec::new();
-    let mut rest = text;
-    while !rest.is_empty() && chunks.len() < budget {
-        let end = longest_prefix(engine, rest, size, style, max_w);
-        chunks.push(rest[..end].to_string());
-        rest = &rest[end..];
-    }
-    chunks
-}
-
-/// The byte end of the longest prefix that fits `max_w`; probing doubles from
-/// a few chars and then binary-searches, so only the cut chunk is shaped.
-fn longest_prefix(
-    engine: &mut TextEngine,
-    text: &str,
-    size: f32,
-    style: TextStyle,
-    max_w: f32,
-) -> usize {
-    let mut low = 0usize;
-    let mut high;
-    let mut probe = 8usize;
-    loop {
-        let end = char_end(text, probe);
-        if engine.shape_styled(&text[..end], size, style).width <= max_w {
-            if end == text.len() {
-                return end;
-            }
-            low = probe;
-            probe *= 2;
-        } else {
-            high = probe;
-            break;
-        }
-    }
-    while high - low > 1 {
-        let mid = low + (high - low) / 2;
-        let end = char_end(text, mid);
-        if engine.shape_styled(&text[..end], size, style).width <= max_w {
-            low = mid;
-        } else {
-            high = mid;
-        }
-    }
-    char_end(text, low.max(1))
-}
-
-fn char_end(text: &str, chars: usize) -> usize {
-    text.char_indices()
-        .nth(chars)
-        .map_or(text.len(), |(index, _)| index)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -339,21 +266,6 @@ mod tests {
         );
         assert!(lines.len() > 1);
         assert!(lines.iter().all(|line| line.width <= 40.5));
-    }
-
-    #[test]
-    fn a_wide_run_is_chunked_within_the_line_budget() {
-        let mut text = engine();
-        let chunks = split_wide(
-            &mut text,
-            &"中".repeat(200),
-            14.0,
-            TextStyle::normal(Weight::NORMAL),
-            40.0,
-            5,
-        );
-        assert_eq!(chunks.len(), 5);
-        assert!(chunks.iter().all(|chunk| !chunk.is_empty()));
     }
 
     #[test]

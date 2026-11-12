@@ -90,8 +90,7 @@ The same pages are published as a site at
 - [Installation](docs/en/install.md) — requirements, install, first launch, and
   feature dependencies.
 - [Usage](docs/en/usage.md) — prefixes, keybindings, and copy/paste.
-- [Config](docs/en/config.md) — `config.toml` (locale, fonts, icons, the file
-  index).
+- [Config](docs/en/config.md) — `config.toml` (locale, icons, the file index).
 - [Theme](docs/en/theme.md) — the system palette and `theme.toml` (colors, blur,
   layout, typography, motion).
 - [Resident mode](docs/en/resident.md) — the systemd unit and the control commands.

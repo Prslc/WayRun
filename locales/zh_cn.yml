@@ -32,6 +32,11 @@ command.suspend: 挂起
 command.reboot: 重启
 command.shutdown: 关机
 command.logout: 注销
+command.lock.description: 锁定屏幕，会话继续运行
+command.suspend.description: 挂起计算机，保留当前会话
+command.reboot.description: 重新启动计算机
+command.shutdown.description: 关闭计算机
+command.logout.description: 结束当前会话，计算机保持运行
 
 action.open: 打开
 action.open_with: 用其他应用打开

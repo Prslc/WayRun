@@ -1,4 +1,5 @@
 use crate::geom::{Align, Layout};
+use crate::present::ENTRANCE_MS;
 use crate::theme;
 
 /// Assign the parsed key when present; an absent key keeps the current value.
@@ -205,15 +206,19 @@ impl ColorConfig {
     }
 }
 
-/// One interface size; every text and icon role keeps its shipped ratio to it.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// The text family and one interface size; every role keeps its shipped ratio.
+#[derive(Clone, Debug, PartialEq)]
 pub struct FontConfig {
+    pub family: String,
     pub size: f32,
 }
 
 impl Default for FontConfig {
     fn default() -> Self {
-        Self { size: 14.0 }
+        Self {
+            family: "sans-serif".to_string(),
+            size: 14.0,
+        }
     }
 }
 
@@ -260,6 +265,7 @@ pub struct AppearanceConfig {
     pub layout: Layout,
     pub preview: bool,
     pub reduced: bool,
+    pub entrance_ms: u64,
 }
 
 impl Default for AppearanceConfig {
@@ -272,6 +278,7 @@ impl Default for AppearanceConfig {
             layout: Layout::default(),
             preview: true,
             reduced: false,
+            entrance_ms: ENTRANCE_MS,
         }
     }
 }
@@ -308,18 +315,23 @@ struct LayoutFile {
     top_ratio: Option<f32>,
     align: Option<String>,
     max_rows: Option<usize>,
-    panel_header: Option<f32>,
+    fixed_height: Option<bool>,
 }
 
 #[derive(serde::Deserialize, Default)]
 struct FontFile {
+    family: Option<String>,
     size: Option<f32>,
 }
 
 #[derive(serde::Deserialize, Default)]
 struct MotionFile {
     reduced: Option<bool>,
+    entrance_ms: Option<u64>,
 }
+
+/// A longer entrance is a stall, not an animation.
+const MAX_ENTRANCE_MS: u64 = 2_000;
 
 #[derive(serde::Deserialize, Default)]
 struct PreviewFile {
@@ -359,6 +371,7 @@ impl AppearanceConfig {
         assign!(self.blur, blur.enabled);
         assign!(self.preview, preview.enabled);
         assign!(self.layout.footer, footer.enabled);
+        assign!(self.font.family, font.family.and_then(non_blank));
         assign!(self.font.size, font.size.and_then(|v| positive(v, 96.0)));
 
         assign!(
@@ -375,15 +388,13 @@ impl AppearanceConfig {
             layout.align.as_deref().and_then(parse_align)
         );
         assign!(self.layout.max_rows, layout.max_rows.map(|v| v.clamp(1, 8)));
-        assign!(
-            self.layout.panel_header_h,
-            layout
-                .panel_header
-                .filter(|v| v.is_finite())
-                .map(|v| v.max(0.0))
-        );
+        assign!(self.layout.fixed_height, layout.fixed_height);
 
         assign!(self.reduced, motion.reduced);
+        assign!(
+            self.entrance_ms,
+            motion.entrance_ms.map(|v| v.min(MAX_ENTRANCE_MS))
+        );
     }
 }
 
@@ -394,6 +405,11 @@ fn parse_align(value: &str) -> Option<Align> {
         "right" => Some(Align::Right),
         _ => None,
     }
+}
+
+/// A blank family keeps the shipped default instead of shaping with nothing.
+fn non_blank(text: String) -> Option<String> {
+    (!text.trim().is_empty()).then_some(text)
 }
 
 /// A finite, positive value clamped into `(0, max]`, else `None`.
@@ -418,6 +434,7 @@ mod tests {
     #[test]
     fn absent_keys_keep_the_defaults() {
         assert_eq!(parse(""), AppearanceConfig::default());
+        assert!(!AppearanceConfig::default().layout.fixed_height);
     }
 
     #[test]
@@ -441,13 +458,14 @@ mod tests {
             radius = 20.0
             width = 800.0
             max_rows = 3
-            panel_header = 34.0
+            fixed_height = true
 
             [surfaces]
             hairline = { width = 2.0 }
 
             [motion]
             reduced = true
+            entrance_ms = 400
             "##,
         );
         assert_eq!(config.colors.shared.primary, Some([0x7a, 0xa2, 0xf7]));
@@ -459,8 +477,9 @@ mod tests {
         assert_eq!(config.surfaces.shared.hairline.unwrap().width, Some(2.0));
         assert_eq!(config.layout.width, 800.0);
         assert_eq!(config.layout.max_rows, 3);
-        assert_eq!(config.layout.panel_header_h, 34.0);
+        assert!(config.layout.fixed_height);
         assert!(config.reduced);
+        assert_eq!(config.entrance_ms, 400);
         // untouched defaults survive
         assert_eq!(config.font.size, 14.0);
         assert_eq!(config.layout.top_ratio, 0.20);
@@ -482,7 +501,7 @@ mod tests {
 
             [layout]
             max_rows = 99
-            panel_header = -5.0
+            radius = -4.0
 
             [surfaces]
             hairline = { width = 40.0 }
@@ -490,7 +509,7 @@ mod tests {
         );
         assert_eq!(config.font.size, 96.0);
         assert_eq!(config.layout.max_rows, 8);
-        assert_eq!(config.layout.panel_header_h, 0.0);
+        assert_eq!(config.layout.radius, 0.0);
         assert_eq!(config.surfaces.shared.hairline.unwrap().width, Some(16.0));
     }
 
@@ -586,12 +605,25 @@ mod tests {
             offset_x = 12.0
             row_radius = 3.0
             width_ratio = 0.5
+            panel_header = 28.0
 
             [motion]
-            entrance_ms = 100
+            stagger_ms = 100
             "##,
         );
         assert_eq!(config, AppearanceConfig::default());
+    }
+
+    #[test]
+    fn entrance_ms_is_clamped_and_zero_is_kept() {
+        assert_eq!(parse("[motion]\nentrance_ms = 0").entrance_ms, 0);
+        assert_eq!(parse("[motion]\nentrance_ms = 900").entrance_ms, 900);
+        assert_eq!(
+            parse("[motion]\nentrance_ms = 9999").entrance_ms,
+            MAX_ENTRANCE_MS
+        );
+        assert_eq!(AppearanceConfig::default().entrance_ms, ENTRANCE_MS);
+        assert!(AppearanceConfig::parse("[motion]\nentrance_ms = -1").is_none());
     }
 
     #[test]
@@ -637,6 +669,15 @@ mod tests {
         assert_eq!(Mode::from_wire(Some("dark")), Mode::Dark);
         assert_eq!(Mode::from_wire(None), Mode::Dark);
         assert_eq!(Mode::from_wire(Some("sepia")), Mode::Dark);
+    }
+
+    #[test]
+    fn the_family_is_read_and_a_blank_one_keeps_the_default() {
+        assert_eq!(
+            parse("[font]\nfamily = \"Noto Sans\"").font.family,
+            "Noto Sans"
+        );
+        assert_eq!(parse("[font]\nfamily = \"  \"").font.family, "sans-serif");
     }
 
     #[test]

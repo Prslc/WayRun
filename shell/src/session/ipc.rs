@@ -1,6 +1,6 @@
 use std::env;
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -12,11 +12,10 @@ use std::thread;
 use std::time::Duration;
 
 use calloop::channel::Sender;
+use wayrun_core::desktop;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
-    Open,
-    Close,
     Toggle,
     Status,
 }
@@ -25,8 +24,6 @@ pub enum Command {
 /// reaches the user instead of looking like a wedged daemon.
 pub fn parse_request(line: &str) -> Result<Command, String> {
     match line.trim() {
-        "open" => Ok(Command::Open),
-        "close" => Ok(Command::Close),
         "toggle" => Ok(Command::Toggle),
         "status" => Ok(Command::Status),
         other => Err(format!("error: unknown verb {other:?}")),
@@ -114,6 +111,20 @@ fn lock_instance(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// The status reply: visibility first, then the daemon's static identity.
+fn status_line(visible: bool, session: Option<&str>, socket: Option<&Path>) -> String {
+    let state = if visible { "visible" } else { "hidden" };
+    let socket = socket
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "unknown".into());
+    format!(
+        "{state}\ndesktop: {}\npid: {}\nsocket: {socket}\nversion: {}",
+        session.unwrap_or("unknown"),
+        process::id(),
+        env!("CARGO_PKG_VERSION"),
+    )
+}
+
 fn handle(stream: UnixStream, tx: Sender<Command>) {
     let _ = stream.set_read_timeout(Some(TIMEOUT));
     let _ = stream.set_write_timeout(Some(TIMEOUT));
@@ -127,13 +138,11 @@ fn handle(stream: UnixStream, tx: Sender<Command>) {
     }
 
     let response = match parse_request(&line) {
-        Ok(Command::Status) => {
-            if VISIBLE.load(Ordering::Relaxed) {
-                "visible".to_string()
-            } else {
-                "hidden".to_string()
-            }
-        }
+        Ok(Command::Status) => status_line(
+            VISIBLE.load(Ordering::Relaxed),
+            desktop::id(),
+            socket_path().as_deref(),
+        ),
         Ok(command) => {
             let _ = tx.send(command);
             "ok".to_string()
@@ -146,7 +155,7 @@ fn handle(stream: UnixStream, tx: Sender<Command>) {
     let _ = writer.flush();
 }
 
-/// The client end: `wayrun open|close|toggle|status`.
+/// The client end: `wayrun toggle|status`.
 pub fn client(verb: &str) -> process::ExitCode {
     let Some(path) = socket_path() else {
         eprintln!("wayrun: XDG_RUNTIME_DIR is not set; no daemon can be reached");
@@ -164,7 +173,10 @@ pub fn client(verb: &str) -> process::ExitCode {
     }
 
     let mut response = String::new();
-    if BufReader::new(&stream).read_line(&mut response).is_err() {
+    if BufReader::new(&stream)
+        .read_to_string(&mut response)
+        .is_err()
+    {
         return process::ExitCode::FAILURE;
     }
     print!("{response}");
@@ -182,9 +194,10 @@ mod tests {
     use std::fs;
     use std::io;
     use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
     use std::process;
 
-    use super::{Command, lock_instance, parse_request};
+    use super::{Command, lock_instance, parse_request, status_line};
 
     #[test]
     fn a_second_instance_lock_is_refused() {
@@ -203,8 +216,6 @@ mod tests {
 
     #[test]
     fn every_client_verb_is_answered() {
-        assert_eq!(parse_request("open\n"), Ok(Command::Open));
-        assert_eq!(parse_request("close\n"), Ok(Command::Close));
         assert_eq!(parse_request("toggle\n"), Ok(Command::Toggle));
         assert_eq!(parse_request("status\n"), Ok(Command::Status));
         assert_eq!(parse_request("  toggle \n"), Ok(Command::Toggle));
@@ -214,5 +225,39 @@ mod tests {
     fn a_typo_is_answered_rather_than_ignored() {
         let error = parse_request("toggl\n").unwrap_err();
         assert!(error.contains("toggl"), "{error}");
+    }
+
+    #[test]
+    fn status_reports_the_daemon_and_desktop() {
+        let socket = Path::new("/run/user/1000/wayrun.sock");
+        let reply = status_line(true, Some("kde"), Some(socket));
+        let mut lines = reply.lines();
+        assert_eq!(lines.next(), Some("visible"));
+        assert_eq!(lines.next(), Some("desktop: kde"));
+        let pid = format!("pid: {}", process::id());
+        assert_eq!(lines.next(), Some(pid.as_str()));
+        assert_eq!(lines.next(), Some("socket: /run/user/1000/wayrun.sock"));
+        assert_eq!(
+            lines.next(),
+            Some(concat!("version: ", env!("CARGO_PKG_VERSION")))
+        );
+    }
+
+    #[test]
+    fn an_unknown_session_and_socket_are_named() {
+        let reply = status_line(false, None, None);
+        let mut lines = reply.lines();
+        assert_eq!(lines.next(), Some("hidden"));
+        assert_eq!(lines.next(), Some("desktop: unknown"));
+        assert!(reply.contains("socket: unknown"));
+    }
+
+    #[test]
+    fn the_first_status_line_stays_the_visibility() {
+        for visible in [true, false] {
+            let reply = status_line(visible, Some("niri"), None);
+            let first = reply.lines().next().unwrap();
+            assert_eq!(first, if visible { "visible" } else { "hidden" });
+        }
     }
 }

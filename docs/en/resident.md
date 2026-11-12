@@ -57,8 +57,10 @@ systemctl --user enable --now wayrun-launcher
 
 ## Control commands
 
-The resident instance owns the socket and answers four commands: `open`,
-`close`, `toggle` and `status`. `status` prints `visible` or `hidden`.
+The resident instance owns the socket and answers two commands: `toggle` and
+`status`. `status` prints `visible` or `hidden` on the first line, then
+`desktop: <id>`, `pid: <pid>`, `socket: <path>` and `version: <version>`;
+`desktop: unknown` means no variable names the session.
 
 Without `WAYRUN_RESIDENT=1`, `wayrun run` shows on launch and quits on dismiss.
 A bare `wayrun` prints the command list in a terminal. Spawned without one, by a

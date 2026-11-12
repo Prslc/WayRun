@@ -59,7 +59,8 @@ a result's `on_click`, and a panel entry's `action`.
 | `type` | Fields | Effect |
 |--------|--------|--------|
 | `run` | `cmd` | execute a shell command (one shell line) |
-| `run_in_terminal` | `cmd` | run a shell command inside a terminal emulator |
+| `run_in_terminal` | `cmd`, `keep_open` | run a shell command inside a terminal emulator; with `keep_open` the terminal continues in an interactive `$SHELL` once the command exits |
+| `session` | `verb` | run a session verb (`lock`, `suspend`, `reboot`, `shutdown`, `logout`) through the line the desktop needs; KDE asks `org.kde.Shutdown` first |
 | `launch` | `desktop_id` | launch an app by desktop id through GLib's `GAppInfo` |
 | `copy` | `text` | write the text to the Wayland clipboard |
 | `desktop_action` | `desktop_id`, `action_id` | run one `[Desktop Action …]` group |

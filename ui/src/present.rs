@@ -4,7 +4,8 @@ use crate::config::{AppearanceConfig, Mode};
 use crate::geom::Layout;
 use crate::theme::{Surfaces, Theme};
 
-/// The entrance fade's duration: a flat pixmap cannot scale, so a show fades in.
+/// The entrance fade's default duration: a flat pixmap cannot scale, so a show
+/// fades in. `[motion].entrance_ms` overrides it.
 pub const ENTRANCE_MS: u64 = 240;
 /// How far below its resting place the card starts; the entrance rises into it.
 const ENTRANCE_SLIDE: f32 = 8.0;
@@ -139,16 +140,16 @@ impl Presentation {
     }
 
     /// The entrance's raw progress: 0 before the first drawn frame, 1 once
-    /// reduced motion or the fade is over.
+    /// reduced motion, a zero duration or the fade is over.
     fn entrance_progress(&self, now: Instant) -> f32 {
-        if self.reduce_motion {
+        if self.reduce_motion || self.appearance.entrance_ms == 0 {
             return 1.0;
         }
         if !self.entrance_started {
             return 0.0;
         }
         let elapsed = now.saturating_duration_since(self.shown_at).as_secs_f32() * 1000.0;
-        (elapsed / ENTRANCE_MS as f32).clamp(0.0, 1.0)
+        (elapsed / self.appearance.entrance_ms as f32).clamp(0.0, 1.0)
     }
 
     /// The entrance's opacity factor: ease-out makes the card visible on the
@@ -174,8 +175,9 @@ impl Presentation {
             return false;
         }
 
-        let entrance =
-            now.saturating_duration_since(self.shown_at) < Duration::from_millis(ENTRANCE_MS);
+        let entrance_ms = self.appearance.entrance_ms;
+        let entrance = entrance_ms > 0
+            && now.saturating_duration_since(self.shown_at) < Duration::from_millis(entrance_ms);
         let height = (self.card_target - self.card_h).abs() > 0.5 || self.card_v.abs() > 5.0;
         entrance || height
     }
@@ -309,6 +311,57 @@ mod tests {
 
         present.reduce_motion = true;
         assert_eq!(present.entrance_offset(start), 0.0);
+    }
+
+    #[test]
+    fn a_zero_entrance_draws_at_rest_and_lets_the_spring_run() {
+        let mut present = Presentation::new(false);
+        present.apply_appearance(AppearanceConfig {
+            entrance_ms: 0,
+            ..AppearanceConfig::default()
+        });
+        let now = Instant::now();
+        present.start_entrance(now);
+
+        assert_eq!(present.entrance(now), 1.0);
+        assert_eq!(present.entrance_offset(now), 0.0);
+        assert_eq!(present.frame_layout(now).offset_y, 0.0);
+        assert!(!present.animating(now));
+
+        present.retarget(present.card_h + 100.0, now);
+        assert!(present.animating(now), "the height spring still runs");
+    }
+
+    #[test]
+    fn turning_the_entrance_off_mid_fade_snaps_it_to_rest() {
+        let mut present = Presentation::new(false);
+        let start = Instant::now();
+        present.start_entrance(start);
+        let mid = start + Duration::from_millis(100);
+        assert!(present.entrance(mid) < 1.0);
+
+        present.apply_appearance(AppearanceConfig {
+            entrance_ms: 0,
+            ..AppearanceConfig::default()
+        });
+        assert_eq!(present.entrance(mid), 1.0);
+        assert_eq!(present.entrance_offset(mid), 0.0);
+        assert!(!present.animating(mid));
+    }
+
+    #[test]
+    fn reduced_motion_wins_over_a_long_entrance() {
+        let mut present = Presentation::new(false);
+        present.apply_appearance(AppearanceConfig {
+            reduced: true,
+            entrance_ms: 2_000,
+            ..AppearanceConfig::default()
+        });
+        let now = Instant::now();
+        present.start_entrance(now);
+
+        assert_eq!(present.entrance(now), 1.0);
+        assert!(!present.animating(now));
     }
 
     #[test]

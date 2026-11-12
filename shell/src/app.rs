@@ -164,12 +164,17 @@ impl State {
     }
 
     /// The card's resting height (panel when open, the field alone while the
-    /// query is untouched, else the list). The footer, blur region and reflow read it.
+    /// query is untouched, else the list; a full `max_rows` height when fixed,
+    /// except for the pristine card). The footer, blur region and reflow read it.
     pub fn content_height(&self) -> f32 {
         let layout = self.layout();
+        let pristine = self.rows.is_empty() && self.query.is_empty();
+        if layout.fixed_height && !pristine {
+            return layout.fixed_h();
+        }
         match &self.menu {
             Some(menu) => layout.panel_h(menu.actions().len()),
-            None if self.rows.is_empty() && self.query.is_empty() => layout.empty_h(),
+            None if pristine => layout.empty_h(),
             None => match self.preview_kind() {
                 Some(kind) => layout.content_h_for(layout.split_h(self.rows.len(), kind)),
                 None => layout.content_h(self.rows.len()),
@@ -217,9 +222,9 @@ impl State {
         } else {
             None
         };
+        let panel_title = self.menu_title();
         let body = match &self.menu {
             Some(menu) => Body::Panel(PanelView {
-                parent_title: self.menu_title(),
                 actions: menu.actions(),
                 first: menu.cursor().first,
                 selected: menu.cursor().selected,
@@ -246,6 +251,7 @@ impl State {
             action_count: self.menu.as_ref().map_or(0, |menu| menu.actions().len()),
             query_empty: self.query.is_empty(),
             panel,
+            searching: self.search_started.is_some(),
             loading,
             has_actions: selected_row.is_some_and(|row| !row.actions.is_empty()),
             can_default: self.selected_default().is_some(),
@@ -261,6 +267,7 @@ impl State {
                     .and_then(effective_action)
                     .map(|action| action.title.as_str())
             },
+            panel_title,
         };
 
         Frame {
@@ -274,7 +281,7 @@ impl State {
             opacity: self.presentation.entrance(now),
             theme: self.presentation.theme,
             surfaces: self.presentation.surfaces,
-            font: self.presentation.appearance.font,
+            font: self.presentation.appearance.font.clone(),
             field,
             body,
             footer,
@@ -344,6 +351,68 @@ mod tests {
         // fractional ratio and 3072 through the integer scale
         assert_eq!((1536.0 * state.scale_factor()).round() as u32, 1920);
         assert_eq!((1536.0 * 2.0) as u32, 3072);
+    }
+
+    #[test]
+    fn a_fixed_height_card_expands_from_the_pristine_state() {
+        use crate::app::test_support::{item, state, with_actions};
+        use wayrun_core::wire::{Preview, TextFormat};
+
+        let mut state = state();
+        state.presentation.appearance.layout.fixed_height = true;
+        let layout = state.layout();
+        let fixed = layout.fixed_h();
+        let now = Instant::now();
+        state.presentation.snap_to(state.content_height(), now);
+
+        assert_eq!(
+            state.content_height(),
+            layout.empty_h(),
+            "the untouched field stays compact"
+        );
+
+        state.query = "q".into();
+        assert_eq!(state.content_height(), fixed, "a query expands the card");
+        state.apply_results(vec![item("one", None, None, None)], now);
+        assert_eq!(state.content_height(), fixed, "one result");
+
+        let many: Vec<_> = (0..layout.max_rows + 3)
+            .map(|i| item(&format!("row{i}"), None, None, None))
+            .collect();
+        state.apply_results(many, now);
+        assert_eq!(state.content_height(), fixed, "more than max_rows");
+        assert_eq!(state.presentation.card_target, fixed, "no retarget");
+
+        state.apply_results(Vec::new(), now);
+        assert_eq!(
+            state.content_height(),
+            fixed,
+            "a no-match query keeps the full height"
+        );
+
+        let mut row = item("note", None, None, None);
+        row.preview = Some(Preview::Text {
+            text: "line".into(),
+            format: TextFormat::Plain,
+        });
+        state.apply_results(vec![row], now);
+        assert!(state.split());
+        assert_eq!(state.content_height(), fixed, "a split preview");
+        assert_eq!(
+            state.layout().body_h(state.content_height()),
+            layout.max_rows as f32 * wayrun_ui::geom::ROW_H
+        );
+
+        state.apply_results(
+            vec![with_actions(item("a.txt", None, None, None), &["Open"])],
+            now,
+        );
+        assert!(state.open_actions());
+        assert_eq!(state.content_height(), fixed, "the action panel");
+        assert_eq!(
+            state.content_height(),
+            state.layout().content_h(layout.max_rows)
+        );
     }
 
     #[test]

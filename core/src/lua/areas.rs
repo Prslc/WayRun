@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 use std::rc::Rc;
 
@@ -28,6 +29,26 @@ pub(super) fn inside(root: &Path, name: &str) -> Result<PathBuf, String> {
         return Err("name must be relative without `..`".to_string());
     }
     let resolved = resolve(&root.join(name));
+    if resolved.starts_with(resolve(root)) {
+        Ok(resolved)
+    } else {
+        Err("path escapes the plugin directory".to_string())
+    }
+}
+
+/// [`inside`] for a link the caller reads rather than follows: only the parent
+/// is resolved, so the link itself may point anywhere.
+pub(super) fn inside_link(root: &Path, name: &str) -> Result<PathBuf, String> {
+    let allowed = !name.is_empty()
+        && !name.starts_with('/')
+        && !name
+            .split('/')
+            .any(|part| part.is_empty() || part == "." || part == "..");
+    if !allowed {
+        return Err("name must be relative without `..`".to_string());
+    }
+    let (parent, file) = split_final(&root.join(name))?;
+    let resolved = resolve(&parent).join(file);
     if resolved.starts_with(resolve(root)) {
         Ok(resolved)
     } else {
@@ -92,6 +113,29 @@ pub(super) fn check(roots: &[PathBuf], requested: &str) -> Result<PathBuf, Strin
     Err("outside the read areas; add the path to the plugin table's read".to_string())
 }
 
+/// [`check`] for a path the caller reads as a link: the final component stays
+/// unresolved, so `/proc/<pid>/exe` is tested and its target may lie elsewhere.
+pub(super) fn check_link(roots: &[PathBuf], requested: &str) -> Result<PathBuf, String> {
+    let Some(path) = expand(requested) else {
+        return Err("the name must be absolute or start with ~/".to_string());
+    };
+    let (parent, file) = split_final(&path)?;
+    let resolved = resolve(&parent).join(file);
+    if roots.iter().any(|root| resolved.starts_with(resolve(root))) {
+        return Ok(resolved);
+    }
+    Err("outside the read areas; add the path to the plugin table's read".to_string())
+}
+
+/// A path's parent and last name, so a caller can resolve the former and keep
+/// the latter as written.
+fn split_final(path: &Path) -> Result<(PathBuf, OsString), String> {
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => Ok((parent.to_path_buf(), name.to_os_string())),
+        _ => Err("the path names no file".to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,6 +196,40 @@ mod tests {
         fs::write(outside.path().join("note.txt"), "hi").unwrap();
         symlink(outside.path(), dir.path().join("link")).unwrap();
         assert!(inside(dir.path(), "link/note.txt").is_err());
+    }
+
+    #[test]
+    fn a_link_read_from_an_area_may_point_outside_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("note.txt"), "hi").unwrap();
+        symlink(outside.path().join("note.txt"), dir.path().join("link.txt")).unwrap();
+        let roots = vec![dir.path().to_path_buf()];
+        let link = dir.path().join("link.txt");
+        assert!(
+            check(&roots, link.to_str().unwrap()).is_err(),
+            "reading through the link leaves the area"
+        );
+        assert_eq!(
+            check_link(&roots, link.to_str().unwrap()).unwrap(),
+            resolve(dir.path()).join("link.txt")
+        );
+        assert_eq!(
+            inside_link(dir.path(), "link.txt").unwrap(),
+            resolve(dir.path()).join("link.txt")
+        );
+    }
+
+    #[test]
+    fn a_link_below_a_symlink_that_escapes_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        symlink(outside.path(), dir.path().join("sub")).unwrap();
+        symlink(outside.path().join("note"), dir.path().join("link")).unwrap();
+        let roots = vec![dir.path().to_path_buf()];
+        assert!(check_link(&roots, dir.path().join("sub/note").to_str().unwrap()).is_err());
+        assert!(inside_link(dir.path(), "sub/note").is_err());
+        assert!(inside_link(dir.path(), "../link").is_err());
     }
 
     #[test]

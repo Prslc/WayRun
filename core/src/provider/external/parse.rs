@@ -185,7 +185,8 @@ mod tests {
         assert_eq!(
             items[1].on_click,
             Some(Action::RunInTerminal {
-                cmd: "htop".to_string()
+                cmd: "htop".to_string(),
+                keep_open: false,
             })
         );
         assert_eq!(
@@ -243,6 +244,23 @@ mod tests {
             items[10].icon_shape,
             Some(IconShape::Circle),
             "the host's shape reaches the row"
+        );
+    }
+
+    #[test]
+    fn a_host_can_keep_the_terminal_open_after_a_command() {
+        let response = serde_json::json!({
+            "result": [
+                {"title": "install", "on_click": {"type": "run_in_terminal", "cmd": "pacman -S x", "keep_open": true}},
+            ]
+        });
+        let items = parse_result_items(response, "golden", "/opt/identity.svg").unwrap();
+        assert_eq!(
+            items[0].on_click,
+            Some(Action::RunInTerminal {
+                cmd: "pacman -S x".to_string(),
+                keep_open: true,
+            })
         );
     }
 

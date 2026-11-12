@@ -2,7 +2,9 @@ use std::time::Instant;
 
 use tiny_skia::{Color, FillRule, Pixmap, Transform};
 
-use super::canvas::{Canvas, Rect, round_rect};
+use crate::geom::Rect;
+
+use super::canvas::{Canvas, round_rect};
 
 /// A micro-benchmark for the software rasteriser, run by `wayrun bench`.
 pub fn bench() {

@@ -2,25 +2,10 @@ use tiny_skia::{
     BlendMode, Color, FillRule, Paint, Path, PathBuilder, Pixmap, Shader, Stroke, Transform,
 };
 
-use crate::geom;
-
-// The magnifier's box, the gap after it and the input inset.
-const MAGNIFIER_BOX: f32 = 22.0;
-const MAGNIFIER_GAP: f32 = 12.0;
-const INPUT_PAD: f32 = 8.0;
-
-/// The search field's inner insets (the card's `PAD` and the magnifier column);
-/// the IME needs it to place the caret rectangle.
-pub const TEXT_INSET: f32 = geom::PAD + MAGNIFIER_BOX + MAGNIFIER_GAP + INPUT_PAD;
-
-/// The return hint uses the covered `⏎` form rather than `↵`, which the shaping
-/// family may lack and then fall back widely.
-pub const ENTER_GLYPH: &str = "⏎";
-
-/// A group entry's trailing mark: Enter opens a further panel level.
-pub const SUBMENU_GLYPH: &str = "›";
+use crate::geom::Rect;
 
 /// Everything logical→physical scaling goes through here.
+#[derive(Clone, Copy)]
 pub struct Canvas {
     pub scale: f32,
 }
@@ -28,6 +13,11 @@ pub struct Canvas {
 impl Canvas {
     pub fn px(&self, value: f32) -> f32 {
         value * self.scale
+    }
+
+    /// A physical length back in the logical pixels a layout works in.
+    pub fn unpx(&self, value: f32) -> f32 {
+        value / self.scale
     }
 
     pub fn color(rgba: [u8; 4]) -> Color {
@@ -139,6 +129,14 @@ impl Canvas {
         }
     }
 
+    /// A rounded fill whose rect is already in pixels, for a layout that works
+    /// in physical space; the radius stays logical.
+    pub fn fill_round_px(&self, pixmap: &mut Pixmap, rect: Rect, radius: f32, rgba: [u8; 4]) {
+        if let Some(path) = round_rect(rect, self.px(radius)) {
+            self.fill_path(pixmap, &path, rgba);
+        }
+    }
+
     pub fn stroke_line(
         &self,
         pixmap: &mut Pixmap,
@@ -190,51 +188,6 @@ impl Canvas {
             Transform::identity(),
             None,
         );
-    }
-}
-
-/// A logical rectangle.
-#[derive(Clone, Copy)]
-pub struct Rect {
-    pub x: f32,
-    pub y: f32,
-    pub w: f32,
-    pub h: f32,
-}
-
-impl Rect {
-    pub fn right(self) -> f32 {
-        self.x + self.w
-    }
-
-    pub fn bottom(self) -> f32 {
-        self.y + self.h
-    }
-
-    pub fn center_y(self) -> f32 {
-        self.y + self.h / 2.0
-    }
-
-    /// The search field inside a card at `(x, y)` of width `w`, inset by `PAD`
-    /// and `SEARCH_H` tall; the IME's `caret_box` shares it so they cannot drift.
-    pub fn field_at(x: f32, y: f32, w: f32) -> Self {
-        Self {
-            x: x + geom::PAD,
-            y: y + geom::PAD,
-            w: w - 2.0 * geom::PAD,
-            h: geom::SEARCH_H,
-        }
-    }
-
-    /// The same rectangle in the target's pixels: `round_rect` works in pixmap
-    /// space, so every rect passed to it must be scaled, not just radii.
-    pub fn scaled(self, scale: f32) -> Self {
-        Self {
-            x: self.x * scale,
-            y: self.y * scale,
-            w: self.w * scale,
-            h: self.h * scale,
-        }
     }
 }
 

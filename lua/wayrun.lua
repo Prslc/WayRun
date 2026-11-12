@@ -22,6 +22,7 @@
 ---@alias WayrunActionType
 ---| "run"
 ---| "run_in_terminal"
+---| "session"
 ---| "launch"
 ---| "copy"
 ---| "desktop_action"
@@ -34,6 +35,8 @@
 ---@class WayrunAction
 ---@field type WayrunActionType
 ---@field cmd string?          run, run_in_terminal
+---@field keep_open boolean?   run_in_terminal: continue in an interactive shell afterwards
+---@field verb string?         session: lock, suspend, reboot, shutdown, logout
 ---@field desktop_id string?   launch, desktop_action, open_with
 ---@field action_id string?    desktop_action
 ---@field text string?         copy
@@ -81,7 +84,7 @@
 ---@field read string[]?
 ---@field search fun(text: string, emit: fun(rows: WayrunRow[])?): WayrunRow[]?
 ---@field top fun(): WayrunRow[]?
----@field command fun(action: string, payload: any): any
+---@field command? fun(action: string, payload: any): any
 
 ---@class Wayrun
 wayrun = {}
@@ -153,6 +156,20 @@ function wayrun.date(seconds) end
 ---@return string
 function wayrun.locale() end
 
+--- The detected desktop environment's lowercase id, or nil when none is named.
+---@return string?
+function wayrun.desktop() end
+
+--- One installed application, as an `app-search` row would show it.
+---@class WayrunApp
+---@field id string       the desktop id, e.g. "org.gnome.Nautilus.desktop"
+---@field name string     the entry's name in the interface language
+---@field exec string?    the program its Exec= names; nil for a wrapper or sandbox entry
+---@field icon string?    the absolute path the launcher resolved, or nil
+
+---@return WayrunApp[]
+function wayrun.apps() end
+
 ---@param name string
 ---@return string?
 function wayrun.env(name) end
@@ -208,6 +225,10 @@ function wayrun.fs.list(dir) end
 ---@param path string
 ---@return WayrunStat?
 function wayrun.fs.stat(path) end
+
+---@param path string
+---@return string?
+function wayrun.fs.readlink(path) end
 
 ---@param text string
 ---@return any

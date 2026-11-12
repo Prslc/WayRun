@@ -15,6 +15,13 @@ pub enum Action {
     /// Run a command inside a terminal emulator, for a binary that needs a tty.
     RunInTerminal {
         cmd: String,
+        /// Continue in an interactive shell once the command exits.
+        #[serde(default, skip_serializing_if = "is_false")]
+        keep_open: bool,
+    },
+    /// A session verb the executor resolves for this desktop when it runs.
+    Session {
+        verb: SessionVerb,
     },
     Launch {
         desktop_id: String,
@@ -48,6 +55,18 @@ pub enum Action {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         payload: Option<serde_json::Value>,
     },
+}
+
+/// The session verbs a row can ask for; the executor picks the line this
+/// desktop needs, so a row never carries a desktop-specific command.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionVerb {
+    Lock,
+    Suspend,
+    Reboot,
+    Shutdown,
+    Logout,
 }
 
 impl Action {
@@ -216,6 +235,36 @@ mod tests {
             value,
             json!({ "type": "plugin", "plugin": "note", "action": "new" })
         );
+    }
+
+    #[test]
+    fn a_session_verb_round_trips_and_keys_itself() {
+        let action = Action::Session {
+            verb: SessionVerb::Reboot,
+        };
+        let value = json!({ "type": "session", "verb": "reboot" });
+        assert_eq!(serde_json::to_value(&action).unwrap(), value);
+        assert_eq!(serde_json::from_value::<Action>(value).unwrap(), action);
+        assert_eq!(action.key(), r#"{"type":"session","verb":"reboot"}"#);
+    }
+
+    #[test]
+    fn a_terminal_run_keeps_its_key_and_round_trips_keep_open() {
+        let plain = json!({ "type": "run_in_terminal", "cmd": "htop" });
+        let action: Action = serde_json::from_value(plain.clone()).unwrap();
+        assert_eq!(
+            action,
+            Action::RunInTerminal {
+                cmd: "htop".into(),
+                keep_open: false,
+            }
+        );
+        assert_eq!(serde_json::to_value(&action).unwrap(), plain);
+        assert_eq!(action.key(), r#"{"type":"run_in_terminal","cmd":"htop"}"#);
+
+        let kept = json!({ "type": "run_in_terminal", "cmd": "pacman -S x", "keep_open": true });
+        let action: Action = serde_json::from_value(kept.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&action).unwrap(), kept);
     }
 
     #[test]

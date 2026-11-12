@@ -101,11 +101,17 @@ on_click = { type = "plugin", plugin = "my-plugin", action = "new",
 | `wayrun.home()` | `$HOME`，没有则为 nil |
 | `wayrun.cache_dir()` | 启动器的缓存目录，没有则为 nil |
 | `wayrun.locale()` | 启动器解析出的界面语言，即它自己文案表使用的语言标识（`en`、`zh_cn` 等） |
+| `wayrun.desktop()` | 当前会话的桌面环境，小写标识（`kde`、`niri`、`hyprland`、`sway`、`wayfire` 等）；`plasma`/`plasmawayland` 返回 `kde`，未识别的名称按原始小写返回，无信息时为 nil；旧版启动器没有这个调用 |
+| `wayrun.apps()` | 已安装的应用，每项为 `{ id, name, icon, exec }`：`name` 使用界面语言，`icon` 是启动器解析出的绝对路径，与 `app-search` 行一致；`exec` 是 `Exec=` 运行的程序，包装器或沙箱条目为 nil；旧版启动器没有这个调用 |
 | `wayrun.env(name)` | 插件在 `env` 中声明的变量；未设置时为 nil，未声明会报错 |
 | `wayrun.which(name)` | 可执行文件在启动器 `$PATH` 中的路径，没有则为 nil；与 `run` 结果行的命令看到的 PATH 一致 |
 | `wayrun.script_dir()` | 脚本自己的目录，用于随脚本发布的图标 |
 | `wayrun.plugin_dir(id)` | 插件可读的目录，`$XDG_CONFIG_HOME/wayrun/plugins/<id>` |
 | `wayrun.plugin_cache_dir(id)` | 插件的可写缓存，`$XDG_CACHE_HOME/wayrun/plugins/<id>` |
+
+桌面标识在启动时从启动器环境解析一次，因此不需要 `env` 声明，脚本加载时即可调用。更换会话后需要重启，与界面语言相同。
+
+`wayrun.apps()` 的列表在每个宿主进程中只构建一次；启动器每次调用都会 fork 的宿主，应把结果用 `wayrun.kv.set` 存起来，再用 `wayrun.kv.get` 读回。
 
 ### 文本、时间与匹配
 
@@ -126,6 +132,7 @@ on_click = { type = "plugin", plugin = "my-plugin", action = "new",
 | `wayrun.fs.read(name)` | 读取文件：插件目录下的相对名，或声明的读取区域、插件目录、插件缓存、脚本目录中的绝对路径或 `~/` 路径；不存在时为 nil，越界时报错 |
 | `wayrun.fs.list(dir)` | 上述位置中某目录的条目名，已排序；没有则为 nil |
 | `wayrun.fs.stat(path)` | 上述位置中路径的 `{ mtime_ns, size }`，没有则为 nil |
+| `wayrun.fs.readlink(path)` | 符号链接的目标；路径不存在或不是链接时为 nil。链接本身必须在上述位置内，目标可以指向任意位置（常用的是进程的 `/proc/<pid>/exe`） |
 | `wayrun.fs.write(path, data)` | 把字符串写入插件目录或缓存（自动创建父目录）；成功为 true；`kv.db` 及其同级文件保留 |
 | `wayrun.fs.delete(path)` | 删除插件目录或缓存中的文件；文件本来就不存在时也为 true |
 | `wayrun.toml.decode(text)` | TOML 输入，表输出 |

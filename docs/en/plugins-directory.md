@@ -3,8 +3,9 @@
 These examples live in the
 [WayRun-Plugins](https://github.com/Prslc/WayRun-Plugins) workspace. They are
 reference material: nothing is registered until your `plugins.toml` names it.
-Most Lua examples are one script; `kde.lua` carries its `kde/` modules. A
-Python example is a directory that carries its own `wayrun_plugin/` copy.
+Most Lua examples are one script; `kde.lua` and `windows.lua` carry their
+`kde/` and `windows/` modules. A Python example is a directory that carries
+its own `wayrun_plugin/` copy.
 
 ## Lua examples
 
@@ -22,10 +23,12 @@ Python example is a directory that carries its own `wayrun_plugin/` copy.
 | [Currency](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/currency.lua) | Convert between currencies at daily rates | network |
 | [KDE settings](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/kde.lua) | Search KDE System Settings | KDE Plasma; `systemsettings` or `kcmshell6` |
 | [Packages](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/packages.lua) | Search pacman repositories and the AUR | Arch; `pacman`; `paru` or `yay` optional |
+| [Windows](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/windows.lua) | Switch between open windows | KDE, niri or Hyprland; `busctl`, `niri` or `hyprctl` |
+| [Kill process](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/kill.lua) | Find a process by name and send SIGTERM or SIGKILL | `ps` and `kill` (procps-ng) |
 
 `firefox.lua` and `web.lua` read the `assets/` folder beside the script;
-`documents.lua` reads `documents/`, and `kde.lua` reads `kde/`. Copy the folder
-with the script.
+`documents.lua` reads `documents/`, `kde.lua` reads `kde/`, and `windows.lua`
+reads `windows/`. Copy the folder with the script.
 
 ## Python examples
 

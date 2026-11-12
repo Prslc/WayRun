@@ -20,6 +20,11 @@ The table lists the built-in keywords. A plugin can add its own.
 | `lock` / `reboot` / `shutdown` | system commands |
 | `2 + 3` | inline calculator |
 
+On KDE Plasma, `reboot`, `shutdown` and `logout` ask the session manager
+(`org.kde.Shutdown`) to log out first, and fall back to `systemctl`/`loginctl`
+when that call fails. Stopping `plasmashell` through systemd can make the
+shutdown hang.
+
 Some features need an optional component. Copy and paste need `wl-clipboard`;
 without it, the keyword returns no rows. A host registered in `plugins.toml`
 adds its own keyword the same way. The full list is in
@@ -66,6 +71,10 @@ If no provider matches a plain query, the launcher lists the first level of
 
 `Shift+Enter` opens a Wox-style second level for the highlighted row: the
 commands that result type offers.
+
+The footer names the row, or the group you entered, at its right edge, just
+left of the action count; a long name is elided. With the footer disabled, the
+panel shows no title.
 
 The panel starts with the row's own command (**Open**). Next come the actions
 its plugin adds for that type. A file row adds "Open in terminal", "Reveal in

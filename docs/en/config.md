@@ -22,8 +22,8 @@ wayrun config set files.exclude '["node_modules", "target"]'
 ```
 
 `locale` is read at startup, so a change needs
-`systemctl --user restart wayrun-launcher`. Every other key, `font.family`
-included, applies through the watchers.
+`systemctl --user restart wayrun-launcher`. Every other key applies through the
+watchers.
 
 ## Interface language
 
@@ -49,18 +49,6 @@ falls back to English, and a blank value acts like an absent key.
 
 Either way the locale is read at startup, so restart the service after a
 change.
-
-## Font
-
-The `[font]` table sets the text family.
-
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `family` | `sans-serif` | Primary shaping family, or a generic name (`serif`, `sans-serif`, `monospace`). |
-
-The launcher applies this live and re-shapes with the new family when the file
-changes. Glyphs the family lacks fall back to the system fonts. The interface
-size lives in `theme.toml` under `[font].size` and applies live too.
 
 ## Icon theme
 
