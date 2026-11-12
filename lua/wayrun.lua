@@ -35,6 +35,7 @@
 ---@class WayrunAction
 ---@field type WayrunActionType
 ---@field cmd string?          run, run_in_terminal
+---@field keep_open boolean?   run_in_terminal: continue in an interactive shell afterwards
 ---@field verb string?         session: lock, suspend, reboot, shutdown, logout
 ---@field desktop_id string?   launch, desktop_action, open_with
 ---@field action_id string?    desktop_action

@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `session` action (`{"type":"session","verb":"reboot"}`) lets a row ask
   for `lock`, `suspend`, `reboot`, `shutdown` or `logout` without embedding a
   desktop-specific command; the executor resolves it for the session.
+- A `run_in_terminal` action takes `keep_open`
+  (`{"type":"run_in_terminal","cmd":"pacman -S x","keep_open":true}`): once the
+  command exits, the terminal continues in an interactive `$SHELL` instead of
+  closing, so a plugin's install or build output stays readable. The plugin
+  that emits the action decides; rows without the field behave as before, and
+  the field is additive, so `PLUGIN_API` stays at 1.
 
 ### Changed
 

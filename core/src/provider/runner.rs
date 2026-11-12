@@ -141,7 +141,10 @@ fn action_for(desktop_id: Option<&str>, terminal: bool, has_args: bool, run_cmd:
             desktop_id: id.to_string(),
         },
         Some(_) if !terminal => Action::Run { cmd: run_cmd },
-        _ => Action::RunInTerminal { cmd: run_cmd },
+        _ => Action::RunInTerminal {
+            cmd: run_cmd,
+            keep_open: false,
+        },
     }
 }
 
@@ -232,7 +235,8 @@ mod tests {
                 "/usr/bin/nvim main.rs".into()
             ),
             Action::RunInTerminal {
-                cmd: "/usr/bin/nvim main.rs".into()
+                cmd: "/usr/bin/nvim main.rs".into(),
+                keep_open: false,
             }
         );
     }
@@ -257,7 +261,8 @@ mod tests {
         assert_eq!(
             action_for(None, false, true, "/usr/bin/htop".into()),
             Action::RunInTerminal {
-                cmd: "/usr/bin/htop".into()
+                cmd: "/usr/bin/htop".into(),
+                keep_open: false,
             }
         );
     }

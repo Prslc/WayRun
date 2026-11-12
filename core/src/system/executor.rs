@@ -266,7 +266,7 @@ pub fn execute(command: &crate::wire::Action) {
     use crate::wire::Action;
     match command {
         Action::Run { cmd } => execute_command(cmd),
-        Action::RunInTerminal { cmd } => run_in_terminal(cmd),
+        Action::RunInTerminal { cmd, keep_open } => run_in_terminal(cmd, *keep_open),
         Action::Session { verb } => execute_command(session_verbs::command(*verb)),
         Action::Launch { desktop_id } => launch_app(desktop_id),
         Action::Copy { text } => copy_text(text),

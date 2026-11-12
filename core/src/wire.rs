@@ -15,6 +15,9 @@ pub enum Action {
     /// Run a command inside a terminal emulator, for a binary that needs a tty.
     RunInTerminal {
         cmd: String,
+        /// Continue in an interactive shell once the command exits.
+        #[serde(default, skip_serializing_if = "is_false")]
+        keep_open: bool,
     },
     /// A session verb the executor resolves for this desktop when it runs.
     Session {
@@ -243,6 +246,25 @@ mod tests {
         assert_eq!(serde_json::to_value(&action).unwrap(), value);
         assert_eq!(serde_json::from_value::<Action>(value).unwrap(), action);
         assert_eq!(action.key(), r#"{"type":"session","verb":"reboot"}"#);
+    }
+
+    #[test]
+    fn a_terminal_run_keeps_its_key_and_round_trips_keep_open() {
+        let plain = json!({ "type": "run_in_terminal", "cmd": "htop" });
+        let action: Action = serde_json::from_value(plain.clone()).unwrap();
+        assert_eq!(
+            action,
+            Action::RunInTerminal {
+                cmd: "htop".into(),
+                keep_open: false,
+            }
+        );
+        assert_eq!(serde_json::to_value(&action).unwrap(), plain);
+        assert_eq!(action.key(), r#"{"type":"run_in_terminal","cmd":"htop"}"#);
+
+        let kept = json!({ "type": "run_in_terminal", "cmd": "pacman -S x", "keep_open": true });
+        let action: Action = serde_json::from_value(kept.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&action).unwrap(), kept);
     }
 
     #[test]
