@@ -120,6 +120,22 @@ pub(super) fn build(lua: &Lua, script: &str, shared: &Shared, log: Log) -> mlua:
         "desktop",
         lua.create_function(|_, ()| Ok(crate::system::desktop_env::id().map(str::to_owned)))?,
     )?;
+    sdk.set(
+        "apps",
+        lua.create_function(|lua, ()| {
+            let list = lua.create_table()?;
+            let apps = crate::provider::application::app_entries();
+            for (at, app) in apps.into_iter().enumerate() {
+                let entry = lua.create_table()?;
+                entry.set("id", app.id)?;
+                entry.set("name", app.name)?;
+                entry.set("exec", app.exec)?;
+                entry.set("icon", app.icon)?;
+                list.set(at + 1, entry)?;
+            }
+            Ok(list)
+        })?,
+    )?;
     let env_active = Rc::clone(&shared.active);
     let env_scope = Rc::clone(&shared.env_scope);
     sdk.set(

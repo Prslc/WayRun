@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   closing, so a plugin's install or build output stays readable. The plugin
   that emits the action decides; rows without the field behave as before, and
   the field is additive, so `PLUGIN_API` stays at 1.
+- `wayrun.apps()` lists the installed applications as `{ id, name, icon,
+  exec }`, with the name in the interface language and the icon resolved to an
+  absolute path exactly as an `app-search` row shows them, so a plugin does not
+  parse `.desktop` files to label a process. The binding is additive: a script
+  can test for it, and `PLUGIN_API` stays at 1.
 
 ### Changed
 

@@ -142,6 +142,7 @@ below group its bindings by area.
 | `wayrun.cache_dir()` | the launcher's cache directory, or nil |
 | `wayrun.locale()` | the launcher's resolved locale, the stem its own tables use (`en`, `zh_cn`, …) |
 | `wayrun.desktop()` | the session's desktop as a lowercase id (`kde`, `niri`, `hyprland`, `sway`, `wayfire`, …), or nil; `plasma` and `plasmawayland` report `kde`; an unrecognised name is returned lowercased; absent on a launcher that predates it |
+| `wayrun.apps()` | the installed applications, one `{ id, name, icon, exec }` table each: `name` in the interface language and `icon` the absolute path the launcher resolved, as an `app-search` row shows them; `exec` is the program the entry's `Exec=` names, nil for a wrapper or sandbox entry; absent on a launcher that predates it |
 | `wayrun.env(name)` | a variable the plugin declares in `env`, or nil when unset; an undeclared name raises |
 | `wayrun.which(name)` | an executable's path on the launcher's `$PATH`, or nil; the same PATH a `run` row's command will see |
 | `wayrun.script_dir()` | the script's own directory, for an icon it ships |
@@ -151,6 +152,10 @@ below group its bindings by area.
 The desktop id is resolved from the launcher's environment once at startup, so
 it needs no `env` declaration and works while the script loads. A changed
 session needs a restart, like the locale.
+
+`wayrun.apps()` builds its list once per host process; a host the launcher
+forks for every call should store the result with `wayrun.kv.set` and read it
+back with `wayrun.kv.get`.
 
 ### Text, time and matching
 

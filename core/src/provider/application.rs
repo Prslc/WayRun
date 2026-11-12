@@ -224,6 +224,31 @@ pub(super) fn needs_terminal(desktop_id: &str) -> bool {
         .is_some_and(|apps| apps.iter().any(|app| app.id == desktop_id && app.terminal))
 }
 
+/// One installed app as a plugin sees it: the name and icon an `app-search` row
+/// would show, plus the program its `Exec=` names (`None` for a wrapper).
+pub struct AppEntry {
+    pub id: String,
+    pub name: String,
+    pub exec: Option<String>,
+    pub icon: Option<String>,
+}
+
+/// Every installed app, through the same watched cache `app-search` uses.
+pub fn app_entries() -> Vec<AppEntry> {
+    ensure_apps();
+    let Some(apps) = APPS.get().and_then(|cache| cache.snapshot()) else {
+        return Vec::new();
+    };
+    apps.iter()
+        .map(|app| AppEntry {
+            id: app.id.clone(),
+            name: app.title.clone(),
+            exec: app.exec.clone(),
+            icon: app.icon_path(),
+        })
+        .collect()
+}
+
 /// The desktop id of the app whose `Exec=` names `executable`: a PATH hit that
 /// is an installed app launches through `gio`, so its `Terminal=` decides.
 pub fn desktop_id_for_exec(executable: &str) -> Option<String> {

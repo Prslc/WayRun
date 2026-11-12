@@ -160,6 +160,16 @@ function wayrun.locale() end
 ---@return string?
 function wayrun.desktop() end
 
+--- One installed application, as an `app-search` row would show it.
+---@class WayrunApp
+---@field id string       the desktop id, e.g. "org.gnome.Nautilus.desktop"
+---@field name string     the entry's name in the interface language
+---@field exec string?    the program its Exec= names; nil for a wrapper or sandbox entry
+---@field icon string?    the absolute path the launcher resolved, or nil
+
+---@return WayrunApp[]
+function wayrun.apps() end
+
 ---@param name string
 ---@return string?
 function wayrun.env(name) end
