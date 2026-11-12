@@ -24,6 +24,7 @@ its own `wayrun_plugin/` copy.
 | [KDE settings](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/kde.lua) | Search KDE System Settings | KDE Plasma; `systemsettings` or `kcmshell6` |
 | [Packages](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/packages.lua) | Search pacman repositories and the AUR | Arch; `pacman`; `paru` or `yay` optional |
 | [Windows](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/windows.lua) | Switch between open windows | KDE, niri or Hyprland; `busctl`, `niri` or `hyprctl` |
+| [Kill process](https://github.com/Prslc/WayRun-Plugins/blob/main/examples/lua/kill.lua) | Find a process by name and send SIGTERM or SIGKILL | `ps` and `kill` (procps-ng) |
 
 `firefox.lua` and `web.lua` read the `assets/` folder beside the script;
 `documents.lua` reads `documents/`, `kde.lua` reads `kde/`, and `windows.lua`
