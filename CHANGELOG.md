@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-12
+
 ### Added
 
 - `theme.toml`'s `[motion].entrance_ms` sets how long the launcher's entrance
@@ -60,8 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- `wayrun open` and `wayrun close`; `wayrun toggle` covers both, and the socket
-  accepts only `toggle` and `status`. Update scripts that used them.
+- **Breaking**: `wayrun open` and `wayrun close` are gone; `wayrun toggle`
+  covers both, and the socket accepts only `toggle` and `status`. Update
+  scripts that used them.
 
 ### Fixed
 
@@ -953,7 +956,9 @@ and, with `--core`, the backend service.
 - Resident mode over `$XDG_RUNTIME_DIR/wayrun.sock` for zero cold-start
   (`wayrun toggle`).
 
-[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/Prslc/WayRun/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/Prslc/WayRun/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/Prslc/WayRun/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Prslc/WayRun/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Prslc/WayRun/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Prslc/WayRun/compare/v0.7.0...v0.8.0
