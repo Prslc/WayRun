@@ -84,7 +84,7 @@
 ---@field read string[]?
 ---@field search fun(text: string, emit: fun(rows: WayrunRow[])?): WayrunRow[]?
 ---@field top fun(): WayrunRow[]?
----@field command fun(action: string, payload: any): any
+---@field command? fun(action: string, payload: any): any
 
 ---@class Wayrun
 wayrun = {}
