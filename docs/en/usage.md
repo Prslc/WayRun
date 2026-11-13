@@ -102,10 +102,12 @@ level. Typing closes the panel and returns to the field.
 
 `Alt+Enter` remembers the highlighted command as the default for its plugin.
 `Enter` on later rows of that plugin then runs it, and the row's own command
-stays available as **Open**. The remembered action carries a dot, and the
-footer shows the `Alt+Enter` hint. `Alt+Enter` on **Open**, or on the action
-that is already the default, clears it, so `Enter` opens normally again. Both a
-plugin's own actions and a host's actions can be made the default.
+stays available as **Open**. The default belongs to the plugin that produced
+the row: `f`, `d`, `path-lookup` and each external host keep separate defaults,
+even when they offer the same command. The remembered action carries a dot,
+and the footer shows the `Alt+Enter` hint. `Alt+Enter` on **Open**, or on the
+action that is already the default, clears it, so `Enter` opens normally again.
+Both a plugin's own actions and a host's actions can be made the default.
 
 `Alt+Enter` re-sends the query and keeps the panel open on the entry you
 changed, so the default dot moves to that entry.

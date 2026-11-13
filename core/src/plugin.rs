@@ -34,6 +34,13 @@ pub struct Meta {
 /// A partial payload from a streaming host, already parsed into rows.
 pub type Emit = tokio::sync::mpsc::Sender<Vec<ResultItem>>;
 
+/// A row and the plugin that produced it; the producer owns the row's action
+/// panel and scopes its remembered default.
+struct Produced {
+    pub plugin: String,
+    pub item: ResultItem,
+}
+
 pub trait Plugin: Send + Sync {
     fn meta(&self) -> &Meta;
     fn search(

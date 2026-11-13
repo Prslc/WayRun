@@ -167,9 +167,9 @@ printf '%s\n' '{"jsonrpc":"2.0","method":"command","params":{"plugin":"todo","ac
 
 `actions` 的条目要么是命令：`{"title": string, "action": Action, "icon"?: string}`；要么是分组：`{"title": string, "children": [ …条目… ]}`，按 Enter 会展开动作面板的下一层。图标解析规则与结果行的 `icon` 相同。
 
-条目还可以携带 `id`（稳定的类型）、`plugin`（所属插件，用于限定记住的默认动作）与 `default`（Enter 会执行时为 true）。`plugin` 与 `default` 由后端赋值，宿主提供的值会被忽略。宿主给动作设置 `id` 才能让用户把它设为默认，分组条目也一样。
+条目还可以携带 `id`（稳定的类型）、`plugin`（产生该行的插件，用于限定记住的默认动作）与 `default`（Enter 会执行时为 true）。`plugin` 与 `default` 由后端赋值，宿主提供的值会被忽略。宿主给动作设置 `id` 才能让用户把它设为默认，分组条目也一样。
 
-所属内置提供者会补上类型专属条目：文件定位、复制路径、在终端中打开、系统提供的其他打开方式、`[Desktop Action …]` 分组、复制链接。宿主自带的条目排在它们之后。
+产生该行的内置提供者会补上类型专属条目：文件定位、复制路径、在终端中打开、系统提供的其他打开方式、`[Desktop Action …]` 分组、复制链接。宿主的行只保留宿主自己附加的条目；宿主可以自行声明这些类型。
 
 没有 `on_click` 的结果项不可交互，只用于显示。
 

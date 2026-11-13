@@ -9,6 +9,9 @@ use rust_i18n::t;
 
 use super::file::{PathHit, file_actions, is_path_query, path_rows};
 
+/// The keywordless path lookup's id; it also owns the default chain's home fallback rows.
+pub(crate) const PLUGIN_ID: &str = "path-lookup";
+
 /// The keywordless path lookup: a path-shaped query opens the file or directory
 /// it names, without taking the `f`/`d` namespace.
 pub struct PathLookup {
@@ -19,7 +22,7 @@ impl PathLookup {
     pub fn new() -> Self {
         Self {
             meta: Meta {
-                id: "path-lookup".into(),
+                id: PLUGIN_ID.into(),
                 name: t!("plugin.path.name"),
                 icon: "builtin:folder".into(),
                 ready: t!("plugin.path.ready"),

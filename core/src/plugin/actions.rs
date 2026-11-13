@@ -1,3 +1,4 @@
+use super::Produced;
 use super::registry::{Entry, REGISTRY, ensure_loaded};
 use crate::system::icon::find_icon_spec;
 use crate::wire::{ActionItem, ResultItem};
@@ -5,7 +6,7 @@ use rust_i18n::t;
 use std::collections::HashMap;
 
 /// Attach each row's action panel.
-pub async fn decorate(items: Vec<ResultItem>) -> Vec<ResultItem> {
+pub async fn decorate(items: Vec<Produced>) -> Vec<ResultItem> {
     ensure_loaded().await;
     // The shared connection stays off the runtime's workers.
     let defaults = tokio::task::spawn_blocking(crate::system::db::defaults::all)
@@ -16,57 +17,54 @@ pub async fn decorate(items: Vec<ResultItem>) -> Vec<ResultItem> {
 
     // One registry read for the whole list; `Plugin::actions` is synchronous,
     // so the guard never spans an await.
-    let mut out = items;
     let reg = REGISTRY.read().await;
-    for item in &mut out {
+    let mut out = Vec::with_capacity(items.len());
+    for Produced { plugin, mut item } in items {
         // A row without a click command gets no panel at all, so it needs no
-        // scan; the rest ask the plugins which of them owns them.
-        let plugin_actions = if item.on_click.is_some() {
-            plugin_actions(&reg, item)
+        // lookup; the rest ask the plugin that produced them.
+        let actions = if item.on_click.is_some() {
+            plugin_actions(&reg, &plugin, &item)
         } else {
-            (None, Vec::new())
+            Vec::new()
         };
-        attach_actions(item, &defaults, plugin_actions);
+        attach_actions(&mut item, &defaults, &plugin, actions);
+        out.push(item);
     }
     out
 }
 
-/// The first plugin that recognises the row and declares actions for it, with
-/// the plugin's id, which scopes a remembered default action.
-fn plugin_actions(entries: &[Entry], item: &ResultItem) -> (Option<String>, Vec<ActionItem>) {
-    for entry in entries {
-        let actions = entry.plugin.actions(item);
-        if !actions.is_empty() {
-            return (Some(entry.plugin.meta().id.to_string()), actions);
-        }
-    }
-    (None, Vec::new())
+/// The producer's own commands for one of its rows; a reload between the search
+/// and this pass leaves only the actions the host attached.
+fn plugin_actions(entries: &[Entry], owner: &str, item: &ResultItem) -> Vec<ActionItem> {
+    entries
+        .iter()
+        .find(|entry| entry.plugin.meta().id.as_ref() == owner)
+        .map_or_else(Vec::new, |entry| entry.plugin.actions(item))
 }
 
-/// The panel an actionable row gets: what its plugins declare, then the row's
+/// The panel an actionable row gets: what its producer declares, then the row's
 /// own command leading.
 fn attach_actions(
     item: &mut ResultItem,
     defaults: &HashMap<String, String>,
-    plugin_actions: (Option<String>, Vec<ActionItem>),
+    owner: &str,
+    mut plugin_actions: Vec<ActionItem>,
 ) {
     let Some(on_click) = item.on_click.clone() else {
         return;
     };
-    let (owner, mut plugin_actions) = plugin_actions;
 
     let mut actions: Vec<ActionItem> = Vec::new();
     actions.append(&mut plugin_actions);
     actions.append(&mut item.actions);
 
-    // Every plugin action carries its owner, so the shell can scope a default.
-    if let Some(owner) = &owner {
-        walk(&mut actions, &mut |action| {
-            if action.plugin.is_none() {
-                action.plugin = Some(owner.clone());
-            }
-        });
-    }
+    // An explicit scope belongs to a shared action; a missing one is the row's
+    // producer, which also scopes the default.
+    walk(&mut actions, &mut |action| {
+        if action.plugin.is_none() {
+            action.plugin = Some(owner.to_string());
+        }
+    });
 
     // A remembered default elevates its action to Enter, whichever plugin the
     // scope belongs to: a host's action is remembered under the host's id.
@@ -92,7 +90,7 @@ fn attach_actions(
                 children: Vec::new(),
                 icon: Some("builtin:open".to_string()),
                 id: None,
-                plugin: owner.clone(),
+                plugin: Some(owner.to_string()),
                 default: false,
             },
         );
@@ -151,11 +149,7 @@ mod tests {
             plugin: None,
             default: false,
         };
-        attach_actions(
-            &mut row,
-            &HashMap::new(),
-            (Some("file-search".to_string()), vec![reveal]),
-        );
+        attach_actions(&mut row, &HashMap::new(), "file-search", vec![reveal]);
 
         let titles: Vec<&str> = row
             .actions
@@ -183,7 +177,7 @@ mod tests {
             plugin: Some("icons".to_string()),
             default: false,
         }];
-        attach_actions(&mut row, &HashMap::new(), (None, Vec::new()));
+        attach_actions(&mut row, &HashMap::new(), "icons", Vec::new());
 
         let titles: Vec<&str> = row.actions.iter().map(|a| a.title.as_str()).collect();
         assert_eq!(
@@ -201,7 +195,7 @@ mod tests {
                 desktop_id: "firefox.desktop".to_string(),
             },
         );
-        attach_actions(&mut row, &HashMap::new(), (None, Vec::new()));
+        attach_actions(&mut row, &HashMap::new(), "app-search", Vec::new());
         assert!(
             row.actions.is_empty(),
             "a row with nothing else to offer has no panel"
@@ -227,7 +221,7 @@ mod tests {
         }];
         let mut defaults = HashMap::new();
         defaults.insert("todo".to_string(), "done".to_string());
-        attach_actions(&mut row, &defaults, (None, Vec::new()));
+        attach_actions(&mut row, &defaults, "todo", Vec::new());
 
         let titles: Vec<&str> = row.actions.iter().map(|a| a.title.as_str()).collect();
         assert_eq!(titles, [t!("action.open"), "Mark done".to_string()]);
@@ -237,9 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn a_host_action_survives_a_built_in_claiming_the_row() {
-        // The row's command is a file, so file-search decorates it too; the
-        // host's own action still answers to the host's remembered default.
+    fn a_hosts_row_shows_only_its_own_actions() {
         let uri = "file:///tmp/a.txt";
         let mut row = item(
             "a.txt",
@@ -258,28 +250,115 @@ mod tests {
         }];
         let mut defaults = HashMap::new();
         defaults.insert("todo".to_string(), "done".to_string());
-        attach_actions(
-            &mut row,
-            &defaults,
-            (
-                Some("file-search".to_string()),
-                vec![file_action(
-                    "Reveal in file manager",
-                    "reveal",
-                    Action::Reveal {
-                        uri: uri.to_string(),
-                    },
-                )],
-            ),
-        );
+        attach_actions(&mut row, &defaults, "todo", Vec::new());
 
-        let marked: Vec<&str> = row
+        let titles: Vec<&str> = row.actions.iter().map(|a| a.title.as_str()).collect();
+        assert_eq!(titles, [t!("action.open"), "Mark done".to_string()]);
+        assert!(
+            row.actions
+                .iter()
+                .all(|action| action.plugin.as_deref() == Some("todo")),
+            "a host's actions are the only ones on its row"
+        );
+    }
+
+    #[test]
+    fn a_default_follows_the_rows_producer() {
+        let uri = "file:///tmp/a.txt";
+        let terminal = || {
+            file_action(
+                "Open in terminal",
+                "terminal",
+                Action::Terminal {
+                    uri: uri.to_string(),
+                },
+            )
+        };
+        let mut from_d = item(
+            "a.txt",
+            Action::Open {
+                uri: uri.to_string(),
+            },
+        );
+        let mut from_host = item(
+            "a.txt",
+            Action::Open {
+                uri: uri.to_string(),
+            },
+        );
+        let defaults = HashMap::from([("path-search".to_string(), "terminal".to_string())]);
+        attach_actions(&mut from_d, &defaults, "path-search", vec![terminal()]);
+        attach_actions(&mut from_host, &defaults, "wayrun-config", vec![terminal()]);
+
+        assert!(
+            from_d.actions.iter().any(|action| action.default),
+            "the producer's remembered action is the default"
+        );
+        assert!(
+            from_host.actions.iter().all(|action| !action.default),
+            "another producer's identical action is untouched"
+        );
+    }
+
+    #[test]
+    fn an_explicit_shared_scope_is_kept() {
+        let mut row = item("link", run("true"));
+        row.actions = vec![ActionItem {
+            title: "Copy link".to_string(),
+            action: Some(Action::Copy {
+                text: "https://example.com".to_string(),
+            }),
+            children: Vec::new(),
+            icon: None,
+            id: Some("copy_url".to_string()),
+            plugin: Some("copy-url".to_string()),
+            default: false,
+        }];
+        attach_actions(&mut row, &HashMap::new(), "web-search", Vec::new());
+
+        let copy = row
             .actions
             .iter()
-            .filter(|a| a.default)
-            .map(|a| a.title.as_str())
-            .collect();
-        assert_eq!(marked, ["Mark done"], "exactly one entry is the default");
+            .find(|action| action.id.as_deref() == Some("copy_url"))
+            .unwrap();
+        assert_eq!(copy.plugin.as_deref(), Some("copy-url"));
+        assert_eq!(row.actions[0].plugin.as_deref(), Some("web-search"));
+    }
+
+    fn entry(plugin: Box<dyn crate::plugin::Plugin>) -> Entry {
+        Entry {
+            plugin,
+            keyword: String::new(),
+            external: false,
+            pending: None,
+        }
+    }
+
+    #[test]
+    fn only_the_producer_declares_the_rows_actions() {
+        let row = item(
+            "a.txt",
+            Action::Open {
+                uri: "file:///tmp/a.txt".to_string(),
+            },
+        );
+        let entries = vec![
+            entry(Box::new(crate::provider::file::FileSearch::new())),
+            entry(Box::new(crate::provider::application::AppSearch::new())),
+        ];
+
+        assert!(
+            !plugin_actions(&entries, "file-search", &row).is_empty(),
+            "the file provider declares the file row's actions"
+        );
+        assert!(
+            plugin_actions(&entries, "app-search", &row).is_empty(),
+            "a later entry is not asked for a row it did not produce"
+        );
+        assert!(
+            plugin_actions(&entries, "wayrun-config", &row).is_empty(),
+            "a producer that is not in the registry contributes nothing"
+        );
     }
 
     fn file_action(title: &str, id: &str, command: Action) -> ActionItem {
@@ -321,11 +400,7 @@ mod tests {
         ];
         let mut defaults = HashMap::new();
         defaults.insert("file-search".to_string(), "terminal".to_string());
-        attach_actions(
-            &mut row,
-            &defaults,
-            (Some("file-search".to_string()), actions),
-        );
+        attach_actions(&mut row, &defaults, "file-search", actions);
 
         // the row's own command leads the panel, owned by the plugin so the
         // panel can make it the default again
@@ -360,16 +435,14 @@ mod tests {
         attach_actions(
             &mut row,
             &HashMap::new(),
-            (
-                Some("file-search".to_string()),
-                vec![file_action(
-                    "Reveal in file manager",
-                    "reveal",
-                    Action::Reveal {
-                        uri: uri.to_string(),
-                    },
-                )],
-            ),
+            "file-search",
+            vec![file_action(
+                "Reveal in file manager",
+                "reveal",
+                Action::Reveal {
+                    uri: uri.to_string(),
+                },
+            )],
         );
         assert!(row.actions.iter().all(|a| !a.default));
         assert_eq!(
@@ -409,11 +482,7 @@ mod tests {
             "file-search".to_string(),
             "open_with:firefox.desktop".to_string(),
         );
-        attach_actions(
-            &mut row,
-            &defaults,
-            (Some("file-search".to_string()), vec![group]),
-        );
+        attach_actions(&mut row, &defaults, "file-search", vec![group]);
 
         let group = &row.actions[1];
         assert_eq!(group.plugin.as_deref(), Some("file-search"));

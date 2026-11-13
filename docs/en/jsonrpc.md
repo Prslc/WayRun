@@ -236,15 +236,16 @@ An `actions` entry is either a command,
 `{"title": string, "children": [ …entries… ]}`, which Enter opens as a further
 level of the action panel. Icons use the same resolution as a row's `icon`.
 
-An entry may also carry `id` (its stable kind), `plugin` (the owner, which scopes
-a remembered default) and `default` (true when Enter runs it). The core assigns
-`plugin` and `default`; a host's values for those are ignored. A host sets `id`
-on its own actions to make them defaultable, a grouped entry included.
+An entry may also carry `id` (its stable kind), `plugin` (the plugin that
+produced the row, which scopes a remembered default) and `default` (true when
+Enter runs it). The core assigns `plugin` and `default`; a host's values for
+those are ignored. A host sets `id` on its own actions to make them defaultable,
+a grouped entry included.
 
-The owning built-in provider adds its type-specific entries: a file reveal, a
-copy path, open in terminal, the system's other handlers for the content type, a
-`[Desktop Action …]` group, a copy link. A host's own entries are kept after
-them.
+The built-in provider that produced a row adds its type-specific entries: a
+file reveal, a copy path, open in terminal, the system's other handlers for the
+content type, a `[Desktop Action …]` group, a copy link. A host's rows carry
+only the entries the host attaches; the host can declare those kinds itself.
 
 An item without `on_click` is non-interactive, display only.
 

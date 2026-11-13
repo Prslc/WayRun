@@ -85,15 +85,17 @@ under `$HOME`; they then keep no cache.
 A row can carry secondary commands, shown in the `Shift+Enter` panel. They
 differ by result type:
 
-- `file-search` and `path-search` offer "Open in terminal", "Reveal in file
-  manager" and "Copy path", then an **Open with** group for the system's other
-  handlers, which opens a further panel level.
+- `file-search`, `path-search` and `path-lookup` offer "Open in terminal",
+  "Reveal in file manager" and "Copy path", then an **Open with** group for the
+  system's other handlers, which opens a further panel level.
 - `app-search` lists the entry's `[Desktop Action …]` groups.
-- An external host's rows carry whatever `actions` it attaches. The workspace's
-  `web.lua`, for example, offers "Copy URL".
+- An external host's rows carry only whatever `actions` it attaches; the
+  built-in file commands are not added. The workspace's `web.lua`, for example,
+  offers "Copy URL".
 
-The row's own command leads the panel. An external host's own actions follow
-the plugin's.
+The row's own command leads the panel. Actions belong to the plugin that
+produced the row, so a remembered default for one provider never marks another
+provider's identical action.
 
 Give an action an `id` to let the user make it the default `Enter` action with
 `Alt+Enter`. The panel's **Open** entry, the row's own command, takes the

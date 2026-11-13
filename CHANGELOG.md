@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A remembered default action is scoped to the plugin that produced the row,
+  so setting one on a file result no longer changes how another plugin's file
+  results open. External hosts' file rows show only the actions the host
+  attaches.
+
 ## [0.12.0] - 2026-11-12
 
 ### Added
